@@ -101,8 +101,8 @@ export default function LandingPage() {
             </span>
           </Link>
 
-          {/* 右側：管理核心 */}
-          <Link href="/admin/history"
+          {/* 右側：管理核心 (已修正 href) */}
+          <Link href="/admin"
             onMouseEnter={() => setIsHovered('admin')}
             onMouseLeave={() => setIsHovered('none')}
             className={`

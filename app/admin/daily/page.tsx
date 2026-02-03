@@ -24,9 +24,9 @@ interface OrderData {
   log_msg: string
 }
 
-// 母資料快取介面 (簡化版：只需驗證品項存在與否)
+// 母資料快取介面
 interface MasterDataCache {
-  itemMap: Map<string, string> // ItemCode -> RouteID
+  itemMap: Map<string, string>
   ready: boolean
 }
 
@@ -59,12 +59,10 @@ export default function DailyOperationsPage() {
     setLoading(false)
   }
 
-  // --- 讀取母資料 (輕量化：只讀取品項表做驗證) ---
+  // --- 讀取母資料 ---
   const loadMasterData = async () => {
     try {
-      // 只抓取品項對途程 (用於驗證品項是否存在)
       const itemRoutes = await fetchAllRows('item_routes', 'item_code, route_id')
-
       if (!itemRoutes) return
 
       const normalize = (str: string) => str ? str.toString().trim().toUpperCase() : ''
@@ -127,12 +125,11 @@ export default function DailyOperationsPage() {
     return allData
   }
 
-  // --- 單列驗證邏輯 (不計算工時) ---
+  // --- 單列驗證邏輯 ---
   const calculateRow = (row: OrderData, mData: MasterDataCache): OrderData => {
     if (!mData.ready) return row 
 
     const normalize = (str: string) => str ? str.toString().trim().toUpperCase() : ''
-    
     const itemCodeNormalized = normalize(row.item_code)
     const qty = parseFloat(row.quantity?.toString()) || 0
     const docType = row.doc_type || ''
@@ -140,42 +137,31 @@ export default function DailyOperationsPage() {
     let status = 'OK'
     let logMsgParts: string[] = []
 
-    // 豁免關鍵字
     const exemptKeywords = ['素材單', '包裝單', '改單', '示意圖']
     const isExempt = exemptKeywords.some(keyword => docType.includes(keyword))
 
     if (!isExempt) {
-      // 1. 品項編碼檢查
       if (!itemCodeNormalized) { 
         status = 'Error'; logMsgParts.push('缺少品項編碼'); 
       } else if (!mData.itemMap.has(itemCodeNormalized)) { 
         status = 'Error'; logMsgParts.push(`資料庫無此品項 [${row.item_code}]`); 
       }
-      
-      // 2. 數量與日期檢查
       if (!qty || qty <= 0) { status = 'Error'; logMsgParts.push('數量必須大於 0'); }
       if (!row.delivery_date) { status = 'Error'; logMsgParts.push('交付日期不可空白'); }
-      
-      // 3. C開頭規則
       if (itemCodeNormalized.startsWith('C') && !docType.includes('委外')) {
           status = 'Error'; logMsgParts.push('C開頭需為委外單');
       }
-      
-      // 4. 壓克力盤數檢查 (新增：C開頭可豁免)
+      // 壓克力檢查 (C開頭豁免)
       if (row.item_name.includes('壓克力') && !row.plate_count) {
           if (!itemCodeNormalized.startsWith('C')) {
              status = 'Error'; logMsgParts.push('壓克力需填寫盤數');
           }
       }
-
     } else {
         if (status === 'OK') logMsgParts.push(`[${docType}] 規則豁免`)
     }
 
-    // 取得 RouteID (僅供參考)
     const routeId = mData.itemMap.get(itemCodeNormalized)
-    
-    // 工時強制為 0 (由其他頁面計算)
     let totalTime = 0 
 
     if (!routeId && !isExempt && status === 'OK') {
@@ -191,12 +177,11 @@ export default function DailyOperationsPage() {
     }
   }
 
-  // --- 編輯功能：本地更新 ---
+  // --- 編輯功能 ---
   const handleCellChange = (id: number, field: keyof OrderData, value: any) => {
     setTempData(prev => prev.map(row => {
       if (row.id !== id) return row
       let updatedRow = { ...row, [field]: value }
-      // 觸發重新驗證
       if (['item_code', 'quantity', 'doc_type', 'item_name', 'plate_count'].includes(field)) {
         updatedRow = calculateRow(updatedRow, masterDataRef.current)
       }
@@ -204,7 +189,6 @@ export default function DailyOperationsPage() {
     }))
   }
 
-  // --- 編輯功能：寫入資料庫 ---
   const handleCellBlur = async (row: OrderData) => {
     const { error } = await supabase
       .from('temp_orders')
@@ -277,21 +261,31 @@ export default function DailyOperationsPage() {
         } as OrderData
       }).filter(r => r.order_number || r.item_code)
 
-      // 執行驗證 (不計算工時)
+      // 執行驗證
       const results = rawResults.map(r => calculateRow(r, masterDataRef.current))
 
+      // 🔥 統計數據計算
+      const totalCount = results.length
       const errorCount = results.filter(r => r.status === 'Error').length
+      const successCount = totalCount - errorCount
+      // 計算準確率 (保留一位小數)
+      const accuracy = totalCount > 0 ? ((successCount / totalCount) * 100).toFixed(1) : '0.0'
       
       if (results.length > 0) {
          await supabase.from('temp_orders').delete().neq('id', 0)
          const { error } = await supabase.from('temp_orders').insert(results)
          if (error) throw error
          
+         // 準備統計訊息
+         const statsMsg = `📊 資料準確率: ${accuracy}% (成功: ${successCount} / 總數: ${totalCount})`
+
          if (errorCount > 0) {
             addLog(`⚠️ 匯入完成，有 ${errorCount} 筆錯誤 (已自動置頂)。`, 'warning')
+            addLog(statsMsg, 'warning') // 顯示統計
          } else {
             addLog(`🎉 成功匯入 ${results.length} 筆資料，全數驗證通過！`, 'success')
-            setTimeout(() => setShowLogs(false), 3000)
+            addLog(statsMsg, 'success') // 顯示統計
+            setTimeout(() => setShowLogs(false), 5000) // 延長顯示時間讓使用者看數據
          }
          fetchTempData()
       } else {
