@@ -17,11 +17,14 @@ export default function LandingPage() {
     return () => clearInterval(timer)
   }, [])
 
-  // 登出功能
-  const handleLogout = () => {
-    // 這裡可以加入清除 token 的邏輯
-    router.push('/login')
-  }
+ // 修改 handleLogout 函式內容
+const handleLogout = () => {
+  // 🔥 新增這行：將 Cookie 的過期時間設為過去 (立即失效)
+  document.cookie = "bardshop-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+  
+  // 踢回登入頁
+  router.push('/login')
+}
 
   return (
     <div className="min-h-screen bg-[#050b14] text-slate-300 font-sans selection:bg-cyan-500 selection:text-white relative overflow-hidden flex flex-col items-center justify-center">
