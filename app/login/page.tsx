@@ -14,7 +14,12 @@ export default function LoginPage() {
     
     // 模擬驗證過程 (之後可接 Supabase Auth)
     setTimeout(() => {
-      router.push('/') // 登入成功，跳轉到 EIP 首頁
+      // 1. 設定 Cookie (通行證)，有效期設為 1 天
+      document.cookie = "bardshop-token=authorized; path=/; max-age=86400; SameSite=Lax;"
+
+      // 2. 🔥 強制重新整理並跳轉 (這是解決轉圈圈的關鍵)
+      // 使用 router.push 有時會因為 Next.js 的快取導致 Middleware 沒讀到新 Cookie
+      window.location.href = '/' 
     }, 1500)
   }
 

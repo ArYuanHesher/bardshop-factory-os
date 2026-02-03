@@ -2,34 +2,43 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export function middleware(request: NextRequest) {
-  // 1. 取得使用者的路徑
   const path = request.nextUrl.pathname
-
-  // 2. 嘗試讀取 'bardshop-token' 這個餅乾 (Cookie)
+  
+  // 嘗試讀取 token
   const token = request.cookies.get('bardshop-token')?.value
 
-  // 3. 定義公開路徑 (不需要登入也能看的頁面)
+  // 定義公開路徑 (只有 login 是公開的)
   const isPublicPath = path === '/login'
 
-  // 4. 邏輯判斷：
+  // 情況 A: 已經登入 (有 Token)
+  if (token) {
+    // 如果登入的人想去 "登入頁"，把他踢回 "首頁"
+    if (isPublicPath) {
+      return NextResponse.redirect(new URL('/', request.url))
+    }
+  } 
+  // 情況 B: 還沒登入 (沒 Token)
+  else {
+    // 如果沒登入的人想去 "非公開頁面" (例如首頁或後台)，把他踢去 "登入頁"
+    if (!isPublicPath) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+  }
   
-  // 情況 A: 如果已經登入 (有 Token) 且試圖去 "登入頁"，強制踢回 "首頁"
-  if (isPublicPath && token) {
-    return NextResponse.redirect(new URL('/', request.url))
-  }
-
-  // 情況 B: 如果還沒登入 (沒 Token) 且試圖去 "非公開頁面" (例如首頁或後台)，強制踢去 "登入頁"
-  if (!isPublicPath && !token) {
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
+  // 其他情況 (例如：已登入且去首頁，或沒登入且在登入頁) -> 放行
+  return NextResponse.next()
 }
 
-// 設定警衛要守衛哪些路徑 (排除圖片、API、靜態檔案)
+// 設定警衛要守衛哪些路徑
 export const config = {
   matcher: [
-    '/',
-    '/login',
-    '/admin/:path*',  // 守護 admin 底下所有頁面
+    /*
+     * 匹配所有路徑，但排除以下開頭的：
+     * - api (API routes)
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     */
     '/((?!api|_next/static|_next/image|favicon.ico).*)',
   ],
 }
