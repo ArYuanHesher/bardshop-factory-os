@@ -2,25 +2,50 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { supabase } from '../../lib/supabaseClient' // 引入 Supabase
 
 export default function LoginPage() {
-  const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
-  const [formData, setFormData] = useState({ id: '', password: '' })
+  const [formData, setFormData] = useState({ email: '', password: '' }) // 改用 email
+  const [errorMsg, setErrorMsg] = useState('')
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
+    setErrorMsg('')
     
-    // 模擬驗證過程 (之後可接 Supabase Auth)
-    setTimeout(() => {
-      // 1. 設定 Cookie (通行證)，有效期設為 1 天
-      document.cookie = "bardshop-token=authorized; path=/; max-age=86400; SameSite=Lax;"
+    try {
+      // 1. 去資料庫找這個人
+      const { data: member, error } = await supabase
+        .from('members')
+        .select('email, password, real_name')
+        .eq('email', formData.email)
+        .single()
 
-      // 2. 🔥 強制重新整理並跳轉 (這是解決轉圈圈的關鍵)
-      // 使用 router.push 有時會因為 Next.js 的快取導致 Middleware 沒讀到新 Cookie
-      window.location.href = '/' 
-    }, 1500)
+      if (error || !member) {
+        throw new Error('找不到此帳號')
+      }
+
+      // 2. 檢查密碼 (這裡做簡單比對，實務上建議加密)
+      if (member.password !== formData.password) {
+        throw new Error('密碼錯誤')
+      }
+
+      // 3. 登入成功：儲存使用者資訊到瀏覽器
+      // 🔥 關鍵步驟：把 Email 存起來，讓其他頁面知道是誰登入的
+      localStorage.setItem('bardshop_user_email', member.email)
+      localStorage.setItem('bardshop_user_name', member.real_name)
+
+      // 4. 設定 Cookie (給 Middleware 過路檢察用)
+      document.cookie = `bardshop-token=authorized; path=/; max-age=86400; SameSite=Lax;`
+
+      // 5. 強制重整進首頁
+      window.location.href = '/'
+
+    } catch (err: any) {
+      setErrorMsg(err.message || '登入失敗')
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -37,33 +62,29 @@ export default function LoginPage() {
 
       {/* 登入卡片 */}
       <div className="relative z-10 w-full max-w-md p-1">
-        {/* 裝飾框線 */}
         <div className="absolute inset-0 border border-cyan-500/30 rounded-2xl blur-[2px]"></div>
         <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-cyan-400 rounded-tl-lg"></div>
         <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-cyan-400 rounded-br-lg"></div>
 
         <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
           
-          {/* Header */}
           <div className="text-center mb-10">
             <h1 className="text-3xl font-black text-white tracking-widest mb-2">BARDSHOP</h1>
             <p className="text-xs text-cyan-400 font-mono tracking-[0.4em] uppercase">Enterprise Portal</p>
           </div>
 
-          {/* Form */}
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
-              <label className="block text-xs font-mono text-slate-500 uppercase tracking-wider mb-2">Employee ID</label>
+              <label className="block text-xs font-mono text-slate-500 uppercase tracking-wider mb-2">Email Account</label>
               <div className="relative group">
                 <input 
-                  type="text" 
+                  type="email" 
                   required
                   className="w-full bg-slate-950/50 border border-slate-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:border-cyan-500 focus:shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all font-mono"
-                  placeholder="BARD-001"
-                  value={formData.id}
-                  onChange={e => setFormData({...formData, id: e.target.value})}
+                  placeholder="admin@bardshop.com"
+                  value={formData.email}
+                  onChange={e => setFormData({...formData, email: e.target.value})}
                 />
-                <div className="absolute inset-0 border border-cyan-500/0 rounded-lg group-hover:border-cyan-500/20 pointer-events-none transition-all"></div>
               </div>
             </div>
 
@@ -79,6 +100,12 @@ export default function LoginPage() {
               />
             </div>
 
+            {errorMsg && (
+              <div className="p-3 bg-red-900/20 border border-red-500/50 rounded text-red-400 text-xs text-center font-bold animate-pulse">
+                {errorMsg}
+              </div>
+            )}
+
             <button 
               type="submit" 
               disabled={isLoading}
@@ -90,23 +117,13 @@ export default function LoginPage() {
               {isLoading ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  Authenticating...
+                  Verifying...
                 </span>
               ) : (
-                <>
-                  <span className="relative z-10">System Login</span>
-                  <div className="absolute inset-0 h-full w-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer"></div>
-                </>
+                <span className="relative z-10">Login System</span>
               )}
             </button>
           </form>
-
-          <div className="mt-8 text-center">
-            <p className="text-[10px] text-slate-600 font-mono">
-              SECURE CONNECTION ESTABLISHED<br/>
-              V2.1.0 • BARDSHOP INC.
-            </p>
-          </div>
         </div>
       </div>
     </div>
