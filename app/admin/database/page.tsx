@@ -170,6 +170,7 @@ export default function DatabaseViewer() {
                       <>
                         <th className="px-6 py-4">工序名稱 (Op Name)</th>
                         <th className="px-6 py-4">站點</th>
+                        {/* 這裡確保標題清晰，對應下方內容 */}
                         <th className="px-6 py-4 text-right">標準工時 (分)</th>
                         <th className="px-6 py-4 text-right text-slate-500">建立時間</th>
                       </>
@@ -178,7 +179,7 @@ export default function DatabaseViewer() {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {data.length === 0 ? (
-                     <tr><td colSpan={4} className="p-12 text-center text-slate-600">查無資料</td></tr>
+                      <tr><td colSpan={4} className="p-12 text-center text-slate-600">查無資料</td></tr>
                   ) : (
                     data.map((row, idx) => (
                       <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
@@ -206,6 +207,7 @@ export default function DatabaseViewer() {
                           <>
                             <td className="px-6 py-3 text-white font-bold">{row.op_name}</td>
                             <td className="px-6 py-3 text-slate-500">{row.station}</td>
+                            {/* 🔥 直接顯示數值，不進行 toFixed 或四捨五入，確保顯示應有的位數 */}
                             <td className="px-6 py-3 text-right font-mono text-green-400">{row.std_time_min}</td>
                             <td className="px-6 py-3 text-right text-xs text-slate-600 font-mono">
                                {new Date(row.created_at).toLocaleDateString()}

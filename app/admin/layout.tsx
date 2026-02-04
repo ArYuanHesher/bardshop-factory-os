@@ -28,14 +28,23 @@ function AdminNavbar() {
       <div className="w-full px-4 md:px-6"> 
         <div className="flex flex-col xl:flex-row items-center justify-start py-3 gap-4 xl:gap-8">
           
-          {/* 左側控制區 (維持原樣) */}
+          {/* 左側控制區 */}
           <div className="flex items-center gap-3 w-full xl:w-auto shrink-0 border-b xl:border-b-0 border-slate-800/50 pb-3 xl:pb-0">
-             <Link href="/" className="flex items-center justify-center w-10 h-10 rounded-lg bg-slate-900/80 border border-slate-700 text-cyan-500 hover:bg-cyan-950 hover:border-cyan-500 hover:text-cyan-400 hover:shadow-[0_0_15px_rgba(6,182,212,0.5)] transition-all group">
+             {/* 1. 回到網站首頁 (Home) */}
+             <Link href="/" className="flex items-center justify-center w-10 h-10 rounded-lg bg-slate-900/80 border border-slate-700 text-cyan-500 hover:bg-cyan-950 hover:border-cyan-500 hover:text-cyan-400 hover:shadow-[0_0_15px_rgba(6,182,212,0.5)] transition-all group" title="回到網站首頁">
                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
              </Link>
-             <button onClick={() => router.back()} className="flex items-center justify-center w-10 h-10 rounded-lg bg-slate-900/80 border border-slate-700 text-slate-400 hover:bg-slate-800 hover:border-slate-500 hover:text-white transition-all">
+
+             {/* 🔥 2. [新增] 回到 Admin 首頁/最愛 (Dashboard) */}
+             <Link href="/admin" className="flex items-center justify-center w-10 h-10 rounded-lg bg-slate-900/80 border border-slate-700 text-slate-400 hover:bg-slate-800 hover:border-yellow-500 hover:text-yellow-400 hover:shadow-[0_0_15px_rgba(234,179,8,0.5)] transition-all group" title="回到管理後台首頁 (最愛)">
+               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
+             </Link>
+
+             {/* 3. 回上一頁 (Back) */}
+             <button onClick={() => router.back()} className="flex items-center justify-center w-10 h-10 rounded-lg bg-slate-900/80 border border-slate-700 text-slate-400 hover:bg-slate-800 hover:border-slate-500 hover:text-white transition-all" title="回上一頁">
                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
              </button>
+
              <div className="h-8 w-px bg-slate-800 mx-2 hidden xl:block"></div>
              <div className="hidden sm:flex flex-col justify-center shrink-0">
                <div className="text-white font-bold text-xs tracking-[0.2em]">CONSOLE</div>
@@ -61,25 +70,25 @@ function AdminNavbar() {
                       <div className={`h-0.5 w-full bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-50`}></div>
 
                       {group.items.map((item) => {
-                         const isItemActive = pathname === item.path
-                         const isFav = favorites.includes(item.path)
-                         
-                         return (
-                           <div key={item.path} className={`group/item flex items-center px-4 py-2 hover:bg-slate-800/50 transition-colors border-l-4 ${isItemActive ? `border-${group.theme}-400 bg-slate-800/80` : 'border-transparent'}`}>
-                             {/* ⭐ 星星開關 */}
-                             <button 
-                               onClick={(e) => { e.preventDefault(); toggleFavorite(item.path); }}
-                               className={`mr-3 p-1 rounded-full transition-all ${isFav ? 'text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10' : 'text-slate-600 hover:text-slate-400'}`}
-                               title={isFav ? "移除常用" : "加入常用"}
-                             >
-                               <svg className="w-4 h-4" fill={isFav ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
-                             </button>
+                          const isItemActive = pathname === item.path
+                          const isFav = favorites.includes(item.path)
+                          
+                          return (
+                            <div key={item.path} className={`group/item flex items-center px-4 py-2 hover:bg-slate-800/50 transition-colors border-l-4 ${isItemActive ? `border-${group.theme}-400 bg-slate-800/80` : 'border-transparent'}`}>
+                              {/* ⭐ 星星開關 */}
+                              <button 
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.path); }}
+                                className={`mr-3 p-1 rounded-full transition-all ${isFav ? 'text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10' : 'text-slate-600 hover:text-slate-400'}`}
+                                title={isFav ? "移除常用" : "加入常用"}
+                              >
+                                <svg className="w-4 h-4" fill={isFav ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
+                              </button>
 
-                             <Link href={item.path} className={`flex-1 text-sm font-medium tracking-wide ${isItemActive ? colors.text : `text-slate-400 ${colors.hoverText} hover:text-white`}`}>
-                               {item.name}
-                             </Link>
-                           </div>
-                         )
+                              <Link href={item.path} className={`flex-1 text-sm font-medium tracking-wide ${isItemActive ? colors.text : `text-slate-400 ${colors.hoverText} hover:text-white`}`}>
+                                {item.name}
+                              </Link>
+                            </div>
+                          )
                       })}
                     </div>
                   </div>

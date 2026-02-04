@@ -22,12 +22,30 @@ interface OrderData {
   total_time_min: number
   status: string
   log_msg: string
+  error_reason?: string 
 }
 
 // 母資料快取介面
 interface MasterDataCache {
   itemMap: Map<string, string>
   ready: boolean
+}
+
+// --- 輔助函式：建立資料指紋 (用於嚴格比對) ---
+const createFingerprint = (row: any) => {
+  return JSON.stringify({
+    order_number: (row.order_number || '').toString().trim(),
+    item_code: (row.item_code || '').toString().trim().toUpperCase(),
+    item_name: (row.item_name || '').toString().trim(),
+    quantity: parseFloat(row.quantity) || 0,
+    plate_count: (row.plate_count || '').toString().trim(),
+    customer: (row.customer || '').toString().trim(),
+    doc_type: (row.doc_type || '').toString().trim(),
+    delivery_date: (row.delivery_date || '').toString().trim(),
+    designer: (row.designer || '').toString().trim(),
+    handler: (row.handler || '').toString().trim(),
+    issuer: (row.issuer || '').toString().trim(),
+  })
 }
 
 export default function DailyOperationsPage() {
@@ -47,9 +65,9 @@ export default function DailyOperationsPage() {
 
   const addLog = (msg: string, type = 'info') => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false })
-    const prefix = type === 'error' ? '[ERROR]' : type === 'success' ? '[SUCCESS]' : '[INFO]'
+    const prefix = type === 'error' ? '[ERROR]' : type === 'success' ? '[SUCCESS]' : type === 'warning' ? '[WARN]' : '[INFO]'
     setLogs(prev => [`${time} ${prefix} ${msg}`, ...prev])
-    if (type === 'error') setShowLogs(true)
+    if (type === 'error' || type === 'warning') setShowLogs(true)
   }
 
   // --- 核心初始化 ---
@@ -148,17 +166,24 @@ export default function DailyOperationsPage() {
       }
       if (!qty || qty <= 0) { status = 'Error'; logMsgParts.push('數量必須大於 0'); }
       if (!row.delivery_date) { status = 'Error'; logMsgParts.push('交付日期不可空白'); }
-      if (itemCodeNormalized.startsWith('C') && !docType.includes('委外')) {
-          status = 'Error'; logMsgParts.push('C開頭需為委外單');
+      
+      if (itemCodeNormalized.startsWith('C')) {
+          const isOutsourced = docType.includes('委外');
+          const isChangping = docType.includes('常平');
+          
+          if (!isOutsourced && !isChangping) {
+             status = 'Error'; 
+             logMsgParts.push('C開頭需為委外單或常平單');
+          }
       }
-      // 壓克力檢查 (C開頭豁免)
+
       if (row.item_name.includes('壓克力') && !row.plate_count) {
           if (!itemCodeNormalized.startsWith('C')) {
              status = 'Error'; logMsgParts.push('壓克力需填寫盤數');
           }
       }
     } else {
-        if (status === 'OK') logMsgParts.push(`[${docType}] 規則豁免`)
+       if (status === 'OK') logMsgParts.push(`[${docType}] 規則豁免`)
     }
 
     const routeId = mData.itemMap.get(itemCodeNormalized)
@@ -173,7 +198,8 @@ export default function DailyOperationsPage() {
       matched_route_id: routeId || 'N/A',
       total_time_min: totalTime,
       status: status,
-      log_msg: logMsgParts.join('; ')
+      log_msg: logMsgParts.join('; '),
+      error_reason: status === 'Error' ? logMsgParts.join('; ') : '' 
     }
   }
 
@@ -218,7 +244,7 @@ export default function DailyOperationsPage() {
     }
   }
 
-  // --- 上傳 CSV ---
+  // --- 上傳 CSV (含重複檢查) ---
   const handleOrderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -239,8 +265,6 @@ export default function DailyOperationsPage() {
       
       if (!masterDataRef.current.ready) throw new Error('母資料載入失敗，無法驗證。')
 
-      addLog(`母資料就緒，開始處理 ${csvData.length} 筆資料...`)
-
       const rawResults = csvData.map((row) => {
         return {
           order_number: row['工單編號']?.trim() || '',
@@ -257,18 +281,55 @@ export default function DailyOperationsPage() {
           matched_route_id: null,
           total_time_min: 0,
           status: 'Pending',
-          log_msg: ''
+          log_msg: '',
+          error_reason: ''
         } as OrderData
       }).filter(r => r.order_number || r.item_code)
 
-      // 執行驗證
-      const results = rawResults.map(r => calculateRow(r, masterDataRef.current))
+      addLog(`讀取到 ${rawResults.length} 筆資料，正在進行重複檢核...`)
 
-      // 🔥 統計數據計算
+      // 重複資料檢核
+      const orderNumbersToCheck = Array.from(new Set(rawResults.map(r => r.order_number))).filter(n => n)
+
+      const { data: existingRows, error: checkError } = await supabase
+        .from('daily_orders')
+        .select('order_number, doc_type, item_code, item_name, quantity, plate_count, customer, delivery_date, designer, handler, issuer')
+        .in('order_number', orderNumbersToCheck)
+
+      if (checkError) throw checkError
+
+      const existingFingerprints = new Set(existingRows?.map(r => createFingerprint(r)))
+
+      const newUniqueResults: OrderData[] = []
+      let skippedCount = 0
+
+      rawResults.forEach(row => {
+        const fingerprint = createFingerprint(row)
+        if (existingFingerprints.has(fingerprint)) {
+          skippedCount++
+        } else {
+          newUniqueResults.push(row)
+        }
+      })
+
+      if (skippedCount > 0) {
+        addLog(`🔍 比對完成：發現 ${skippedCount} 筆資料與總表完全一致，已自動略過。`, 'warning')
+      }
+
+      if (newUniqueResults.length === 0) {
+        addLog('⚠️ 所有上傳資料均為重複資料，無需匯入。', 'warning')
+        setLoading(false)
+        e.target.value = ''
+        return
+      }
+
+      addLog(`🚀 準備匯入 ${newUniqueResults.length} 筆新資料...`)
+
+      const results = newUniqueResults.map(r => calculateRow(r, masterDataRef.current))
+
       const totalCount = results.length
       const errorCount = results.filter(r => r.status === 'Error').length
       const successCount = totalCount - errorCount
-      // 計算準確率 (保留一位小數)
       const accuracy = totalCount > 0 ? ((successCount / totalCount) * 100).toFixed(1) : '0.0'
       
       if (results.length > 0) {
@@ -276,20 +337,17 @@ export default function DailyOperationsPage() {
          const { error } = await supabase.from('temp_orders').insert(results)
          if (error) throw error
          
-         // 準備統計訊息
-         const statsMsg = `📊 資料準確率: ${accuracy}% (成功: ${successCount} / 總數: ${totalCount})`
+         const statsMsg = `📊 本次匯入準確率: ${accuracy}% (成功: ${successCount} / 總數: ${totalCount})`
 
          if (errorCount > 0) {
-            addLog(`⚠️ 匯入完成，有 ${errorCount} 筆錯誤 (已自動置頂)。`, 'warning')
-            addLog(statsMsg, 'warning') // 顯示統計
+           addLog(`⚠️ 匯入完成，有 ${errorCount} 筆錯誤 (已自動置頂)。`, 'warning')
+           addLog(statsMsg, 'warning') 
          } else {
-            addLog(`🎉 成功匯入 ${results.length} 筆資料，全數驗證通過！`, 'success')
-            addLog(statsMsg, 'success') // 顯示統計
-            setTimeout(() => setShowLogs(false), 5000) // 延長顯示時間讓使用者看數據
+           addLog(`🎉 成功匯入 ${results.length} 筆資料，全數驗證通過！`, 'success')
+           addLog(statsMsg, 'success') 
+           setTimeout(() => setShowLogs(false), 5000) 
          }
          fetchTempData()
-      } else {
-         addLog('⚠️ 有效資料為 0 筆。', 'warning')
       }
 
     } catch (err: any) {
@@ -316,27 +374,42 @@ export default function DailyOperationsPage() {
     }
   }
 
+  // 🔥 關鍵修改：確認並發單邏輯
   const handleCommit = async () => {
-    const hasError = tempData.some(d => d.status === 'Error')
-    if (hasError) {
-      alert('暫存區仍有錯誤資料(紅字)，請先刪除或修正後再提交！')
-      setShowLogs(true)
-      return
-    }
     if (tempData.length === 0) return
+
+    const errorCount = tempData.filter(d => d.status === 'Error').length
+    const successCount = tempData.length - errorCount
+
+    // 提示使用者
+    const confirmMsg = errorCount > 0 
+      ? `⚠️ 注意：有 ${errorCount} 筆資料狀態為 Error！\n\n這些資料將會被送入「待處理資料表」進行修正。\n另外 ${successCount} 筆正常資料將直接發單。\n\n確定要繼續嗎？`
+      : `確定要發送這 ${tempData.length} 筆工單嗎？`
+
+    if (!confirm(confirmMsg)) return
 
     setLoading(true)
     try {
-      const dataToMove = tempData.map(({ id, ...rest }) => rest)
+      // 準備要寫入的資料 (移除 id，避免主鍵衝突)
+      const dataToMove = tempData.map(({ id, ...rest }) => ({
+        ...rest,
+        // 🔥🔥🔥 關鍵修正：如果是 Error，強制將 log_msg 寫入 error_reason
+        error_reason: rest.status === 'Error' ? rest.log_msg : null
+      }))
+
       const { error: insertError } = await supabase.from('daily_orders').insert(dataToMove)
       if (insertError) throw insertError
 
       const { error: clearError } = await supabase.from('temp_orders').delete().neq('id', 0)
       if (clearError) throw clearError
 
-      addLog('🎉 資料已成功移轉至發單紀錄總表！', 'success')
+      addLog(`🎉 發單成功！ (成功: ${successCount} / 待修正: ${errorCount})`, 'success')
+      if (errorCount > 0) {
+        addLog('⚠️ 請前往「待處理資料表」修正錯誤訂單。', 'warning')
+      }
+
       setTempData([])
-      alert('發單成功！')
+      alert('發單成功！請至「訂單查詢表」或「待處理資料表」查看。')
       setShowLogs(false)
 
     } catch (err: any) {
@@ -372,9 +445,9 @@ export default function DailyOperationsPage() {
         
         <div className="flex gap-3">
            <label className={`flex items-center gap-2 px-5 py-2 rounded-md shadow cursor-pointer transition-all ${loading ? 'bg-slate-700' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-              <span>上傳 CSV</span>
-              <input type="file" accept=".csv" className="hidden" onChange={handleOrderUpload} disabled={loading} />
+             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+             <span>上傳 CSV</span>
+             <input type="file" accept=".csv" className="hidden" onChange={handleOrderUpload} disabled={loading} />
            </label>
 
            <button onClick={handleClearTemp} className="px-5 py-2 bg-red-900/50 text-red-400 border border-red-800 rounded-md hover:bg-red-900 transition-all" disabled={tempData.length === 0 || loading}>
@@ -419,7 +492,6 @@ export default function DailyOperationsPage() {
                 <th className="p-2 w-12 border-b border-slate-700">承辦</th>
                 <th className="p-2 w-12 border-b border-slate-700">開單</th>
                 <th className="p-2 w-10 text-center border-b border-slate-700">盤數</th>
-                <th className="p-2 w-16 text-right border-b border-slate-700 text-emerald-400">工時</th>
                 <th className="p-2 w-24 border-b border-slate-700 text-red-400">訊息</th>
               </tr>
             </thead>
@@ -450,7 +522,6 @@ export default function DailyOperationsPage() {
                   <td className="p-2 text-slate-500"><TableInput value={row.handler} onChange={v => handleCellChange(row.id!, 'handler', v)} onBlur={() => handleCellBlur(row)} /></td>
                   <td className="p-2 text-slate-500"><TableInput value={row.issuer} onChange={v => handleCellChange(row.id!, 'issuer', v)} onBlur={() => handleCellBlur(row)} /></td>
                   <td className="p-2 text-center text-slate-400"><TableInput className="text-center" value={row.plate_count} onChange={v => handleCellChange(row.id!, 'plate_count', v)} onBlur={() => handleCellBlur(row)} /></td>
-                  <td className="p-2 text-right font-mono"><TableInput type="number" className="text-right text-emerald-400 font-bold" value={row.total_time_min} onChange={v => handleCellChange(row.id!, 'total_time_min', v)} onBlur={() => handleCellBlur(row)} /></td>
                   <td className={`p-2 text-[10px] break-words leading-tight ${row.status === 'Error' ? 'text-red-400 font-bold' : 'text-slate-600'}`}>{row.log_msg}</td>
                 </tr>
               ))}
@@ -462,7 +533,7 @@ export default function DailyOperationsPage() {
         </div>
       </div>
 
-      <div className={`fixed top-0 right-0 h-full bg-[#0b1120] border-l border-slate-700 shadow-2xl transition-all duration-300 ease-in-out z-50 flex flex-col ${showLogs ? 'w-96 translate-x-0' : 'w-10 translate-x-0 bg-slate-900/50 hover:bg-slate-800 border-none'}`}>
+      <div className={`fixed top-24 right-0 h-[calc(100vh-6rem)] bg-[#0b1120] border-l border-slate-700 shadow-2xl transition-all duration-300 ease-in-out z-50 flex flex-col ${showLogs ? 'w-96 translate-x-0' : 'w-10 translate-x-0 bg-slate-900/50 hover:bg-slate-800 border-none'}`}>
         <button onClick={() => setShowLogs(!showLogs)} className={`absolute -left-0 top-1/2 -translate-y-1/2 w-10 h-24 flex items-center justify-center text-slate-500 hover:text-cyan-400 transition-colors ${!showLogs ? 'w-full h-full' : ''}`} title={showLogs ? "收起日誌" : "展開系統日誌"}>
           {showLogs ? (<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>) : (<div className="flex flex-col items-center gap-4"><svg className="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg><span className="writing-vertical-rl text-xs font-mono tracking-widest opacity-50 uppercase">Logs</span></div>)}
         </button>
@@ -475,7 +546,7 @@ export default function DailyOperationsPage() {
             <div className="flex-1 overflow-y-auto font-mono text-xs space-y-2 scrollbar-thin scrollbar-thumb-slate-700 pr-2">
                {logs.length === 0 && <div className="text-slate-700 italic text-center mt-10">Waiting for events...</div>}
                {logs.map((log, i) => (
-                 <div key={i} className={`p-2 rounded border-l-2 bg-slate-900/50 ${log.includes('ERROR') ? 'text-red-300 border-red-500 bg-red-900/10' : log.includes('SUCCESS') ? 'text-emerald-300 border-emerald-500 bg-emerald-900/10' : log.includes('WARNING') ? 'text-yellow-300 border-yellow-500 bg-yellow-900/10' : 'text-cyan-300 border-cyan-500/30'}`}>{log}</div>
+                 <div key={i} className={`p-2 rounded border-l-2 bg-slate-900/50 ${log.includes('ERROR') ? 'text-red-300 border-red-500 bg-red-900/10' : log.includes('SUCCESS') ? 'text-emerald-300 border-emerald-500 bg-emerald-900/10' : log.includes('WARN') ? 'text-yellow-300 border-yellow-500 bg-yellow-900/10' : 'text-cyan-300 border-cyan-500/30'}`}>{log}</div>
                ))}
             </div>
           </div>
