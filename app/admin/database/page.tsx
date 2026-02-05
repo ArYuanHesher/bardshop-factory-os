@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+// 🔥 修正路徑：往上三層即可找到 src/lib (src/app/admin/database -> src)
 import { supabase } from '../../../lib/supabaseClient'
 
 export default function DatabaseViewer() {
@@ -27,7 +28,7 @@ export default function DatabaseViewer() {
     setData([])
   }
 
-  // 當搜尋輸入時，重置回第一頁 (並加入防抖動，避免打字太快一直發請求)
+  // 當搜尋輸入時，重置回第一頁
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value)
     setPage(0) 
@@ -41,18 +42,19 @@ export default function DatabaseViewer() {
         activeTab === 'ops' ? 'operation_times' : 
         activeTab === 'routes' ? 'route_operations' : 'item_routes'
       )
-      .select('*', { count: 'exact' }) // count: 'exact' 讓我們知道符合條件的總筆數有多少
+      .select('*', { count: 'exact' }) 
 
-      // --- 1. 搜尋邏輯 (Server-side Search) ---
+      // --- 1. 搜尋邏輯 (全欄位搜尋) ---
       if (searchTerm) {
         if (activeTab === 'ops') {
-          query = query.ilike('op_name', `%${searchTerm}%`)
+          // 搜尋 工序名稱 OR 站點
+          query = query.or(`op_name.ilike.%${searchTerm}%,station.ilike.%${searchTerm}%`)
         } else if (activeTab === 'routes') {
-          // 搜尋 RouteID 或 OpName
+          // 搜尋 RouteID OR OpName
           query = query.or(`route_id.ilike.%${searchTerm}%,op_name.ilike.%${searchTerm}%`)
         } else if (activeTab === 'items') {
-          // 搜尋 ItemCode 或 ItemName
-          query = query.or(`item_code.ilike.%${searchTerm}%,item_name.ilike.%${searchTerm}%`)
+          // 搜尋 ItemCode OR ItemName OR 對應途程ID
+          query = query.or(`item_code.ilike.%${searchTerm}%,item_name.ilike.%${searchTerm}%,route_id.ilike.%${searchTerm}%`)
         }
       }
 
@@ -65,7 +67,7 @@ export default function DatabaseViewer() {
         query = query.order('item_code', { ascending: true })
       }
 
-      // --- 3. 分頁邏輯 (Server-side Pagination) ---
+      // --- 3. 分頁邏輯 ---
       const from = page * PAGE_SIZE
       const to = from + PAGE_SIZE - 1
       query = query.range(from, to)
@@ -84,9 +86,6 @@ export default function DatabaseViewer() {
       setLoading(false)
     }
   }
-
-  // 計算總頁數
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
   return (
     <div className="p-6 md:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen">
@@ -107,10 +106,10 @@ export default function DatabaseViewer() {
           </div>
           <input 
             type="text" 
-            placeholder="搜尋資料庫 (Enter search...)" 
+            placeholder="全欄位搜尋 (Enter search...)" 
             value={searchTerm}
             onChange={handleSearch}
-            className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-lg block pl-10 p-2.5 focus:ring-cyan-500 focus:border-cyan-500 placeholder-slate-600"
+            className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-lg block pl-10 p-2.5 focus:ring-cyan-500 focus:border-cyan-500 placeholder-slate-600 outline-none transition-all"
           />
         </div>
       </div>
@@ -170,7 +169,6 @@ export default function DatabaseViewer() {
                       <>
                         <th className="px-6 py-4">工序名稱 (Op Name)</th>
                         <th className="px-6 py-4">站點</th>
-                        {/* 這裡確保標題清晰，對應下方內容 */}
                         <th className="px-6 py-4 text-right">標準工時 (分)</th>
                         <th className="px-6 py-4 text-right text-slate-500">建立時間</th>
                       </>
@@ -207,7 +205,6 @@ export default function DatabaseViewer() {
                           <>
                             <td className="px-6 py-3 text-white font-bold">{row.op_name}</td>
                             <td className="px-6 py-3 text-slate-500">{row.station}</td>
-                            {/* 🔥 直接顯示數值，不進行 toFixed 或四捨五入，確保顯示應有的位數 */}
                             <td className="px-6 py-3 text-right font-mono text-green-400">{row.std_time_min}</td>
                             <td className="px-6 py-3 text-right text-xs text-slate-600 font-mono">
                                {new Date(row.created_at).toLocaleDateString()}
@@ -236,11 +233,11 @@ export default function DatabaseViewer() {
                   上一頁
                 </button>
                 <span className="text-xs font-mono text-slate-400 px-2">
-                   Page {page + 1} / {totalPages || 1}
+                   Page {page + 1}
                 </span>
                 <button 
-                  onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
-                  disabled={page >= totalPages - 1 || loading}
+                  onClick={() => setPage(p => p + 1)} // 簡化分頁邏輯，因為 totalCount 是動態的
+                  disabled={data.length < PAGE_SIZE || loading}
                   className="px-3 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 text-xs hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   下一頁

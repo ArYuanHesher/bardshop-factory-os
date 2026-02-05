@@ -3,13 +3,19 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
+import { supabase } from '../lib/supabaseClient'
 
 export default function LandingPage() {
   const router = useRouter()
   const [time, setTime] = useState('')
   const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin'>('none')
+  
+  // 公告相關狀態
+  const [announcements, setAnnouncements] = useState<any[]>([])
+  const [currentAnnoIndex, setCurrentAnnoIndex] = useState(0)
+  const [showModal, setShowModal] = useState(false) // 控制詳情視窗
 
-  // 時間跳動效果
+  // 時間跳動
   useEffect(() => {
     const timer = setInterval(() => {
       setTime(new Date().toLocaleTimeString('en-US', { hour12: false }))
@@ -17,20 +23,44 @@ export default function LandingPage() {
     return () => clearInterval(timer)
   }, [])
 
- // 修改 handleLogout 函式內容
-const handleLogout = () => {
-  // 🔥 新增這行：將 Cookie 的過期時間設為過去 (立即失效)
-  document.cookie = "bardshop-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
-  
-  // 踢回登入頁
-  router.push('/login')
-}
+  // 讀取公告
+  useEffect(() => {
+    const fetchAnnouncements = async () => {
+      const { data } = await supabase
+        .from('system_announcements')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+      
+      if (data && data.length > 0) {
+        setAnnouncements(data)
+      }
+    }
+    fetchAnnouncements()
+  }, [])
+
+  // 公告輪播
+  useEffect(() => {
+    if (announcements.length <= 1 || showModal) return // 如果打開詳情就不輪播
+    const interval = setInterval(() => {
+      setCurrentAnnoIndex((prev) => (prev + 1) % announcements.length)
+    }, 5000) 
+    return () => clearInterval(interval)
+  }, [announcements, showModal])
+
+  const handleLogout = () => {
+    document.cookie = "bardshop-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
+    router.push('/login')
+  }
+
+  // 取得當前顯示的公告
+  const currentAnnouncement = announcements[currentAnnoIndex]
 
   return (
     <div className="min-h-screen bg-[#050b14] text-slate-300 font-sans selection:bg-cyan-500 selection:text-white relative overflow-hidden flex flex-col items-center justify-center">
       
       {/* --- 背景特效 --- */}
-      <div className="absolute inset-0 z-0">
+      <div className="absolute inset-0 z-0 pointer-events-none">
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150"></div>
         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-blue-900/10 via-transparent to-slate-900/80"></div>
         <div className="absolute inset-0 opacity-20" 
@@ -41,18 +71,54 @@ const handleLogout = () => {
         </div>
       </div>
 
+      {/* --- 左上角：公告顯示區 (卷軸式) --- */}
+      {currentAnnouncement && (
+        <div className="absolute top-6 left-6 z-40 max-w-[280px] md:max-w-sm animate-fade-in-right">
+          <div 
+            onClick={() => setShowModal(true)}
+            className="group cursor-pointer bg-slate-900/60 backdrop-blur-md border border-orange-500/30 rounded-xl p-4 shadow-[0_4px_20px_rgba(0,0,0,0.3)] hover:border-orange-500/60 transition-all hover:translate-x-1"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+              </span>
+              <span className="text-[10px] font-bold text-orange-400 uppercase tracking-wider">System Notice</span>
+              {announcements.length > 1 && (
+                <span className="text-[10px] text-slate-500 ml-auto font-mono">
+                  {currentAnnoIndex + 1}/{announcements.length}
+                </span>
+              )}
+            </div>
+            
+            <h3 className="text-white font-bold text-sm mb-1 truncate group-hover:text-orange-300 transition-colors">
+              {currentAnnouncement.title}
+            </h3>
+            
+            {/* 限制顯示兩行 (line-clamp-2) */}
+            <p className="text-xs text-slate-400 font-mono leading-relaxed line-clamp-2">
+              {currentAnnouncement.content || '點擊查看詳情...'}
+            </p>
+
+            <div className="mt-2 text-[10px] text-slate-600 group-hover:text-slate-500">
+              Click to expand &rarr;
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 右上角登出按鈕 */}
-      <div className="absolute top-6 right-6 z-20">
+      <div className="absolute top-6 right-6 z-40">
         <button 
           onClick={handleLogout}
-          className="flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-full text-xs font-mono text-slate-500 hover:text-red-400 hover:border-red-500/50 hover:bg-red-950/20 transition-all"
+          className="flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-full text-xs font-mono text-slate-500 hover:text-red-400 hover:border-red-500/50 hover:bg-red-950/20 transition-all backdrop-blur-sm bg-slate-900/30"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
           LOGOUT
         </button>
       </div>
 
-      {/* --- 中央核心區域 --- */}
+      {/* --- 中央內容區 --- */}
       <div className="relative z-10 w-full max-w-7xl px-6 flex flex-col items-center">
         
         {/* LOGO & Header */}
@@ -104,7 +170,7 @@ const handleLogout = () => {
             </span>
           </Link>
 
-          {/* 右側：管理核心 (已修正 href) */}
+          {/* 右側：管理核心 */}
           <Link href="/admin"
             onMouseEnter={() => setIsHovered('admin')}
             onMouseLeave={() => setIsHovered('none')}
@@ -140,6 +206,58 @@ const handleLogout = () => {
         </div>
 
       </div>
+
+      {/* --- 公告詳情 Modal (彈出視窗) --- */}
+      {showModal && currentAnnouncement && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden relative">
+            
+            {/* Modal Header */}
+            <div className="bg-slate-800 p-4 flex justify-between items-center border-b border-slate-700">
+              <h3 className="text-white font-bold flex items-center gap-2">
+                <span className="w-2 h-6 bg-orange-500 rounded-full"></span>
+                系統公告 (System Notice)
+              </h3>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              <div className="text-xs text-slate-500 font-mono mb-4">
+                發布時間: {new Date(currentAnnouncement.created_at).toLocaleString()}
+              </div>
+              <h2 className="text-2xl font-bold text-orange-400 mb-4">{currentAnnouncement.title}</h2>
+              <div className="text-slate-300 whitespace-pre-wrap leading-relaxed text-sm">
+                {currentAnnouncement.content || "無詳細內容"}
+              </div>
+            </div>
+
+            {/* Modal Footer (如果有上一則/下一則可以放這裡) */}
+            {announcements.length > 1 && (
+              <div className="bg-slate-800/50 p-3 flex justify-between border-t border-slate-700">
+                <button 
+                  onClick={() => setCurrentAnnoIndex(prev => (prev - 1 + announcements.length) % announcements.length)}
+                  className="text-xs text-slate-400 hover:text-white px-3 py-1 hover:bg-slate-700 rounded"
+                >
+                  &larr; Prev
+                </button>
+                <span className="text-xs text-slate-500 font-mono py-1">
+                  {currentAnnoIndex + 1} / {announcements.length}
+                </span>
+                <button 
+                  onClick={() => setCurrentAnnoIndex(prev => (prev + 1) % announcements.length)}
+                  className="text-xs text-slate-400 hover:text-white px-3 py-1 hover:bg-slate-700 rounded"
+                >
+                  Next &rarr;
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
