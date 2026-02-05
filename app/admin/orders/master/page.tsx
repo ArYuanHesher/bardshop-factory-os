@@ -5,12 +5,17 @@ import { supabase } from '../../../../lib/supabaseClient'
 
 interface ScheduleItem {
   id: number
-  source_order_id: number // 🔥 關鍵：用來綁定原始訂單
+  source_order_id: number 
   order_number: string
   item_code: string
   item_name: string
   quantity: number
   plate_count: string
+  delivery_date: string // 新增
+  designer: string      // 新增
+  customer: string      // 新增
+  handler: string       // 新增
+  issuer: string        // 新增
   op_name: string
   station: string
   std_time: number
@@ -24,6 +29,12 @@ interface GroupedOrder {
   order_number: string
   item_code: string
   item_name: string
+  // 將共用資訊拉到 Group 層級方便顯示
+  delivery_date: string
+  designer: string
+  customer: string
+  handler: string
+  issuer: string
   items: ScheduleItem[]
 }
 
@@ -32,10 +43,9 @@ export default function MasterSchedulePage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   
-  // 分頁狀態 (以「工單組」為單位比較合理，但受限於 SQL，我們先用 Row 做分頁，前端做分組)
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
-  const PAGE_SIZE = 100 // 稍微加大每頁筆數，避免同一單被切斷
+  const PAGE_SIZE = 100 
 
   useEffect(() => {
     fetchData()
@@ -59,7 +69,7 @@ export default function MasterSchedulePage() {
         .order('id', { ascending: true })
 
       if (searchTerm) {
-        query = query.or(`order_number.ilike.%${searchTerm}%,item_code.ilike.%${searchTerm}%,item_name.ilike.%${searchTerm}%,station.ilike.%${searchTerm}%`)
+        query = query.or(`order_number.ilike.%${searchTerm}%,item_code.ilike.%${searchTerm}%,item_name.ilike.%${searchTerm}%,station.ilike.%${searchTerm}%,customer.ilike.%${searchTerm}%`)
       }
 
       const from = page * PAGE_SIZE
@@ -71,7 +81,6 @@ export default function MasterSchedulePage() {
       if (error) throw error
 
       // --- 前端資料分組 (Grouping) ---
-      // 將平鋪的資料轉為以 source_order_id 為 Key 的群組
       const groups: GroupedOrder[] = []
       const map = new Map<number, GroupedOrder>()
 
@@ -82,6 +91,11 @@ export default function MasterSchedulePage() {
             order_number: row.order_number,
             item_code: row.item_code,
             item_name: row.item_name,
+            delivery_date: row.delivery_date, // 綁定第一筆資料的共用欄位
+            designer: row.designer,
+            customer: row.customer,
+            handler: row.handler,
+            issuer: row.issuer,
             items: []
           }
           map.set(row.source_order_id, newGroup)
@@ -101,23 +115,20 @@ export default function MasterSchedulePage() {
     }
   }
 
-  // --- 2. 🔥 刪除與回溯邏輯 (Revert) ---
+  // --- 2. 刪除與回溯邏輯 ---
   const handleGroupDelete = async (sourceOrderId: number, orderNumber: string) => {
     if (!confirm(`⚠️ 警告：這將會刪除工單 [${orderNumber}] 的所有工序資料！\n\n並且該工單會回到「待處理清單」中。\n\n確定要執行嗎？`)) return
     
-    // 樂觀更新 UI
     setGroupedData(prev => prev.filter(g => g.source_order_id !== sourceOrderId))
 
     try {
-      // 步驟 A: 修改原始訂單狀態 (Revert Status)
       const { error: updateError } = await supabase
         .from('daily_orders')
-        .update({ is_converted: false }) // 改回 false
+        .update({ is_converted: false }) 
         .eq('id', sourceOrderId)
       
       if (updateError) throw updateError
 
-      // 步驟 B: 刪除總表中的資料
       const { error: deleteError } = await supabase
         .from('station_time_summary')
         .delete()
@@ -125,18 +136,15 @@ export default function MasterSchedulePage() {
 
       if (deleteError) throw deleteError
 
-      // alert('刪除成功，工單已退回待處理區！') // 可以選擇不跳窗干擾操作
-
     } catch (err: any) {
       console.error(err)
-      alert('操作失敗，請重新整理頁面: ' + err.message)
-      fetchData() // 失敗則重抓
+      alert('操作失敗: ' + err.message)
+      fetchData() 
     }
   }
 
-  // --- 3. 編輯邏輯 (維持單行編輯) ---
+  // --- 3. 編輯邏輯 ---
   const handleUpdate = async (id: number, field: keyof ScheduleItem, value: any) => {
-    // 複雜的巢狀更新 UI
     setGroupedData(prev => prev.map(group => ({
       ...group,
       items: group.items.map(item => item.id === id ? { ...item, [field]: value } : item)
@@ -150,7 +158,6 @@ export default function MasterSchedulePage() {
     if (error) console.error('Update Failed', error)
   }
 
-  // 輔助元件
   const EditableCell = ({ value, onChange, type = "text", className = "" }: any) => (
     <input 
       type={type}
@@ -176,7 +183,7 @@ export default function MasterSchedulePage() {
       
       <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">工時計算總表</h1>
+          <h1 className="text-3xl font-bold text-white tracking-tight">各站工時查詢表</h1>
           <p className="text-purple-400 mt-1 font-mono text-sm uppercase">
             MASTER SCHEDULE // 已分組顯示 (刪除時將自動退回轉換區)
           </p>
@@ -185,7 +192,7 @@ export default function MasterSchedulePage() {
         <div className="relative w-full md:w-80">
           <input 
             type="text" 
-            placeholder="搜尋工單、品項、站點..." 
+            placeholder="搜尋工單、品項、站點、客戶..." 
             value={searchTerm}
             onChange={handleSearch}
             className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-lg block pl-4 p-2.5 focus:border-purple-500 outline-none transition-colors"
@@ -206,11 +213,9 @@ export default function MasterSchedulePage() {
                 <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono sticky top-0 z-20 shadow-lg">
                   <tr>
                     <th className="px-4 py-3 w-10 text-center">Action</th>
-                    <th className="px-4 py-3 w-36">工單編號</th>
-                    <th className="px-4 py-3 w-40">品項編碼</th>
-                    <th className="px-4 py-3 min-w-[200px]">品名</th>
-                    <th className="px-4 py-3 w-20 text-right">數量</th>
-                    <th className="px-4 py-3 w-20 text-center">盤數</th>
+                    <th className="px-4 py-3 w-48">工單資訊</th>
+                    <th className="px-4 py-3 min-w-[200px]">品項資訊 (雙層)</th>
+                    <th className="px-4 py-3 w-24 text-right">數量/盤數</th>
                     <th className="px-4 py-3 w-32">歸屬站點</th>
                     <th className="px-4 py-3">工序名稱</th>
                     <th className="px-4 py-3 text-right w-24">標準工時</th>
@@ -218,7 +223,7 @@ export default function MasterSchedulePage() {
                   </tr>
                 </thead>
                 
-                {/* 🔥 使用多個 tbody 來做分組，每個 tbody 代表一張工單 */}
+                {/* 🔥 分組顯示 */}
                 {groupedData.length === 0 ? (
                    <tbody><tr><td colSpan={10} className="p-20 text-center text-slate-600">無資料</td></tr></tbody>
                 ) : groupedData.map((group, gIndex) => (
@@ -229,9 +234,9 @@ export default function MasterSchedulePage() {
 
                       return (
                         <tr key={row.id} className="group/row">
-                          {/* 只有第一列顯示刪除按鈕 (合併儲存格概念) */}
+                          {/* 只有第一列顯示刪除按鈕 */}
                           {isFirst && (
-                            <td rowSpan={rowSpan} className="px-4 py-3 text-center align-middle border-r border-slate-800/50">
+                            <td rowSpan={rowSpan} className="px-4 py-3 text-center align-top pt-4 border-r border-slate-800/50">
                               <button 
                                 onClick={() => handleGroupDelete(group.source_order_id, group.order_number)} 
                                 className="text-slate-600 hover:text-red-400 p-2 rounded hover:bg-red-900/20 transition-all tooltip-trigger"
@@ -242,26 +247,33 @@ export default function MasterSchedulePage() {
                             </td>
                           )}
 
-                          {/* 只有第一列顯示工單資訊，讓畫面更乾淨 */}
+                          {/* 只有第一列顯示共用資訊 (雙層排版) */}
                           {isFirst && (
                             <>
-                              <td rowSpan={rowSpan} className="px-4 py-3 font-mono text-cyan-400 font-bold align-top pt-4 border-r border-slate-800/30">
-                                {group.order_number}
+                              <td rowSpan={rowSpan} className="px-4 py-3 align-top pt-4 border-r border-slate-800/30">
+                                <div className="font-mono text-cyan-400 font-bold text-base">{group.order_number}</div>
+                                <div className="text-slate-500 text-xs mt-1">{group.delivery_date}</div>
+                                <div className="text-slate-400 text-xs mt-1 truncate max-w-[150px]">{group.customer}</div>
                               </td>
-                              <td rowSpan={rowSpan} className="px-4 py-3 font-mono text-purple-300 align-top pt-4 border-r border-slate-800/30">
-                                {group.item_code}
+                              
+                              <td rowSpan={rowSpan} className="px-4 py-3 align-top pt-4 border-r border-slate-800/30">
+                                <div className="font-mono text-purple-300 text-sm mb-1">{group.item_code}</div>
+                                <div className="text-slate-300 text-sm mb-2 break-words max-w-[300px]">
+                                  <EditableCell 
+                                    value={row.item_name} 
+                                    onChange={(val: string) => handleUpdate(row.id, 'item_name', val)}
+                                  />
+                                </div>
+                                <div className="flex gap-2 text-[10px] text-slate-500 font-mono">
+                                  <span>美: {group.designer}</span>
+                                  <span>承: {group.handler}</span>
+                                  <span>開: {group.issuer}</span>
+                                </div>
                               </td>
-                              <td rowSpan={rowSpan} className="px-4 py-3 text-slate-300 align-top pt-4 border-r border-slate-800/30">
-                                <EditableCell 
-                                  value={row.item_name} 
-                                  onChange={(val: string) => handleUpdate(row.id, 'item_name', val)} // 這裡有個小缺陷：只改第一筆。若要改全組需要額外邏輯，暫維持單筆
-                                />
-                              </td>
-                              <td rowSpan={rowSpan} className="px-4 py-3 text-right font-mono text-white align-top pt-4 border-r border-slate-800/30">
-                                {row.quantity}
-                              </td>
-                              <td rowSpan={rowSpan} className="px-4 py-3 text-center text-slate-400 align-top pt-4 border-r border-slate-800/30">
-                                {row.plate_count}
+
+                              <td rowSpan={rowSpan} className="px-4 py-3 text-right align-top pt-4 border-r border-slate-800/30">
+                                <div className="font-mono text-white text-lg font-bold">{row.quantity}</div>
+                                <div className="text-slate-500 text-xs mt-1">盤: {row.plate_count || '-'}</div>
                               </td>
                             </>
                           )}

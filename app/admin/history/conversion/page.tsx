@@ -8,22 +8,33 @@ import { supabase } from '../../../../lib/supabaseClient'
 interface SourceOrder {
   id: number
   order_number: string
+  doc_type: string
   item_code: string
   item_name: string
   quantity: number
   plate_count: string
-  status: string
+  delivery_date: string
+  designer: string
   customer: string
+  handler: string
+  issuer: string
+  status: string
 }
 
 interface ConvertedRow {
   unique_id: string       
   source_order_id: number 
   order_number: string
+  doc_type: string      // 🔥 新增：寫入單據種類
   item_code: string
   item_name: string
   quantity: number
   plate_count: string
+  delivery_date: string // 🔥 新增：寫入交付日
+  designer: string      // 🔥 新增：寫入美編
+  customer: string      // 🔥 新增：寫入客戶
+  handler: string       // 🔥 新增：寫入承辦
+  issuer: string        // 🔥 新增：寫入開單
   sequence: number
   station: string
   op_name: string
@@ -76,12 +87,9 @@ export default function ConversionPage() {
   const fetchOrders = async () => {
     const { data, error } = await supabase
       .from('daily_orders')
-      .select('id, order_number, item_code, item_name, quantity, plate_count, status, customer')
-      // 🔥 條件 1: 未轉換
+      .select('id, order_number, doc_type, item_code, item_name, quantity, plate_count, delivery_date, designer, customer, handler, issuer, status')
       .is('is_converted', false) 
-      // 🔥 條件 2: 轉換狀態非失敗 (失敗的去待處理區)
       .neq('conversion_status', 'failed') 
-      // 🔥 條件 3: 訂單本身狀態不能是 Error (必須先修好)
       .neq('status', 'Error')
       .order('created_at', { ascending: false })
       .limit(500) 
@@ -90,11 +98,11 @@ export default function ConversionPage() {
     else setOrders(data || [])
   }
 
-  // 🔥 分頁讀取函式 (無限讀取直到抓完)
+  // 分頁讀取函式
   const fetchAllData = async (table: string, selectColumns: string) => {
     let allData: any[] = []
     let from = 0
-    const size = 1000 // 每次抓 1000 筆
+    const size = 1000
     
     while (true) {
       const { data, error } = await supabase
@@ -116,21 +124,16 @@ export default function ConversionPage() {
   // 2. 讀取母資料
   const fetchMasterData = async () => {
     try {
-      // A. 品項 -> 途程
       const ir = await fetchAllData('item_routes', 'item_code, route_id')
       const irMap = new Map<string, string>()
       ir.forEach((i: any) => {
         const cleanCode = (i.item_code || '').trim().toUpperCase()
         const cleanRoute = (i.route_id || '').trim()
-        if (cleanCode && cleanRoute) {
-          irMap.set(cleanCode, cleanRoute)
-        }
+        if (cleanCode && cleanRoute) irMap.set(cleanCode, cleanRoute)
       })
 
-      // B. 途程 -> 工序
       const ro = await fetchAllData('route_operations', 'route_id, sequence, op_name')
       ro.sort((a: any, b: any) => a.sequence - b.sequence)
-
       const roMap = new Map<string, any[]>()
       ro.forEach((r: any) => {
         const cleanRouteId = (r.route_id || '').trim()
@@ -140,7 +143,6 @@ export default function ConversionPage() {
         }
       })
 
-      // C. 工序 -> 工時
       const ot = await fetchAllData('operation_times', 'op_name, station, std_time_min')
       const otMap = new Map(ot.map((o: any) => [
         (o.op_name || '').trim(), 
@@ -160,7 +162,6 @@ export default function ConversionPage() {
     }
   }
 
-  // --- 互動邏輯 ---
   const toggleSelect = (id: number) => {
     const newSet = new Set(selectedIds)
     if (newSet.has(id)) newSet.delete(id)
@@ -182,7 +183,7 @@ export default function ConversionPage() {
     o.customer?.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
-  // 3. 🔥 核心：轉換運算邏輯 (包含品名、數量、盤數 + 20分鐘低消邏輯)
+  // 3. 核心轉換運算
   const handleConvert = () => {
     if (!masterData.ready) { alert('母資料載入中，請稍候...'); return }
     if (selectedIds.size === 0) { alert('請先勾選工單'); return }
@@ -196,27 +197,18 @@ export default function ConversionPage() {
     targetOrders.forEach(order => {
       const cleanItemCode = (order.item_code || '').trim().toUpperCase()
       
-      // 步驟 A: 找途程
       const routeId = masterData.itemRoutes.get(cleanItemCode)
       if (!routeId) {
-        newFailed.push({ 
-          ...order, 
-          reason: `找不到對應途程 (ItemCode: "${cleanItemCode}")` 
-        })
+        newFailed.push({ ...order, reason: `找不到對應途程 (ItemCode: "${cleanItemCode}")` })
         return
       }
 
-      // 步驟 B: 找工序
       const ops = masterData.routeOps.get(routeId)
       if (!ops || ops.length === 0) {
-        newFailed.push({ 
-          ...order, 
-          reason: `途程存在但無工序資料 (RouteID: "${routeId}")` 
-        })
+        newFailed.push({ ...order, reason: `途程存在但無工序資料 (RouteID: "${routeId}")` })
         return
       }
 
-      // 步驟 C: 逐一檢查工序
       const tempResults: ConvertedRow[] = []
       const missingOps: string[] = [] 
 
@@ -231,13 +223,11 @@ export default function ConversionPage() {
 
         const station = opInfo.station || '未知站點'
         const stdTime = opInfo.std_time || 0
-
         const qty = Number(order.quantity) || 0
         const plates = parseFloat(order.plate_count) || 0
         
         let multiplier = 0
         let basisText = ''
-        
         const isPrintOrLaser = station.includes('印刷') || station.includes('雷切')
         const isPacking = station.includes('包裝')
 
@@ -252,11 +242,8 @@ export default function ConversionPage() {
           else { multiplier = qty; basisText = `數量 (${qty})` }
         }
 
-        // 🔥 修改：基本工時邏輯
         let rawTime = stdTime * multiplier
-        if (rawTime < 20) {
-            rawTime = 20 // 未滿 20 分鐘，以 20 分鐘計
-        }
+        if (rawTime < 20) rawTime = 20
 
         const totalMin = Math.round(rawTime * 100) / 100
 
@@ -264,10 +251,16 @@ export default function ConversionPage() {
           unique_id: `${order.id}_${op.sequence}`, 
           source_order_id: order.id,             
           order_number: order.order_number,
+          doc_type: order.doc_type || '',       // 🔥 帶入值
           item_code: order.item_code,
-          item_name: order.item_name || '',     // 🔥 寫入品名
-          quantity: qty,                        // 🔥 寫入數量
-          plate_count: order.plate_count || '', // 🔥 寫入盤數
+          item_name: order.item_name || '',
+          quantity: qty,
+          plate_count: order.plate_count || '',
+          delivery_date: order.delivery_date || '', // 🔥 帶入值
+          designer: order.designer || '',           // 🔥 帶入值
+          customer: order.customer || '',           // 🔥 帶入值
+          handler: order.handler || '',             // 🔥 帶入值
+          issuer: order.issuer || '',               // 🔥 帶入值
           sequence: op.sequence,
           station: station,
           op_name: op.op_name,
@@ -294,7 +287,7 @@ export default function ConversionPage() {
     setTimeout(() => { document.getElementById('results-section')?.scrollIntoView({ behavior: 'smooth' }) }, 100)
   }
 
-  // 4. 寫入資料庫 (成功部分)
+  // 4. 寫入資料庫
   const handleSaveToDatabase = async () => {
     if (results.length === 0) return
     if (!confirm(`確定要將這 ${results.length} 筆工時資料寫入總表嗎？`)) return
@@ -303,22 +296,18 @@ export default function ConversionPage() {
     try {
       const processedOrderIds = Array.from(new Set(results.map(r => r.source_order_id)))
 
-      // 先刪除舊的轉換資料 (防止重複)
       if (processedOrderIds.length > 0) {
         await supabase.from('station_time_summary').delete().in('source_order_id', processedOrderIds)
       }
 
-      // 移除 unique_id (它是前端 React Key 用，DB 會自動生成 ID)
       const dataToInsert = results.map(({ unique_id, ...rest }) => rest)
-      
       const { error: insertError } = await supabase.from('station_time_summary').insert(dataToInsert)
       if (insertError) throw insertError
 
-      // 更新原訂單狀態為「已轉換」
       if (processedOrderIds.length > 0) {
         const { error: updateError } = await supabase
           .from('daily_orders')
-          .update({ is_converted: true, conversion_status: 'success' }) // 🔥 標記成功
+          .update({ is_converted: true, conversion_status: 'success' })
           .in('id', processedOrderIds)
         if (updateError) throw updateError
       }
@@ -338,7 +327,6 @@ export default function ConversionPage() {
     }
   }
 
-  // 🔥 5. 新增：將失敗項目移至待處理區
   const handleMoveFailedToPending = async () => {
     if (failedRows.length === 0) return
     if (!confirm(`確定要將這 ${failedRows.length} 筆失敗資料移至「待處理資料表」嗎？\n\n(這些資料將暫時從此列表中隱藏)`)) return
@@ -347,18 +335,16 @@ export default function ConversionPage() {
     try {
       const updates = failedRows.map(row => ({
         id: row.id,
-        conversion_status: 'failed', // 🔥 標記為失敗 -> 會被 fetchOrders 過濾掉
-        conversion_note: row.reason  // 🔥 紀錄原因
+        conversion_status: 'failed',
+        conversion_note: row.reason
       }))
 
-      // 使用 upsert 批量更新
       const { error } = await supabase.from('daily_orders').upsert(updates)
-      
       if (error) throw error
 
       alert(`✅ 已成功將 ${failedRows.length} 筆資料移至待處理區。`)
-      setFailedRows([]) // 清空前端失敗清單
-      fetchOrders() // 重新讀取，剛才那些就會消失了
+      setFailedRows([])
+      fetchOrders() 
 
     } catch (err: any) {
       console.error(err)
@@ -392,24 +378,48 @@ export default function ConversionPage() {
               <thead className="bg-slate-950 text-slate-400 font-mono sticky top-0 z-10">
                 <tr>
                   <th className="p-3 w-10 text-center"><input type="checkbox" onChange={toggleSelectAll} checked={selectedIds.size > 0 && selectedIds.size === filteredOrders.length} /></th>
-                  <th className="p-3">工單編號</th>
-                  <th className="p-3">品項編碼</th>
-                  <th className="p-3">品名</th>
-                  <th className="p-3 text-right">數量</th>
-                  <th className="p-3 text-center">盤數</th>
-                  <th className="p-3">客戶</th>
+                  <th className="p-3">工單資訊</th>
+                  <th className="p-3">品項資訊</th>
+                  <th className="p-3 text-right">數量/盤數</th>
+                  <th className="p-3">交付與客戶</th>
+                  <th className="p-3">內部人員</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
-                {loading ? ( <tr><td colSpan={7} className="p-10 text-center">載入中...</td></tr> ) : filteredOrders.length === 0 ? ( <tr><td colSpan={7} className="p-10 text-center text-slate-500">目前沒有待處理的工單</td></tr> ) : filteredOrders.map(order => (
+                {loading ? ( <tr><td colSpan={6} className="p-10 text-center">載入中...</td></tr> ) : filteredOrders.length === 0 ? ( <tr><td colSpan={6} className="p-10 text-center text-slate-500">目前沒有待處理的工單 (無 Error 狀態訂單)</td></tr> ) : filteredOrders.map(order => (
                   <tr key={order.id} className={`hover:bg-slate-800/60 cursor-pointer ${selectedIds.has(order.id) ? 'bg-yellow-900/10' : ''}`} onClick={() => toggleSelect(order.id)}>
-                    <td className="p-3 text-center" onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedIds.has(order.id)} onChange={() => toggleSelect(order.id)} /></td>
-                    <td className="p-3 font-mono text-cyan-300">{order.order_number}</td>
-                    <td className="p-3 font-mono text-purple-300">{order.item_code}</td>
-                    <td className="p-3 text-slate-400 truncate max-w-[200px]">{order.item_name}</td>
-                    <td className="p-3 text-right font-bold text-white">{order.quantity}</td>
-                    <td className="p-3 text-center text-slate-400">{order.plate_count || '-'}</td>
-                    <td className="p-3 text-slate-500">{order.customer}</td>
+                    {/* 勾選 */}
+                    <td className="p-3 text-center align-top pt-4" onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedIds.has(order.id)} onChange={() => toggleSelect(order.id)} /></td>
+                    
+                    {/* 工單資訊：編號 + 種類 */}
+                    <td className="p-3 align-top">
+                      <div className="font-mono text-cyan-300 font-bold text-sm">{order.order_number}</div>
+                      <div className="text-slate-500 text-[10px] mt-1">{order.doc_type}</div>
+                    </td>
+
+                    {/* 品項資訊：編碼 + 品名 */}
+                    <td className="p-3 align-top max-w-[250px]">
+                      <div className="font-mono text-purple-300 text-sm">{order.item_code}</div>
+                      <div className="text-slate-400 text-xs mt-1 leading-tight truncate">{order.item_name}</div>
+                    </td>
+
+                    {/* 數量/盤數 */}
+                    <td className="p-3 align-top text-right">
+                      <div className="font-bold text-white text-sm">{order.quantity}</div>
+                      <div className="text-slate-500 text-xs mt-1">盤: {order.plate_count || '-'}</div>
+                    </td>
+
+                    {/* 交付與客戶 */}
+                    <td className="p-3 align-top">
+                      <div className="font-mono text-white text-xs">{order.delivery_date}</div>
+                      <div className="text-slate-500 text-xs mt-1 truncate max-w-[100px]">{order.customer}</div>
+                    </td>
+
+                    {/* 內部人員 */}
+                    <td className="p-3 align-top text-xs text-slate-400">
+                      <div className="flex gap-2"><span>美: {order.designer}</span> <span>承: {order.handler}</span></div>
+                      <div className="mt-1">開: {order.issuer}</div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -445,7 +455,7 @@ export default function ConversionPage() {
                   <tr>
                     <th className="p-4 border-b border-slate-700">工單編號</th>
                     <th className="p-4 border-b border-slate-700">品項編碼</th>
-                    <th className="p-4 border-b border-slate-700 w-48">品名</th> {/* 新增欄位顯示 */}
+                    <th className="p-4 border-b border-slate-700 w-48">品名</th>
                     <th className="p-4 border-b border-slate-700 text-center">序</th>
                     <th className="p-4 border-b border-slate-700">站點</th>
                     <th className="p-4 border-b border-slate-700">工序名稱</th>
