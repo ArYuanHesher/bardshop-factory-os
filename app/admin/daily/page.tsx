@@ -437,7 +437,7 @@ export default function DailyOperationsPage() {
       
       <div className="flex flex-col md:flex-row justify-between items-end mb-4 gap-4 px-1">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">每日訂單作業</h1>
+          <h1 className="text-3xl font-bold text-white tracking-tight">訂單更新表</h1>
           <p className="text-cyan-500/80 mt-1 font-mono text-sm uppercase">
             DAILY OPERATIONS // 完整資料檢核 (NO TIME CALC)
           </p>

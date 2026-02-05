@@ -361,7 +361,7 @@ export default function ConversionPage() {
       <div className="flex flex-col gap-4">
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">各站工時轉換</h1>
+            <h1 className="text-3xl font-bold text-white tracking-tight">各站工時轉換表</h1>
             <p className="text-yellow-500 mt-1 font-mono text-sm uppercase">
               TIME CONVERSION CALCULATOR // 待處理工單
             </p>

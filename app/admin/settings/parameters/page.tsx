@@ -38,7 +38,7 @@ export default function ParametersPage() {
     <div className="p-6 md:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-end gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">產程參數設定</h1>
+          <h1 className="text-3xl font-bold text-white tracking-tight">環境參數設定</h1>
           <p className="text-orange-500 mt-1 font-mono text-sm uppercase">
             SYSTEM CONFIGURATION // 機台產能與行事曆
           </p>
