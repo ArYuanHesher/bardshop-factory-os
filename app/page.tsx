@@ -147,8 +147,8 @@ export default function LandingPage() {
         {/* 雙入口選擇器 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
           
-          {/* 左側：產線看板 */}
-          <Link href="/admin/schedule" 
+          {/* 左側：產線看板 (連結已修正 🔥) */}
+          <Link href="/dashboard" 
             onMouseEnter={() => setIsHovered('production')}
             onMouseLeave={() => setIsHovered('none')}
             className={`

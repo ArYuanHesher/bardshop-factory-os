@@ -1,36 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link' // 🔥 新增 Link 引入
 import { supabase } from '../lib/supabaseClient'
-import { DndContext, useDraggable, useDroppable, DragOverlay } from '@dnd-kit/core'
-import { CSS } from '@dnd-kit/utilities'
 
-// --- 1. 小元件：可拖曳的任務卡片 ---
-function DraggableTask({ task, isOverlay = false }: { task: any, isOverlay?: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: task.id.toString(),
-    data: { task }
-  })
-
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    opacity: isDragging ? 0.3 : 1,
-  }
-
+// --- 1. 純顯示的任務卡片 (無拖拉功能) ---
+function TaskCard({ task }: { task: any }) {
   return (
-    <div 
-      ref={setNodeRef} 
-      style={style} 
-      {...listeners} 
-      {...attributes}
-      className={`
-        p-2 mb-2 rounded border shadow-sm cursor-grab active:cursor-grabbing text-xs select-none relative group
-        ${isOverlay 
-          ? 'bg-cyan-900 border-cyan-500 scale-105 z-50 shadow-2xl ring-2 ring-cyan-400 w-48' 
-          : 'bg-slate-800 border-slate-700 hover:border-cyan-500/50 hover:bg-slate-700'
-        }
-      `}
-    >
+    <div className="p-2 mb-2 rounded border shadow-sm bg-slate-800 border-slate-700 text-xs select-none relative group hover:border-cyan-500/30 transition-colors">
       <div className="flex justify-between items-start mb-0.5">
         <span className="font-mono text-cyan-400 font-bold text-[10px]">{task.order_number}</span>
         <span className="text-[9px] bg-slate-900 px-1 rounded text-slate-400">{task.total_time_min}m</span>
@@ -41,8 +18,8 @@ function DraggableTask({ task, isOverlay = false }: { task: any, isOverlay?: boo
   )
 }
 
-// --- 2. 小元件：行事曆格子 (高度調整為 8.5 筆) ---
-function DroppableDay({ 
+// --- 2. 純顯示的行事曆格子 ---
+function DayColumn({ 
   date, 
   tasks, 
   title, 
@@ -57,22 +34,14 @@ function DroppableDay({
   isToday: boolean,
   dailyCapacity: number 
 }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: date, 
-    disabled: !isMachineSelected 
-  })
-
   const usedMins = tasks.reduce((sum, t) => sum + t.total_time_min, 0)
   const remainingMins = dailyCapacity - usedMins
   const isOverloaded = remainingMins < 0
 
   return (
-    <div 
-      ref={setNodeRef}
-      className={`
+    <div className={`
         flex-1 min-w-[160px] border-r border-slate-700/50 flex flex-col transition-colors relative
-        ${isOver ? 'bg-cyan-900/20 shadow-[inset_0_0_20px_rgba(6,182,212,0.2)]' : 'bg-transparent'}
-        ${!isMachineSelected ? 'bg-slate-950/50 cursor-not-allowed' : ''}
+        ${!isMachineSelected ? 'bg-slate-950/50' : 'bg-transparent'}
         ${isToday ? 'bg-slate-800/30' : ''}
       `}
     >
@@ -102,47 +71,49 @@ function DroppableDay({
         </div>
       </div>
 
-      {/* 任務列表區 (高度增加) */}
-      {/* h-[500px] 大約可以放 8.5 個 task */}
-      <div className="relative flex-1 group/container">
-        <div className="p-2 overflow-y-auto custom-scrollbar h-[500px] min-h-[500px] pb-6">
-          {tasks.map(task => (
-            <DraggableTask key={task.id} task={task} />
-          ))}
-          
-          {tasks.length === 0 && (
-            <div className="h-full flex items-center justify-center text-slate-700 text-[10px] italic opacity-50 border-2 border-dashed border-slate-800/50 rounded m-1">
-              {isMachineSelected ? '+' : '停止'}
-            </div>
-          )}
-        </div>
-
-        {/* 底部提示 */}
-        {tasks.length > 8 && (
-            <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black to-transparent pointer-events-none flex justify-center items-end pb-1">
-                <span className="text-[9px] text-cyan-400 bg-black/60 px-2 rounded-full border border-cyan-900/50 backdrop-blur-md">
-                   ⬇️ 還有 {tasks.length - 8} 筆...
-                </span>
-            </div>
+      {/* 任務列表區 (純顯示) */}
+      <div className="p-2 overflow-y-auto custom-scrollbar h-[500px] min-h-[500px] pb-6">
+        {tasks.map(task => (
+          <TaskCard key={task.id} task={task} />
+        ))}
+        {tasks.length === 0 && (
+          <div className="h-full flex items-center justify-center text-slate-700 text-[10px] italic opacity-50">
+             - 空閒 -
+          </div>
         )}
       </div>
+
+      {/* 底部提示 */}
+      {tasks.length > 8 && (
+        <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-black to-transparent pointer-events-none flex justify-center items-end pb-1">
+            <span className="text-[9px] text-cyan-400 bg-black/60 px-2 rounded-full border border-cyan-900/50 backdrop-blur-md">
+                ⬇️ 還有 {tasks.length - 8} 筆...
+            </span>
+        </div>
+      )}
     </div>
   )
 }
 
-// --- 3. 主框架元件 ---
-export default function ProductionScheduler({ sectionId, sectionName }: { sectionId: string, sectionName: string }) {
+// --- 3. 主框架 (唯讀版) ---
+export default function ProductionViewer({ sectionId, sectionName }: { sectionId: string, sectionName: string }) {
   const [tasks, setTasks] = useState<any[]>([])
   const [machines, setMachines] = useState<any[]>([])
   const [selectedMachineId, setSelectedMachineId] = useState<number | null>(null)
-  
   const [loading, setLoading] = useState(true)
-  const [activeDragItem, setActiveDragItem] = useState<any>(null)
 
-  // 日期與顯示控制
+  // 日期控制
   const [currentStart, setCurrentStart] = useState(new Date())
   const [showWeekends, setShowWeekends] = useState(false)
-  const [showNextWeek, setShowNextWeek] = useState(false) // 🔥 預設隱藏下週
+  const [showNextWeek, setShowNextWeek] = useState(false)
+
+  // 自動重整
+  useEffect(() => {
+    const interval = setInterval(() => {
+        fetchTasks()
+    }, 60000) // 60秒自動更新
+    return () => clearInterval(interval)
+  }, [sectionId, selectedMachineId])
 
   useEffect(() => {
     const d = new Date()
@@ -153,15 +124,9 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
     setCurrentStart(new Date(d))
   }, [])
 
-  // 1. 讀取機台
   useEffect(() => {
     const fetchMachines = async () => {
-      const { data } = await supabase
-        .from('production_machines') 
-        .select('*')
-        .eq('section_id', sectionId)
-        .order('id')
-      
+      const { data } = await supabase.from('production_machines').select('*').eq('section_id', sectionId).order('id')
       if (data && data.length > 0) {
         setMachines(data)
         setSelectedMachineId(data[0].id)
@@ -173,18 +138,13 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
     fetchMachines()
   }, [sectionId])
 
-  // 2. 讀取任務
   useEffect(() => {
     fetchTasks()
   }, [sectionId, selectedMachineId])
 
   const fetchTasks = async () => {
     setLoading(true)
-    let query = supabase
-      .from('station_time_summary')
-      .select('*')
-      .eq('assigned_section', sectionId)
-
+    let query = supabase.from('station_time_summary').select('*').eq('assigned_section', sectionId)
     const { data, error } = await query
     if (error) console.error(error)
     else setTasks(data || [])
@@ -201,9 +161,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
       const d = new Date(start)
       d.setDate(start.getDate() + i)
       const dayOfWeek = d.getDay()
-      if (!showWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) {
-        continue
-      }
+      if (!showWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) continue
       arr.push(d.toISOString().split('T')[0])
     }
     return arr
@@ -214,63 +172,13 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   const week1Dates = allDates.slice(0, daysPerWeek)
   const week2Dates = allDates.slice(daysPerWeek, daysPerWeek * 2)
 
-  const handleDragEnd = async (event: any) => {
-    const { active, over } = event
-    setActiveDragItem(null)
-    if (!over) return
-
-    const taskId = active.id
-    const targetDate = over.id 
-
-    if (targetDate !== 'unscheduled' && !selectedMachineId) {
-      alert('請先選擇機台！')
-      return
-    }
-
-    const isReverting = targetDate === 'unscheduled'
-
-    setTasks(prev => prev.map(t => {
-      if (t.id.toString() === taskId) {
-        return { 
-          ...t, 
-          scheduled_date: isReverting ? null : targetDate,
-          production_machine_id: isReverting ? null : selectedMachineId 
-        }
-      }
-      return t
-    }))
-
-    const updatePayload = { 
-      scheduled_date: isReverting ? null : targetDate,
-      production_machine_id: isReverting ? null : selectedMachineId
-    }
-    
-    await supabase.from('station_time_summary').update(updatePayload).eq('id', taskId)
-  }
-
-  const handleDragStart = (event: any) => {
-    setActiveDragItem(event.active.data.current.task)
-  }
-
   const changeWeek = (offset: number) => {
     const newStart = new Date(currentStart)
     newStart.setDate(newStart.getDate() + (offset * 7))
     setCurrentStart(newStart)
-    setShowNextWeek(false) // 切換週次時，重置為收合狀態
+    setShowNextWeek(false)
   }
 
-  const handleDatePick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const date = new Date(e.target.value)
-    if (!isNaN(date.getTime())) {
-      const day = date.getDay()
-      const diff = date.getDate() - day + (day === 0 ? -6 : 1) 
-      date.setDate(diff)
-      setCurrentStart(new Date(date))
-      setShowNextWeek(false)
-    }
-  }
-
-  const unscheduledTasks = tasks.filter(t => !t.scheduled_date)
   const getTasksForDate = (date: string) => {
     if (!selectedMachineId) return []
     return tasks.filter(t => t.scheduled_date === date && t.production_machine_id === selectedMachineId)
@@ -279,32 +187,47 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   const todayStr = new Date().toISOString().split('T')[0]
 
   return (
-    <DndContext onDragEnd={handleDragEnd} onDragStart={handleDragStart}>
-      <div className="flex flex-col h-[calc(100vh-80px)] overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-80px)] overflow-hidden">
         
-        {/* === Header 區塊 === */}
+        {/* Header */}
         <div className="flex flex-col gap-3 mb-2 px-1">
             <div className="flex justify-between items-center bg-slate-900/50 p-2 rounded-lg border border-slate-700">
                 <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold text-white whitespace-nowrap mr-2">{sectionName}</h2>
+                    <span className="text-xs font-bold bg-orange-600 text-white px-2 py-1 rounded">唯讀模式</span>
+                    <h2 className="text-xl font-bold text-white whitespace-nowrap mr-2">{sectionName} 看板</h2>
+                    
+                    {/* 日期導航 */}
                     <div className="flex items-center gap-2 bg-black/30 rounded-lg p-1 border border-slate-700">
                         <button onClick={() => changeWeek(-1)} className="p-1 hover:text-cyan-400 text-slate-400 transition-colors">
                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                         </button>
-                        <input 
-                          type="date" 
-                          value={currentStart.toISOString().split('T')[0]}
-                          onChange={handleDatePick}
-                          className="bg-transparent text-white text-sm font-bold border-none outline-none focus:ring-0 w-32 text-center"
-                        />
+                        <span className="text-white text-sm font-bold w-32 text-center font-mono">
+                           {currentStart.toISOString().split('T')[0]}
+                        </span>
                         <button onClick={() => changeWeek(1)} className="p-1 hover:text-cyan-400 text-slate-400 transition-colors">
                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                         </button>
                     </div>
+
+                    {/* 🔥 新增：返回首頁按鈕 */}
+                    <Link 
+                      href="/dashboard" 
+                      className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-cyan-500/50 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition-all group"
+                    >
+                      <svg className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                      </svg>
+                      看板首頁
+                    </Link>
                 </div>
 
                 <div className="flex items-center gap-3">
-                   <label className="flex items-center cursor-pointer gap-2">
+                    {/* Auto Refresh Indicator */}
+                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                        Live Sync
+                    </span>
+                    <label className="flex items-center cursor-pointer gap-2">
                       <div className="relative">
                         <input type="checkbox" className="sr-only" checked={showWeekends} onChange={() => setShowWeekends(!showWeekends)} />
                         <div className={`block w-10 h-6 rounded-full transition-colors ${showWeekends ? 'bg-cyan-600' : 'bg-slate-700'}`}></div>
@@ -339,13 +262,10 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
             </div>
         </div>
 
-        {/* === Main Content === */}
+        {/* Content - 只有左側行事曆，移除右側待排區 */}
         <div className="flex flex-1 gap-4 overflow-hidden">
-            
-            {/* 左側：行事曆主區 */}
             <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-1 pb-4 custom-scrollbar">
-                
-                {/* 第一週 Row (永遠顯示) */}
+                {/* 第一週 */}
                 <div className="flex flex-col bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden shadow-xl shrink-0">
                     <div className="bg-slate-950 px-3 py-1.5 border-b border-slate-800 flex justify-between">
                        <span className="text-xs font-bold text-cyan-400 flex items-center gap-2">
@@ -355,7 +275,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                     </div>
                     <div className="flex divide-x divide-slate-800 overflow-x-auto">
                         {week1Dates.map((date) => (
-                          <DroppableDay 
+                          <DayColumn 
                               key={date} 
                               date={date} 
                               tasks={getTasksForDate(date)} 
@@ -368,7 +288,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                     </div>
                 </div>
 
-                {/* 第二週 Row (條件顯示) */}
+                {/* 第二週 */}
                 {showNextWeek ? (
                     <div className="flex flex-col bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden shadow-xl shrink-0 animate-fade-in">
                         <div className="bg-slate-950 px-3 py-1.5 border-b border-slate-800 flex justify-between">
@@ -382,7 +302,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                         </div>
                         <div className="flex divide-x divide-slate-800 overflow-x-auto">
                             {week2Dates.map((date) => (
-                            <DroppableDay 
+                            <DayColumn 
                                 key={date} 
                                 date={date} 
                                 tasks={getTasksForDate(date)} 
@@ -395,7 +315,6 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                         </div>
                     </div>
                 ) : (
-                    // 🔥 展開下週按鈕
                     <button 
                         onClick={() => setShowNextWeek(true)}
                         className="w-full py-3 rounded-xl border border-dashed border-slate-700 text-slate-500 hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-950/20 transition-all text-xs font-mono flex items-center justify-center gap-2"
@@ -403,47 +322,8 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                         <span>⬇️ 載入下週排程 (Show Next Week)</span>
                     </button>
                 )}
-
             </div>
-
-            {/* 右側：待排任務箱 */}
-            <div className="w-72 flex flex-col bg-slate-950 border border-slate-800 rounded-xl shadow-2xl">
-                <div className="p-3 border-b border-slate-800 bg-slate-900/50">
-                    <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                        <svg className="w-4 h-4 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
-                        待排任務 ({unscheduledTasks.length})
-                    </h3>
-                </div>
-                <UnscheduledDroppable tasks={unscheduledTasks} />
-            </div>
-
         </div>
-      </div>
-
-      <DragOverlay>
-        {activeDragItem ? <DraggableTask task={activeDragItem} isOverlay /> : null}
-      </DragOverlay>
-    </DndContext>
-  )
-}
-
-function UnscheduledDroppable({ tasks }: { tasks: any[] }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: 'unscheduled',
-  })
-
-  return (
-    <div 
-      ref={setNodeRef} 
-      className={`flex-1 p-2 overflow-y-auto custom-scrollbar transition-colors ${isOver ? 'bg-red-900/10' : ''}`}
-    >
-      {tasks.length === 0 ? (
-        <div className="text-center text-slate-600 mt-10 text-xs">
-            <p>無待排任務</p>
-        </div>
-      ) : (
-        tasks.map(task => <DraggableTask key={task.id} task={task} />)
-      )}
     </div>
   )
 }
