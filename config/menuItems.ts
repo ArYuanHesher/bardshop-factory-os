@@ -58,6 +58,18 @@ export const NAV_GROUPS = [
     ]
   },
   {
+    title: '產線排程看板', // 新分類
+    theme: 'purple',
+    items: [
+      { name: '印刷排程', path: '/admin/production/printing', icon: '...' },
+      { name: '雷切排程', path: '/admin/production/laser', icon: '...' },
+      { name: '後加工排程', path: '/admin/production/post', icon: '...' },
+      { name: '包裝排程', path: '/admin/production/packaging', icon: '...' },
+      { name: '委外排程', path: '/admin/production/outsourced', icon: '...' },
+      { name: '常平排程', path: '/admin/production/changping', icon: '...' },
+   ]
+  },
+  {
     title: '工序資料庫',
     theme: 'green',
     items: [

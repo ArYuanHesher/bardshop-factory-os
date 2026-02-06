@@ -22,6 +22,7 @@ interface PendingItem {
   op_name: string
   station: string
   total_time_min: number
+  sequence: number // 🔥 確保介面有 sequence
   created_at: string
 }
 
@@ -49,6 +50,12 @@ export default function SchedulePendingPage() {
   const [saving, setSaving] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
 
+  // 新增工序 Modal 狀態
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [targetGroup, setTargetGroup] = useState<GroupedPendingOrder | null>(null)
+  // insertAfterId: 'start' 代表插在最前面，數值代表插在該 ID 後面
+  const [newOpData, setNewOpData] = useState({ station: '後加工', op_name: '', total_time_min: 20, insertAfterId: 'end' })
+
   useEffect(() => {
     fetchPendingData()
   }, [])
@@ -59,15 +66,14 @@ export default function SchedulePendingPage() {
     const { data: rawData, error } = await supabase
       .from('station_time_summary')
       .select('*')
-      .is('assigned_section', null) // 只抓未分配
+      .is('assigned_section', null)
       .order('created_at', { ascending: false })
-      .order('source_order_id', { ascending: true }) // 確保同源ID在一起
-      .order('id', { ascending: true })
+      .order('source_order_id', { ascending: true })
+      .order('sequence', { ascending: true }) // 🔥 確保按照 sequence 排序
     
     if (error) {
       console.error(error)
     } else {
-      // 進行資料分組
       const groups: GroupedPendingOrder[] = []
       const map = new Map<number, GroupedPendingOrder>()
 
@@ -93,6 +99,8 @@ export default function SchedulePendingPage() {
         }
         map.get(row.source_order_id)?.items.push(row)
       })
+      // 確保每個 group 內的 items 再次依照 sequence 排序 (雙重保險)
+      groups.forEach(g => g.items.sort((a, b) => a.sequence - b.sequence))
       setGroupedData(groups)
     }
     setLoading(false)
@@ -103,36 +111,170 @@ export default function SchedulePendingPage() {
     if (!searchTerm) return groupedData
     const lowerTerm = searchTerm.toLowerCase()
     
-    // 只要 Group 內的任何資訊符合，整組都會顯示
     return groupedData.filter(group => 
       group.order_number.toLowerCase().includes(lowerTerm) ||
       group.item_code.toLowerCase().includes(lowerTerm) ||
       group.item_name.toLowerCase().includes(lowerTerm) ||
       group.customer.toLowerCase().includes(lowerTerm) ||
-      // 甚至搜尋工序名稱 (例如搜尋 "雷切" 顯示含有雷切工序的單)
       group.items.some(item => item.op_name.toLowerCase().includes(lowerTerm) || item.station.toLowerCase().includes(lowerTerm))
     )
   }, [groupedData, searchTerm])
 
-  // 3. 🔥 選擇邏輯 (支援取消選取 Toggle)
+  // 3. 選擇邏輯
   const handleSelect = (rowId: number, sectionId: string) => {
     setSelections(prev => {
       const currentSelection = prev[rowId]
       const newSelections = { ...prev }
-
-      if (currentSelection === sectionId) {
-        // 如果點擊的是已經選取的項目 -> 移除選擇 (取消)
-        delete newSelections[rowId]
-      } else {
-        // 否則 -> 設定為新的選擇
-        newSelections[rowId] = sectionId
-      }
-      
+      if (currentSelection === sectionId) delete newSelections[rowId]
+      else newSelections[rowId] = sectionId
       return newSelections
     })
   }
 
-  // 4. 批量確認邏輯 (Floating Button Action)
+  // 4. 更新工時邏輯
+  const handleTimeUpdate = async (itemId: number, newValue: string) => {
+    const numValue = parseFloat(newValue)
+    if (isNaN(numValue)) return
+
+    setGroupedData(prev => prev.map(group => ({
+      ...group,
+      items: group.items.map(item => item.id === itemId ? { ...item, total_time_min: numValue } : item)
+    })))
+
+    const { error } = await supabase
+      .from('station_time_summary')
+      .update({ total_time_min: numValue })
+      .eq('id', itemId)
+
+    if (error) {
+      console.error('Update time failed:', error)
+      alert('更新工時失敗，請重試')
+    }
+  }
+
+  // 5. 刪除工序邏輯
+  const handleDeleteOp = async (itemId: number, opName: string) => {
+    if (!confirm(`確定要刪除工序「${opName}」嗎？\n此動作將直接從資料庫移除該項目。`)) return
+
+    setGroupedData(prev => {
+      return prev.map(group => ({
+        ...group,
+        items: group.items.filter(item => item.id !== itemId)
+      })).filter(group => group.items.length > 0)
+    })
+
+    const { error } = await supabase
+      .from('station_time_summary')
+      .delete()
+      .eq('id', itemId)
+
+    if (error) {
+      alert('刪除失敗: ' + error.message)
+      fetchPendingData()
+    }
+  }
+
+  // 6. 開啟新增視窗
+  const openAddModal = (group: GroupedPendingOrder) => {
+    setTargetGroup(group)
+    // 預設插在最後面 (end)
+    setNewOpData({ station: '後加工', op_name: '', total_time_min: 30, insertAfterId: 'end' })
+    setShowAddModal(true)
+  }
+
+  // 7. 🔥 提交新增工序 (含自動重新排序邏輯)
+  const handleAddOpSubmit = async () => {
+    if (!targetGroup) return
+    if (!newOpData.op_name) return alert('請輸入工序名稱')
+
+    setSaving(true)
+
+    // A. 準備新工序的資料物件 (不含 sequence，稍後計算)
+    const newRowBase = {
+      source_order_id: targetGroup.source_order_id,
+      order_number: targetGroup.order_number,
+      doc_type: targetGroup.doc_type,
+      item_code: targetGroup.item_code,
+      item_name: targetGroup.item_name,
+      quantity: targetGroup.quantity,
+      plate_count: targetGroup.plate_count,
+      delivery_date: targetGroup.delivery_date,
+      designer: targetGroup.designer,
+      customer: targetGroup.customer,
+      handler: targetGroup.handler,
+      issuer: targetGroup.issuer,
+      station: newOpData.station,
+      op_name: newOpData.op_name,
+      total_time_min: newOpData.total_time_min,
+      std_time: 0,
+      assigned_section: null
+    }
+
+    try {
+      // B. 記憶體中重新排序 (Re-indexing Strategy)
+      // 1. 複製現有工序
+      const currentItems = [...targetGroup.items]
+      
+      // 2. 決定插入點索引
+      let insertIndex = currentItems.length // 預設最後
+      if (newOpData.insertAfterId === 'start') {
+        insertIndex = 0
+      } else if (newOpData.insertAfterId !== 'end') {
+        const foundIndex = currentItems.findIndex(item => item.id === Number(newOpData.insertAfterId))
+        if (foundIndex !== -1) insertIndex = foundIndex + 1
+      }
+
+      // 3. 插入新項目 (暫時用假ID標記，稍後DB會給真ID)
+      // 這裡我們不需要真的把物件放進去給 DB，我們只需要算出每個舊項目應該變成什麼序號
+      // 以及新項目應該是什麼序號
+      
+      // 策略：直接全部重給序號 10, 20, 30...
+      const updates = []
+      
+      // 3.1 先處理舊項目 (上半部)
+      for (let i = 0; i < insertIndex; i++) {
+        updates.push({ id: currentItems[i].id, sequence: (i + 1) * 10 })
+      }
+      
+      // 3.2 這是新項目的序號
+      const newRowSequence = (insertIndex + 1) * 10 
+
+      // 3.3 再處理舊項目 (下半部)
+      for (let i = insertIndex; i < currentItems.length; i++) {
+        updates.push({ id: currentItems[i].id, sequence: (i + 2) * 10 })
+      }
+
+      // C. 執行資料庫操作 (平行處理)
+      const tasks = []
+
+      // 1. 更新舊項目的序號
+      if (updates.length > 0) {
+        // 為了效能，我們可以一筆一筆 update，或者用 upsert (如果資料量大)
+        // 這裡因為單量不大，用 Promise.all update 比較簡單直覺
+        updates.forEach(u => {
+          tasks.push(supabase.from('station_time_summary').update({ sequence: u.sequence }).eq('id', u.id))
+        })
+      }
+
+      // 2. 插入新項目
+      tasks.push(supabase.from('station_time_summary').insert({ ...newRowBase, sequence: newRowSequence }))
+
+      await Promise.all(tasks)
+
+      // D. 完成
+      setShowAddModal(false)
+      fetchPendingData() // 重新讀取以顯示正確排序
+      alert('工序新增並重新排序完成！')
+
+    } catch (err: any) {
+      console.error(err)
+      alert('新增失敗: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 8. 批量確認邏輯
   const handleBatchConfirm = async () => {
     const selectedIds = Object.keys(selections).map(Number)
     if (selectedIds.length === 0) return
@@ -142,7 +284,6 @@ export default function SchedulePendingPage() {
     setSaving(true)
     
     const updatesBySection: Record<string, number[]> = {}
-    
     selectedIds.forEach(id => {
       const section = selections[id]
       if (!updatesBySection[section]) updatesBySection[section] = []
@@ -159,7 +300,6 @@ export default function SchedulePendingPage() {
 
       await Promise.all(promises)
 
-      // 更新成功，從前端移除這些資料
       setGroupedData(prev => {
         return prev.map(group => ({
           ...group,
@@ -178,7 +318,6 @@ export default function SchedulePendingPage() {
     }
   }
 
-  // 計算已選擇的數量 (用於懸浮按鈕顯示)
   const selectedCount = Object.keys(selections).length
 
   const getStationBadge = (station: string) => {
@@ -198,22 +337,17 @@ export default function SchedulePendingPage() {
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">生產待排表</h1>
           <p className="text-yellow-500 mt-1 font-mono text-sm uppercase">
-            PENDING SCHEDULE // 請分配生產區塊 (支援批量)
+            PENDING SCHEDULE // 新增/刪除/分配工序
           </p>
         </div>
         <div className="relative w-full md:w-96">
           <input 
             type="text" 
-            placeholder="搜尋關鍵字 (工單、客戶、雷切...)" 
+            placeholder="搜尋關鍵字..." 
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-lg block pl-4 p-2.5 focus:border-yellow-500 outline-none transition-colors shadow-lg"
           />
-          {searchTerm && (
-            <div className="absolute right-3 top-2.5 text-xs text-slate-500">
-              Filter Active
-            </div>
-          )}
         </div>
       </div>
 
@@ -227,25 +361,24 @@ export default function SchedulePendingPage() {
                 <th className="px-4 py-3 min-w-[200px] border-b border-slate-700">品項資訊 (分組)</th>
                 <th className="px-4 py-3 w-24 text-right border-b border-slate-700">數量/盤數</th>
                 <th className="px-4 py-3 w-40 border-b border-slate-700">工序與站點</th>
-                <th className="px-4 py-3 w-24 text-right border-b border-slate-700 text-emerald-400">預計總時</th>
-                <th className="px-4 py-3 min-w-[280px] text-center border-b border-slate-700">分配區塊 (點擊選擇)</th>
+                <th className="px-4 py-3 w-32 text-right border-b border-slate-700 text-emerald-400">預計總時</th>
+                <th className="px-4 py-3 min-w-[280px] text-center border-b border-slate-700">分配區塊</th>
+                <th className="px-4 py-3 w-16 text-center border-b border-slate-700">操作</th>
               </tr>
             </thead>
             
-            {/* 分組顯示邏輯 */}
             {loading ? (
-               <tbody><tr><td colSpan={6} className="p-20 text-center text-slate-500">載入中...</td></tr></tbody>
+               <tbody><tr><td colSpan={7} className="p-20 text-center text-slate-500">載入中...</td></tr></tbody>
             ) : filteredGroups.length === 0 ? (
-               <tbody><tr><td colSpan={6} className="p-20 text-center text-slate-600">無符合條件的待排資料</td></tr></tbody>
+               <tbody><tr><td colSpan={7} className="p-20 text-center text-slate-600">無符合條件的待排資料</td></tr></tbody>
             ) : filteredGroups.map((group, gIndex) => (
               <tbody key={group.source_order_id} className={`border-b border-slate-700/50 ${gIndex % 2 === 0 ? 'bg-slate-900/20' : 'bg-transparent'} hover:bg-slate-800/30 transition-colors`}>
                 {group.items.map((row, index) => {
                   const isFirst = index === 0
-                  const rowSpan = group.items.length
+                  const rowSpan = group.items.length + 1 
 
                   return (
                     <tr key={row.id} className="group/row">
-                      {/* 共用資訊欄位 (第一列顯示，RowSpan合併) */}
                       {isFirst && (
                         <>
                           <td rowSpan={rowSpan} className="px-4 py-3 align-top border-r border-slate-800/30 pt-4">
@@ -282,21 +415,28 @@ export default function SchedulePendingPage() {
                         </>
                       )}
 
-                      {/* 獨立工序資訊 */}
                       <td className="px-4 py-3 align-top border-r border-slate-800/30">
                         <div className="text-slate-300 font-bold mb-1">{row.op_name}</div>
                         <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold mt-1 ${getStationBadge(row.station)}`}>
                           {row.station}
                         </span>
+                        {/* 顯示目前序號以便確認 */}
+                        <span className="ml-2 text-[9px] text-slate-600 font-mono">#{row.sequence}</span>
                       </td>
 
                       <td className="px-4 py-3 align-top text-right border-r border-slate-800/30">
-                        <span className="font-mono text-xl font-bold text-emerald-400">{row.total_time_min}</span>
-                        <span className="text-xs text-emerald-600 block mt-1">mins</span>
+                        <div className="flex flex-col items-end">
+                          <input 
+                            type="number"
+                            value={row.total_time_min}
+                            onChange={(e) => handleTimeUpdate(row.id, e.target.value)}
+                            className="bg-transparent border-b border-slate-700 hover:border-emerald-500 focus:border-emerald-400 focus:bg-slate-800 outline-none w-20 text-right font-mono text-xl font-bold text-emerald-400 transition-colors"
+                          />
+                          <span className="text-xs text-emerald-600 block mt-1">mins</span>
+                        </div>
                       </td>
                       
-                      {/* 六格選擇區 */}
-                      <td className="px-4 py-3 align-middle">
+                      <td className="px-4 py-3 align-middle border-r border-slate-800/30">
                         <div className="flex gap-2 justify-center flex-wrap">
                           {PRODUCTION_SECTIONS.map((section) => {
                             const isSelected = selections[row.id] === section.id
@@ -305,25 +445,43 @@ export default function SchedulePendingPage() {
                                 key={section.id}
                                 onClick={() => handleSelect(row.id, section.id)}
                                 className={`
-                                  w-10 h-10 rounded-md border-2 transition-all flex flex-col items-center justify-center gap-0.5 relative overflow-hidden
+                                  w-8 h-8 rounded-md border-2 transition-all flex flex-col items-center justify-center gap-0.5 relative overflow-hidden
                                   ${isSelected 
-                                    ? `${section.border} ${section.color} text-white shadow-lg scale-110 z-10 ring-2 ring-offset-2 ring-offset-slate-900 ring-white` 
+                                    ? `${section.border} ${section.color} text-white shadow-lg scale-110 z-10` 
                                     : 'border-slate-700 bg-slate-800/50 text-slate-500 hover:border-slate-500 hover:bg-slate-700 hover:text-slate-300'
                                   }
                                 `}
                                 title={section.name}
                               >
-                                <span className="text-[11px] font-bold leading-none z-10">{section.name.substring(0, 1)}</span>
-                                <span className="text-[9px] leading-none opacity-80 z-10">{section.name.substring(1)}</span>
-                                {isSelected && <div className="absolute inset-0 bg-white/10 animate-pulse"></div>}
+                                <span className="text-[10px] font-bold leading-none z-10">{section.name.substring(0, 1)}</span>
                               </button>
                             )
                           })}
                         </div>
                       </td>
+
+                      {/* 刪除按鈕 */}
+                      <td className="px-4 py-3 text-center align-middle">
+                        <button onClick={() => handleDeleteOp(row.id, row.op_name)} className="text-slate-600 hover:text-red-500 transition-colors p-2 rounded hover:bg-red-950/30">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
+
+                {/* 新增工序按鈕 */}
+                <tr>
+                  <td colSpan={4} className="p-2 text-center border-t border-slate-800/30">
+                    <button 
+                      onClick={() => openAddModal(group)}
+                      className="flex items-center justify-center gap-2 w-full py-2 rounded-lg border border-dashed border-slate-700 text-slate-500 hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-950/20 transition-all text-xs font-mono"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                      ADD OPERATION (新增工序)
+                    </button>
+                  </td>
+                </tr>
               </tbody>
             ))}
           </table>
@@ -350,6 +508,95 @@ export default function SchedulePendingPage() {
           </div>
         </button>
       </div>
+
+      {/* 新增工序 Modal */}
+      {showAddModal && targetGroup && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md shadow-2xl p-6 relative">
+            <h3 className="text-lg font-bold text-white mb-1">新增工序 (Add Operation)</h3>
+            <p className="text-xs text-slate-500 font-mono mb-4">
+              工單: {targetGroup.order_number} / 品項: {targetGroup.item_code}
+            </p>
+
+            <div className="space-y-4">
+              {/* 🔥 新增：插入位置選擇器 */}
+              <div>
+                <label className="block text-xs text-cyan-400 mb-1 font-bold">插入位置 (Insert After)</label>
+                <select 
+                  value={newOpData.insertAfterId}
+                  onChange={e => setNewOpData({...newOpData, insertAfterId: e.target.value})}
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-cyan-500"
+                >
+                  <option value="start">⬆️ 最前面 (Start of Order)</option>
+                  {targetGroup.items.map(item => (
+                    <option key={item.id} value={item.id}>
+                      ⬇️ 插在「{item.op_name}」之後
+                    </option>
+                  ))}
+                  <option value="end">⬇️ 最後面 (End of Order)</option>
+                </select>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  * 系統將自動重新排列序號 (10, 20, 30...) 以確保順序正確。
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">站點 (Station)</label>
+                  <select 
+                    value={newOpData.station}
+                    onChange={e => setNewOpData({...newOpData, station: e.target.value})}
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none focus:border-cyan-500"
+                  >
+                    <option value="印刷">印刷 (Printing)</option>
+                    <option value="雷切">雷切 (Laser)</option>
+                    <option value="後加工">後加工 (Post)</option>
+                    <option value="包裝">包裝 (Packing)</option>
+                    <option value="委外">委外 (Outsourced)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">預計工時 (分)</label>
+                  <input 
+                    type="number" 
+                    value={newOpData.total_time_min}
+                    onChange={e => setNewOpData({...newOpData, total_time_min: parseFloat(e.target.value) || 0})}
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none focus:border-cyan-500 text-right"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">工序名稱 (Op Name)</label>
+                <input 
+                  type="text" 
+                  value={newOpData.op_name}
+                  onChange={e => setNewOpData({...newOpData, op_name: e.target.value})}
+                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none focus:border-cyan-500"
+                  placeholder="例如: 手工糊盒、加貼標籤..."
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-6 justify-end">
+              <button 
+                onClick={() => setShowAddModal(false)} 
+                disabled={saving}
+                className="px-4 py-2 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-sm"
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleAddOpSubmit} 
+                disabled={saving}
+                className="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center gap-2"
+              >
+                {saving ? '處理中...' : '確認新增'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
