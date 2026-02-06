@@ -34,7 +34,6 @@ const CATEGORIES = [
     )
   },
   {
-    // 🔥 修正：從 'packing' 改為 'packaging' (對應資料庫 section_id)
     id: 'packaging', 
     name: '包裝產程',
     eng: 'Packaging',
@@ -68,8 +67,21 @@ const CATEGORIES = [
 
 export default function DashboardMenuPage() {
   return (
-    <div className="p-8 max-w-7xl mx-auto min-h-screen flex flex-col justify-center bg-[#050b14]">
+    <div className="p-8 max-w-7xl mx-auto min-h-screen flex flex-col justify-center bg-[#050b14] relative">
       
+      {/* 🔥 新增：左上角返回系統入口按鈕 */}
+      <div className="absolute top-6 left-6">
+        <Link 
+          href="/" 
+          className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700 border border-slate-700 hover:border-cyan-500/50 rounded-full text-sm font-bold text-slate-400 hover:text-white transition-all backdrop-blur-sm group"
+        >
+          <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+          回系統入口
+        </Link>
+      </div>
+
       <div className="text-center mb-12">
         <h1 className="text-4xl font-black text-white tracking-tight mb-2">產線電子看板</h1>
         <p className="text-slate-400 font-mono uppercase tracking-widest">
