@@ -8,14 +8,13 @@ import { supabase } from '../lib/supabaseClient'
 export default function LandingPage() {
   const router = useRouter()
   const [time, setTime] = useState('')
-  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin'>('none')
+  // 🔥 新增 'estimation' 狀態
+  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin' | 'estimation'>('none')
   
-  // 公告相關狀態
   const [announcements, setAnnouncements] = useState<any[]>([])
   const [currentAnnoIndex, setCurrentAnnoIndex] = useState(0)
-  const [showModal, setShowModal] = useState(false) // 控制詳情視窗
+  const [showModal, setShowModal] = useState(false)
 
-  // 時間跳動
   useEffect(() => {
     const timer = setInterval(() => {
       setTime(new Date().toLocaleTimeString('en-US', { hour12: false }))
@@ -23,7 +22,6 @@ export default function LandingPage() {
     return () => clearInterval(timer)
   }, [])
 
-  // 讀取公告
   useEffect(() => {
     const fetchAnnouncements = async () => {
       const { data } = await supabase
@@ -39,9 +37,8 @@ export default function LandingPage() {
     fetchAnnouncements()
   }, [])
 
-  // 公告輪播
   useEffect(() => {
-    if (announcements.length <= 1 || showModal) return // 如果打開詳情就不輪播
+    if (announcements.length <= 1 || showModal) return 
     const interval = setInterval(() => {
       setCurrentAnnoIndex((prev) => (prev + 1) % announcements.length)
     }, 5000) 
@@ -53,7 +50,6 @@ export default function LandingPage() {
     router.push('/login')
   }
 
-  // 取得當前顯示的公告
   const currentAnnouncement = announcements[currentAnnoIndex]
 
   return (
@@ -71,7 +67,7 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* --- 左上角：公告顯示區 (卷軸式) --- */}
+      {/* --- 左上角：公告顯示區 --- */}
       {currentAnnouncement && (
         <div className="absolute top-6 left-6 z-40 max-w-[280px] md:max-w-sm animate-fade-in-right">
           <div 
@@ -95,7 +91,6 @@ export default function LandingPage() {
               {currentAnnouncement.title}
             </h3>
             
-            {/* 限制顯示兩行 (line-clamp-2) */}
             <p className="text-xs text-slate-400 font-mono leading-relaxed line-clamp-2">
               {currentAnnouncement.content || '點擊查看詳情...'}
             </p>
@@ -144,57 +139,88 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* 雙入口選擇器 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
+        {/* 三入口選擇器 (Grid 調整為 3 欄) */}
+        {/* 🔥 修改：max-w-4xl -> max-w-6xl，grid-cols-2 -> grid-cols-3 */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
           
-          {/* 左側：產線看板 (連結已修正 🔥) */}
+          {/* 1. 產線看板 */}
           <Link href="/dashboard" 
             onMouseEnter={() => setIsHovered('production')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
               group relative h-64 md:h-80 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-8 transition-all duration-500 cursor-pointer
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
               hover:border-cyan-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(6,182,212,0.15)]
-              ${isHovered === 'admin' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+              ${isHovered !== 'none' && isHovered !== 'production' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
             <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-cyan-900/50 text-slate-400 group-hover:text-cyan-400 transition-colors">
-              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
             </div>
-            <h2 className="text-2xl font-bold text-white mb-2 group-hover:text-cyan-400 transition-colors">產線看板</h2>
-            <p className="text-slate-500 text-sm mb-6 max-w-xs group-hover:text-slate-300">
-              即時生產進度與工單狀態。<br/>(View Production Status)
+            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-cyan-400 transition-colors">產線看板</h2>
+            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+              即時生產進度與狀態。<br/>(Dashboard)
             </p>
-            <span className="px-6 py-2 rounded border border-slate-600 text-slate-300 text-sm font-mono group-hover:bg-cyan-600 group-hover:border-cyan-600 group-hover:text-white transition-all">
+            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-cyan-600 group-hover:border-cyan-600 group-hover:text-white transition-all">
               ENTER SYSTEM &rarr;
             </span>
           </Link>
 
-          {/* 右側：管理核心 */}
+          {/* 2. 時間試算 (新增) */}
+          <Link href="/estimation"
+            onMouseEnter={() => setIsHovered('estimation')}
+            onMouseLeave={() => setIsHovered('none')}
+            className={`
+              group relative h-64 md:h-80 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              hover:border-emerald-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(16,185,129,0.15)]
+              ${isHovered !== 'none' && isHovered !== 'estimation' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+            `}
+          >
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 rounded border border-emerald-500/20">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+              <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">New</span>
+            </div>
+
+            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-emerald-900/50 text-slate-400 group-hover:text-emerald-400 transition-colors">
+               {/* 計算機 Icon */}
+               <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+               </svg>
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-emerald-400 transition-colors">時間試算</h2>
+            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+              生產週期評估與計算。<br/>(Estimator)
+            </p>
+            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-emerald-600 group-hover:border-emerald-600 group-hover:text-white transition-all">
+              CALCULATE &rarr;
+            </span>
+          </Link>
+
+          {/* 3. 管理核心 */}
           <Link href="/admin"
             onMouseEnter={() => setIsHovered('admin')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
               group relative h-64 md:h-80 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-8 transition-all duration-500 cursor-pointer
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
               hover:border-purple-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(168,85,247,0.15)]
-              ${isHovered === 'production' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+              ${isHovered !== 'none' && isHovered !== 'admin' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
             <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-purple-500/10 rounded border border-purple-500/20">
-              <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></div>
-              <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">Manager</span>
+              <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">Admin</span>
             </div>
 
             <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-purple-900/50 text-slate-400 group-hover:text-purple-400 transition-colors">
-              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
             </div>
-            <h2 className="text-2xl font-bold text-white mb-2 group-hover:text-purple-400 transition-colors">管理核心</h2>
-            <p className="text-slate-500 text-sm mb-6 max-w-xs group-hover:text-slate-300">
-              母資料設定、訂單計算與人員管理。<br/>(Admin Console)
+            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-purple-400 transition-colors">管理核心</h2>
+            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+              母資料設定與管理。<br/>(Console)
             </p>
-            <span className="px-6 py-2 rounded border border-slate-600 text-slate-300 text-sm font-mono group-hover:bg-purple-600 group-hover:border-purple-600 group-hover:text-white transition-all">
-              ACCESS CONSOLE &rarr;
+            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-purple-600 group-hover:border-purple-600 group-hover:text-white transition-all">
+              ACCESS &rarr;
             </span>
           </Link>
 
@@ -207,23 +233,19 @@ export default function LandingPage() {
 
       </div>
 
-      {/* --- 公告詳情 Modal (彈出視窗) --- */}
+      {/* --- 公告詳情 Modal --- */}
       {showModal && currentAnnouncement && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden relative">
-            
-            {/* Modal Header */}
             <div className="bg-slate-800 p-4 flex justify-between items-center border-b border-slate-700">
               <h3 className="text-white font-bold flex items-center gap-2">
                 <span className="w-2 h-6 bg-orange-500 rounded-full"></span>
-                系統公告 (System Notice)
+                系統公告
               </h3>
               <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white transition-colors">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-
-            {/* Modal Body */}
             <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
               <div className="text-xs text-slate-500 font-mono mb-4">
                 發布時間: {new Date(currentAnnouncement.created_at).toLocaleString()}
@@ -233,25 +255,11 @@ export default function LandingPage() {
                 {currentAnnouncement.content || "無詳細內容"}
               </div>
             </div>
-
-            {/* Modal Footer (如果有上一則/下一則可以放這裡) */}
             {announcements.length > 1 && (
               <div className="bg-slate-800/50 p-3 flex justify-between border-t border-slate-700">
-                <button 
-                  onClick={() => setCurrentAnnoIndex(prev => (prev - 1 + announcements.length) % announcements.length)}
-                  className="text-xs text-slate-400 hover:text-white px-3 py-1 hover:bg-slate-700 rounded"
-                >
-                  &larr; Prev
-                </button>
-                <span className="text-xs text-slate-500 font-mono py-1">
-                  {currentAnnoIndex + 1} / {announcements.length}
-                </span>
-                <button 
-                  onClick={() => setCurrentAnnoIndex(prev => (prev + 1) % announcements.length)}
-                  className="text-xs text-slate-400 hover:text-white px-3 py-1 hover:bg-slate-700 rounded"
-                >
-                  Next &rarr;
-                </button>
+                <button onClick={() => setCurrentAnnoIndex(prev => (prev - 1 + announcements.length) % announcements.length)} className="text-xs text-slate-400 hover:text-white px-3 py-1 hover:bg-slate-700 rounded">&larr; Prev</button>
+                <span className="text-xs text-slate-500 font-mono py-1">{currentAnnoIndex + 1} / {announcements.length}</span>
+                <button onClick={() => setCurrentAnnoIndex(prev => (prev + 1) % announcements.length)} className="text-xs text-slate-400 hover:text-white px-3 py-1 hover:bg-slate-700 rounded">Next &rarr;</button>
               </div>
             )}
           </div>

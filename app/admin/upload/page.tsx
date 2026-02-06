@@ -59,7 +59,7 @@ export default function UploadPage() {
     }
   }
 
-  // --- 核心邏輯：執行覆寫更新 ---
+  // --- 核心邏輯：執行覆寫更新 (修正順序版) ---
   const handleOverwrite = async () => {
     // 1. 確認防呆
     if (!files.itemRoutes && !files.routeOps && !files.opTimes) {
@@ -76,50 +76,39 @@ export default function UploadPage() {
     const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
 
     try {
-      // --- A. 處理 品項對途程 (item_routes) ---
+      // -----------------------------------------------------------
+      // Step 0: 預先解析所有檔案 (確保檔案沒問題再開始刪資料)
+      // -----------------------------------------------------------
+      let dataItemRoutes: any[] = []
+      let dataRouteOps: any[] = []
+      let dataOpTimes: any[] = []
+
+      // A. 解析：品項對途程
       if (files.itemRoutes) {
-        addLog('📦 開始處理：品項對途程...')
+        addLog('📖 讀取檔案：品項對途程...')
         const text = await files.itemRoutes.text()
-        const rawData = parseCSV(text)
-        
-        // 轉換欄位
-        const cleanData = rawData
+        const raw = parseCSV(text)
+        dataItemRoutes = raw
           .filter((row: any) => row['品項編碼'] && row['途程名稱'])
           .map((row: any) => ({
-            item_code: row['品項編碼'].toUpperCase(), // 強制大寫
-            route_id: row['途程名稱'] // 或是 row['對應途程 ID']，視您的CSV標頭而定
+            item_code: row['品項編碼'].toUpperCase(),
+            route_id: row['途程名稱']
           }))
-
-        if (cleanData.length > 0) {
-          addLog(`  - 清空舊資料 (item_routes)...`)
-          const { error: delError } = await supabase.from('item_routes').delete().neq('id', 0) // 清空全表
-          if (delError) throw delError
-
-          addLog(`  - 寫入 ${cleanData.length} 筆新資料...`)
-          await batchInsert('item_routes', cleanData, addLog)
-          addLog('  ✅ 品項對途程 更新完成')
-        }
       }
 
-      // --- B. 處理 途程對工序 (route_operations) ---
+      // B. 解析：途程對工序
       if (files.routeOps) {
-        addLog('🛠️ 開始處理：途程對工序...')
+        addLog('📖 讀取檔案：途程對工序...')
         const text = await files.routeOps.text()
-        const rawData = parseCSV(text)
+        const raw = parseCSV(text)
         
-        // 轉換邏輯：寬表格 (站點1, 工序1...) 轉 長表格 (sequence, op_name)
-        const cleanData: any[] = []
-        
-        rawData.forEach((row: any) => {
+        raw.forEach((row: any) => {
           const routeId = row['途程']
           if (!routeId) return
-
-          // 假設最多支援 20 個工序，依序檢查
           for (let i = 1; i <= 20; i++) {
             const opName = row[`工序${i}`]
-            // 只要工序名稱存在，就加入
             if (opName) {
-              cleanData.push({
+              dataRouteOps.push({
                 route_id: routeId,
                 sequence: i,
                 op_name: opName.trim()
@@ -127,41 +116,74 @@ export default function UploadPage() {
             }
           }
         })
-
-        if (cleanData.length > 0) {
-          addLog(`  - 清空舊資料 (route_operations)...`)
-          const { error: delError } = await supabase.from('route_operations').delete().neq('id', 0)
-          if (delError) throw delError
-
-          addLog(`  - 轉換後產生 ${cleanData.length} 筆工序資料，開始寫入...`)
-          await batchInsert('route_operations', cleanData, addLog)
-          addLog('  ✅ 途程對工序 更新完成')
-        }
       }
 
-      // --- C. 處理 工序對時間 (operation_times) ---
+      // C. 解析：工序對時間
       if (files.opTimes) {
-        addLog('⏱️ 開始處理：工序對時間...')
+        addLog('📖 讀取檔案：工序對時間...')
         const text = await files.opTimes.text()
-        const rawData = parseCSV(text)
+        const raw = parseCSV(text)
         
-        const cleanData = rawData
-          .filter((row: any) => row['製程名稱'] && row['生產時間'])
-          .map((row: any) => ({
-            op_name: row['製程名稱'].trim(),
-            station: row['站點'] ? row['站點'].trim() : '未知',
-            std_time_min: parseFloat(row['生產時間']) || 0
-          }))
+        // 這裡一定要去重複，不然資料庫會報錯
+        const uniqueOps = new Map()
+        raw.forEach((row: any) => {
+            const name = row['製程名稱']?.trim()
+            if (name && !uniqueOps.has(name)) {
+                uniqueOps.set(name, {
+                    op_name: name,
+                    station: row['站點'] ? row['站點'].trim() : '未知',
+                    std_time_min: parseFloat(row['生產時間']) || 0
+                })
+            }
+        })
+        dataOpTimes = Array.from(uniqueOps.values())
+      }
 
-        if (cleanData.length > 0) {
-          addLog(`  - 清空舊資料 (operation_times)...`)
-          const { error: delError } = await supabase.from('operation_times').delete().neq('id', 0)
-          if (delError) throw delError
+      // -----------------------------------------------------------
+      // Step 1: 清空舊資料 (Delete Phase) - 順序：子 -> 母
+      // -----------------------------------------------------------
+      addLog('🧹 開始清空舊資料...')
+      
+      // 1-1. 先清空 品項關聯 (最下游)
+      if (files.itemRoutes) {
+        addLog('  - 刪除 item_routes...')
+        const { error } = await supabase.from('item_routes').delete().neq('id', 0)
+        if (error) throw error
+      }
 
-          addLog(`  - 寫入 ${cleanData.length} 筆工時資料...`)
-          await batchInsert('operation_times', cleanData, addLog)
-          addLog('  ✅ 工序對時間 更新完成')
-        }
+      // 1-2. 再清空 途程表 (中游)
+      // 如果有更新途程 或 工序，都要清空途程表，因為途程依賴工序
+      if (files.routeOps || files.opTimes) {
+        addLog('  - 刪除 route_operations...')
+        const { error } = await supabase.from('route_operations').delete().neq('id', 0)
+        if (error) throw error
+      }
+
+      // 1-3. 最後清空 工時表 (最上游/母資料)
+      if (files.opTimes) {
+        addLog('  - 刪除 operation_times...')
+        const { error } = await supabase.from('operation_times').delete().neq('id', 0)
+        if (error) throw error
+      }
+
+      // -----------------------------------------------------------
+      // Step 2: 寫入新資料 (Insert Phase) - 順序：母 -> 子
+      // -----------------------------------------------------------
+      addLog('🚀 開始寫入新資料...')
+
+      // 2-1. 先寫入 工時表 (最上游)
+      if (dataOpTimes.length > 0) {
+        await batchInsert('operation_times', dataOpTimes, addLog)
+      }
+
+      // 2-2. 再寫入 途程表 (中游，依賴工時)
+      if (dataRouteOps.length > 0) {
+        await batchInsert('route_operations', dataRouteOps, addLog)
+      }
+
+      // 2-3. 最後寫入 品項關聯 (下游，依賴途程)
+      if (dataItemRoutes.length > 0) {
+        await batchInsert('item_routes', dataItemRoutes, addLog)
       }
 
       addLog('🎉 全部更新作業成功！')
