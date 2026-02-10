@@ -6,8 +6,9 @@ import { supabase } from '../../lib/supabaseClient' // 引入 Supabase
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
-  const [formData, setFormData] = useState({ email: '', password: '' }) // 改用 email
+  const [formData, setFormData] = useState({ email: '', password: '' })
   const [errorMsg, setErrorMsg] = useState('')
+  const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -15,7 +16,7 @@ export default function LoginPage() {
     setErrorMsg('')
     
     try {
-      // 1. 去資料庫找這個人
+      // 1. 去資料庫找這個人 (直接查 members 表)
       const { data: member, error } = await supabase
         .from('members')
         .select('email, password, real_name')
@@ -23,11 +24,12 @@ export default function LoginPage() {
         .single()
 
       if (error || !member) {
-        throw new Error('找不到此帳號')
+        throw new Error('找不到此帳號，請確認 Email 是否正確')
       }
 
-      // 2. 檢查密碼 (這裡做簡單比對，實務上建議加密)
-      if (member.password !== formData.password) {
+      // 2. 檢查密碼 (注意：這裡直接比對明碼，需確保資料庫內的密碼也是明碼)
+      // 如果資料庫密碼是 123456，這裡輸入 123456 就會過
+      if (String(member.password) !== String(formData.password)) {
         throw new Error('密碼錯誤')
       }
 
@@ -39,8 +41,9 @@ export default function LoginPage() {
       // 4. 設定 Cookie (給 Middleware 過路檢察用)
       document.cookie = `bardshop-token=authorized; path=/; max-age=86400; SameSite=Lax;`
 
-      // 5. 強制重整進首頁
-      window.location.href = '/'
+      // 5. 轉址進首頁
+      // 使用 router.push 比 window.location.href 更平滑
+      router.push('/')
 
     } catch (err: any) {
       setErrorMsg(err.message || '登入失敗')

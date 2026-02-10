@@ -24,7 +24,8 @@ export default function TaskBoardPage() {
   // --- 系統資料狀態 ---
   const [dbDepartments, setDbDepartments] = useState<Department[]>([])
   const [dbMembers, setDbMembers] = useState<Member[]>([])
-  const [currentUser, setCurrentUser] = useState<{ id: string, name: string, dept: string } | null>(null)
+  
+  const [currentUser, setCurrentUser] = useState<{ id: string, name: string, dept: string, email?: string } | null>(null)
 
   // --- 任務狀態 ---
   const [tasks, setTasks] = useState<any[]>([])
@@ -32,18 +33,39 @@ export default function TaskBoardPage() {
   const [selectedTask, setSelectedTask] = useState<any>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   
-  // 新任務表單
   const [newTask, setNewTask] = useState({ title: '', content: '', targetDept: '', targetUsers: [] as string[] })
-  // 🔥 新增：控制選人視窗目前正在看哪個部門
   const [activeUserSelectTab, setActiveUserSelectTab] = useState<string>('') 
   
-  // 聊天輸入
   const [chatInput, setChatInput] = useState('')
   const [messages, setMessages] = useState<any[]>([])
 
-  // --- 1. 初始化 ---
+  // --- 1. 初始化 (改用 LocalStorage 驗證) ---
   useEffect(() => {
     const initData = async () => {
+      console.log("🚀 正在讀取登入資訊 (LocalStorage)...")
+
+      // 🔥 改讀取 LocalStorage (配合新的登入頁)
+      const storedEmail = localStorage.getItem('bardshop_user_email')
+      const storedName = localStorage.getItem('bardshop_user_name')
+      
+      // 如果沒有存 email，代表沒登入 -> 踢回登入頁
+      if (!storedEmail) {
+        console.error("❌ 未偵測到 LocalStorage 登入紀錄")
+        alert("尚未登入或憑證過期，請重新登入！")
+        router.replace('/login')
+        return
+      }
+
+      // 先設定一個暫時的身分 (防止畫面卡住)
+      let myProfile = {
+        id: 'temp_id', // 暫時ID，稍後比對資料庫更新
+        name: storedName || storedEmail, 
+        dept: '讀取中...',
+        email: storedEmail
+      }
+      setCurrentUser(myProfile)
+
+      // Step B: 抓取資料庫 (同時抓部門跟成員)
       const [deptRes, memberRes] = await Promise.all([
         supabase.from('departments').select('*').order('id', { ascending: true }),
         supabase.from('members').select('*').eq('status', 'Active')
@@ -51,22 +73,35 @@ export default function TaskBoardPage() {
 
       if (deptRes.data) {
         setDbDepartments(deptRes.data)
-        // 預設選人分頁為第一個部門
         if (deptRes.data.length > 0) setActiveUserSelectTab(deptRes.data[0].name)
       }
-      if (memberRes.data) setDbMembers(memberRes.data)
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user && user.email && memberRes.data) {
-        const matchedMember = memberRes.data.find(m => m.email === user.email)
+      if (memberRes.data) {
+        setDbMembers(memberRes.data)
+        
+        // C. 使用 LocalStorage 的 Email 進行比對
+        const myEmailClean = storedEmail.trim().toLowerCase()
+        const matchedMember = memberRes.data.find(m => 
+          m.email?.trim().toLowerCase() === myEmailClean
+        )
+
         if (matchedMember) {
+          console.log("✅ 成功對應成員資料:", matchedMember.real_name)
           setCurrentUser({
-            id: user.id,
+            id: String(matchedMember.id), // 使用 DB ID
             name: matchedMember.real_name,
-            dept: matchedMember.department
+            dept: matchedMember.department,
+            email: storedEmail
           })
         } else {
-          setCurrentUser({ id: user.id, name: user.email, dept: 'Unknown' })
+          // 找不到對應，但有 email (可能是資料庫被刪除)，暫時允許進入但顯示警示
+          console.warn("⚠️ 資料庫找不到 Email，使用 LocalStorage 暫存資料")
+          setCurrentUser({
+            id: 'temp',
+            name: storedName || storedEmail,
+            dept: '未綁定',
+            email: storedEmail
+          })
         }
       }
     }
@@ -78,44 +113,36 @@ export default function TaskBoardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchTasks())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [router])
 
   const fetchTasks = async () => {
     const { data } = await supabase.from('tasks').select('*').order('updated_at', { ascending: false })
     if (data) setTasks(data)
   }
 
-  // --- 邏輯：選人相關 (Toggle / Select All) ---
-  
-  // 切換單一人員
+  // --- 選人邏輯 ---
   const handleToggleUser = (userName: string) => {
     setNewTask(prev => {
       const exists = prev.targetUsers.includes(userName)
       return {
         ...prev,
         targetUsers: exists 
-          ? prev.targetUsers.filter(u => u !== userName) // 移除
-          : [...prev.targetUsers, userName] // 新增
+          ? prev.targetUsers.filter(u => u !== userName)
+          : [...prev.targetUsers, userName]
       }
     })
   }
 
-  // 切換部門全選
   const handleToggleDeptAll = (deptName: string) => {
-    // 找出該部門所有成員的名字
     const deptMembers = dbMembers.filter(m => m.department === deptName).map(m => m.real_name)
     if (deptMembers.length === 0) return
 
     setNewTask(prev => {
-      // 檢查是否已經全選了該部門的人
       const allSelected = deptMembers.every(name => prev.targetUsers.includes(name))
-      
       let newUsers = [...prev.targetUsers]
       if (allSelected) {
-        // 如果已全選 -> 全部取消 (從名單中移除該部門的人)
         newUsers = newUsers.filter(name => !deptMembers.includes(name))
       } else {
-        // 如果未全選 -> 全部加入 (加入還沒被選的人)
         deptMembers.forEach(name => {
           if (!newUsers.includes(name)) newUsers.push(name)
         })
@@ -127,14 +154,13 @@ export default function TaskBoardPage() {
   // --- 邏輯：發送任務 ---
   const handleCreateTask = async () => {
     if (!newTask.title || !newTask.targetDept) return alert('請填寫標題與主要歸屬部門')
-    if (!currentUser) return alert('無法識別您的身分')
+    if (!currentUser) return alert('系統正在讀取您的身分，請稍後再試...')
 
-    // 如果沒有選人，預設為該部門全部人可見 (邏輯可自訂，這邊保留空陣列)
     const { error } = await supabase.from('tasks').insert({
       title: newTask.title,
       content: newTask.content,
       sender_id: currentUser.id,
-      sender_name: currentUser.name,
+      sender_name: currentUser.name, 
       target_dept: newTask.targetDept,
       assigned_to: newTask.targetUsers,
       status: 'pending',
@@ -160,11 +186,13 @@ export default function TaskBoardPage() {
 
   const handleTransferTask = async () => {
     if (!selectedTask) return
-    const newDept = prompt('請輸入要轉移的部門名稱:', dbDepartments[0]?.name)
+    const defaultDept = dbDepartments.length > 0 ? dbDepartments[0].name : ''
+    const newDept = prompt('請輸入要轉移的部門名稱:', defaultDept)
+    
     if (!newDept) return
 
     const deptExists = dbDepartments.some(d => d.name === newDept)
-    if (!deptExists) return alert('找不到此部門。')
+    if (!deptExists) return alert('找不到此部門，請確認名稱是否正確。')
 
     const newCount = (selectedTask.transfer_count || 0) + 1
     
@@ -182,7 +210,7 @@ export default function TaskBoardPage() {
     } else {
       await supabase.from('tasks').update({
         target_dept: newDept,
-        assigned_to: [], // 轉移時清空指定人
+        assigned_to: [],
         status: 'pending',
         transfer_count: newCount,
         is_read: false
@@ -219,17 +247,21 @@ export default function TaskBoardPage() {
   // --- 過濾任務 ---
   const filteredTasks = tasks.filter(task => {
     if (filter === 'all') return true
-    if (!currentUser) return true
-    if (filter === 'sent') return task.sender_id === currentUser.id
+    if (!currentUser) return true 
+    
+    // 如果是發送者
+    if (filter === 'sent') return task.sender_name === currentUser.name
+    
+    // 如果是指派給我
     if (filter === 'mine') {
       const assignedToMe = task.assigned_to?.includes(currentUser.name)
-      const assignedToMyDept = task.target_dept === currentUser.dept && (!task.assigned_to || task.assigned_to.length === 0)
+      // 如果部門匹配且未指定人，也算我的 (前提是部門已綁定)
+      const assignedToMyDept = currentUser.dept !== '未綁定' && currentUser.dept !== '讀取中...' && task.target_dept === currentUser.dept && (!task.assigned_to || task.assigned_to.length === 0)
       return assignedToMe || assignedToMyDept
     }
     return true
   })
 
-  // --- UI ---
   return (
     <div className="min-h-screen bg-[#050b14] text-slate-300 flex flex-col md:flex-row font-sans relative">
       
@@ -252,7 +284,25 @@ export default function TaskBoardPage() {
                任務看板
             </h1>
             <p className="text-xs text-slate-500 mt-1 font-mono">TASK MANAGEMENT SYSTEM</p>
-            {currentUser && <p className="text-xs text-blue-400 mt-2">Hi, {currentUser.name}</p>}
+            
+            {/* 🔥 身分顯示區 */}
+            <div className="mt-4 p-3 bg-slate-900 rounded-lg border border-slate-800">
+              <div className="text-[10px] text-slate-500 mb-1">CURRENT USER:</div>
+              {currentUser ? (
+                <>
+                  <div className="text-sm font-bold text-blue-400 truncate" title={currentUser.name}>{currentUser.name}</div>
+                  <div className="text-xs text-slate-400">{currentUser.dept}</div>
+                  {currentUser.dept === '未綁定' && (
+                    <div className="text-[10px] text-red-400 mt-1">
+                      ⚠️ 未對應到成員資料<br/>
+                      請確認 Email: {currentUser.email}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-xs text-slate-500 animate-pulse">載入身分中...</div>
+              )}
+            </div>
         </div>
 
         <button 
@@ -362,7 +412,7 @@ export default function TaskBoardPage() {
          )}
       </div>
 
-      {/* --- Modal: 建立任務 (已更新選人邏輯) --- */}
+      {/* --- Modal: 建立任務 --- */}
       {isCreateModalOpen && (
          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-slate-900 w-full max-w-2xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-fade-in-up max-h-[90vh] flex flex-col">
@@ -387,7 +437,7 @@ export default function TaskBoardPage() {
 
                   <div className="h-px bg-slate-800 w-full"></div>
 
-                  {/* 🔥 1. 主要歸屬部門 (Primary Dept) */}
+                  {/* 1. 主要歸屬部門 */}
                   <div>
                      <label className="text-xs font-bold text-blue-400 block mb-2 uppercase">1. 設定主要歸屬部門 (Primary Dept)</label>
                      <div className="flex flex-wrap gap-2">
@@ -403,11 +453,10 @@ export default function TaskBoardPage() {
                      </div>
                   </div>
 
-                  {/* 🔥 2. 指派人員 (Assignees - Cross Dept) */}
+                  {/* 2. 指派人員 */}
                   <div className="bg-slate-800/30 p-4 rounded-xl border border-slate-800">
                      <label className="text-xs font-bold text-emerald-400 block mb-3 uppercase">2. 指派執行人員 (複選 / 跨部門)</label>
                      
-                     {/* A. 部門切換 Tabs */}
                      <div className="flex border-b border-slate-700 mb-3 overflow-x-auto custom-scrollbar">
                         {dbDepartments.map(dept => (
                            <button
@@ -420,7 +469,6 @@ export default function TaskBoardPage() {
                         ))}
                      </div>
 
-                     {/* B. 該部門人員列表 */}
                      <div className="min-h-[100px]">
                         <div className="flex justify-between items-center mb-2">
                            <span className="text-xs text-slate-500">部門成員:</span>
@@ -448,7 +496,7 @@ export default function TaskBoardPage() {
                      </div>
                   </div>
 
-                  {/* 🔥 3. 已選名單總覽 (Selected Summary) */}
+                  {/* 3. 已選名單 */}
                   {newTask.targetUsers.length > 0 && (
                      <div className="animate-fade-in">
                         <label className="text-xs font-bold text-slate-500 block mb-2">已選擇人員 ({newTask.targetUsers.length})</label>
