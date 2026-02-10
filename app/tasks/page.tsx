@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation' // 引入路由控制
+import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabaseClient'
-import TaskFloatingWidget from '../../components/TaskFloatingWidget' // 引用剛剛的組件
+// 注意：這裡不再需要引用 TaskFloatingWidget，因為它會被放在全域 Layout 中
 
 // --- 模擬資料：部門與人員 ---
 const DEPARTMENTS = [
@@ -13,6 +15,8 @@ const DEPARTMENTS = [
 ]
 
 export default function TaskBoardPage() {
+  const router = useRouter() // 初始化路由
+  
   // --- 狀態 ---
   const [tasks, setTasks] = useState<any[]>([])
   const [filter, setFilter] = useState<'all' | 'mine' | 'sent'>('all')
@@ -53,8 +57,8 @@ export default function TaskBoardPage() {
       content: newTask.content,
       sender_id: currentUser.id,
       sender_name: currentUser.name,
-      target_dept: newTask.targetDept, // 選部門
-      assigned_to: newTask.targetUsers, // 選人 (可多選，可空)
+      target_dept: newTask.targetDept,
+      assigned_to: newTask.targetUsers,
       status: 'pending',
       transfer_count: 0
     })
@@ -74,19 +78,16 @@ export default function TaskBoardPage() {
     setSelectedTask({ ...selectedTask, status: 'accepted' })
   }
 
-  // --- 邏輯：轉移任務 (含防呆退回) ---
+  // --- 邏輯：轉移任務 ---
   const handleTransferTask = async (newDept: string, newUsers: string[]) => {
     if (!selectedTask) return
-    
-    // 檢查轉移次數
     const newCount = (selectedTask.transfer_count || 0) + 1
     
     if (newCount > 2) {
-      // 超過2次，退回給發送人
       await supabase.from('tasks').update({
         status: 'returned',
         target_dept: '退回', 
-        assigned_to: [selectedTask.sender_id], // 指回給發送者
+        assigned_to: [selectedTask.sender_id],
         transfer_count: 0,
         is_read: false
       }).eq('id', selectedTask.id)
@@ -94,18 +95,16 @@ export default function TaskBoardPage() {
       addSystemMessage(`⚠️ 任務流轉次數過多 (${newCount}次)，系統強制退回給發送人。`)
       alert('任務流轉次數過多，已退回給發送人！')
     } else {
-      // 正常轉移
       await supabase.from('tasks').update({
         target_dept: newDept,
         assigned_to: newUsers,
-        status: 'pending', // 重置為待接收
+        status: 'pending',
         transfer_count: newCount,
         is_read: false
       }).eq('id', selectedTask.id)
       
       addSystemMessage(`將任務轉移至 [${newDept}]`)
     }
-    
     fetchTasks()
     setSelectedTask(null)
   }
@@ -113,7 +112,6 @@ export default function TaskBoardPage() {
   // --- 邏輯：發送訊息 ---
   const handleSendMessage = async () => {
     if (!chatInput.trim() || !selectedTask) return
-    // 這裡僅示範 UI 更新，實際應寫入 task_messages 表
     const newMsg = {
         id: Date.now(),
         user_name: currentUser.name,
@@ -139,11 +137,21 @@ export default function TaskBoardPage() {
   return (
     <div className="min-h-screen bg-[#050b14] text-slate-300 flex flex-col md:flex-row font-sans relative">
       
-      {/* 引用懸浮聊天室 (全域) */}
-      <TaskFloatingWidget />
-
       {/* 左側邊欄：導航與篩選 */}
       <div className="w-full md:w-64 bg-slate-950 border-r border-slate-800 flex flex-col p-4">
+        
+        {/* 🔥 新增：導航按鈕區 */}
+        <div className="flex gap-2 mb-6">
+           <Link href="/" className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-colors">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+              回首頁
+           </Link>
+           <button onClick={() => router.back()} className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-colors">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+              上一頁
+           </button>
+        </div>
+
         <div className="mb-8">
             <h1 className="text-2xl font-black text-white flex items-center gap-2">
                <span className="w-3 h-8 bg-blue-600 rounded-sm"></span>
@@ -175,7 +183,7 @@ export default function TaskBoardPage() {
         </nav>
       </div>
 
-      {/* 中間：任務列表 (List View) */}
+      {/* 中間：任務列表 */}
       <div className="flex-1 bg-[#0a101a] flex flex-col border-r border-slate-800 max-w-md">
          <div className="p-4 border-b border-slate-800 flex justify-between items-center">
             <h2 className="font-bold text-white">任務列表</h2>
@@ -210,11 +218,10 @@ export default function TaskBoardPage() {
          </div>
       </div>
 
-      {/* 右側：任務詳情與聊天 (Detail View) */}
+      {/* 右側：任務詳情 */}
       <div className="flex-[2] bg-[#050b14] flex flex-col relative">
          {selectedTask ? (
             <>
-               {/* Detail Header */}
                <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-950/50 backdrop-blur">
                   <div>
                      <h2 className="text-lg font-bold text-white">{selectedTask.title}</h2>
@@ -225,7 +232,6 @@ export default function TaskBoardPage() {
                      </div>
                   </div>
                   
-                  {/* Action Buttons */}
                   <div className="flex gap-2">
                      {selectedTask.status === 'pending' && (
                         <button onClick={handleAcceptTask} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-full transition-colors">
@@ -234,7 +240,7 @@ export default function TaskBoardPage() {
                      )}
                      <button 
                         onClick={() => {
-                           const target = prompt('輸入轉移部門 (prod, art, sales):'); // 簡化示範
+                           const target = prompt('輸入轉移部門 (prod, art, sales):'); 
                            if (target) handleTransferTask(target, []);
                         }}
                         className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-full border border-slate-600 transition-colors"
@@ -244,9 +250,7 @@ export default function TaskBoardPage() {
                   </div>
                </div>
 
-               {/* Chat Area */}
                <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                  {/* 任務內容本體 */}
                   <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 mb-8">
                      <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Description</h4>
                      <p className="text-slate-300 leading-relaxed">{selectedTask.content}</p>
@@ -258,7 +262,6 @@ export default function TaskBoardPage() {
                      <div className="h-px bg-slate-800 flex-1"></div>
                   </div>
 
-                  {/* 訊息列表 */}
                   {messages.map(msg => (
                      <div key={msg.id} className={`flex flex-col ${msg.type === 'system' ? 'items-center' : msg.user_name === currentUser.name ? 'items-end' : 'items-start'}`}>
                         {msg.type === 'system' ? (
@@ -273,7 +276,6 @@ export default function TaskBoardPage() {
                   ))}
                </div>
 
-               {/* Input Area */}
                <div className="p-4 bg-slate-950 border-t border-slate-800">
                   <div className="flex gap-2">
                      <input 
@@ -324,7 +326,7 @@ export default function TaskBoardPage() {
                         {DEPARTMENTS.map(dept => (
                            <button
                               key={dept.id}
-                              onClick={() => setNewTask({...newTask, targetDept: dept.name, targetUsers: []})} // 切換部門清空人選
+                              onClick={() => setNewTask({...newTask, targetDept: dept.name, targetUsers: []})} 
                               className={`py-2 rounded-lg text-sm border transition-colors ${newTask.targetDept === dept.name ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'}`}
                            >
                               {dept.name}
@@ -333,7 +335,6 @@ export default function TaskBoardPage() {
                      </div>
                   </div>
                   
-                  {/* 選完部門才顯示選人 */}
                   {newTask.targetDept && (
                      <div className="animate-fade-in">
                         <label className="text-xs font-bold text-slate-500 block mb-1">指派人員 (選填，可複選)</label>

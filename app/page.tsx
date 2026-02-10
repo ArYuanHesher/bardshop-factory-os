@@ -8,8 +8,8 @@ import { supabase } from '../lib/supabaseClient'
 export default function LandingPage() {
   const router = useRouter()
   const [time, setTime] = useState('')
-  // 🔥 新增 'estimation' 狀態
-  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin' | 'estimation'>('none')
+  // 🔥 新增 'tasks' 狀態
+  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin' | 'estimation' | 'tasks'>('none')
   
   const [announcements, setAnnouncements] = useState<any[]>([])
   const [currentAnnoIndex, setCurrentAnnoIndex] = useState(0)
@@ -114,10 +114,10 @@ export default function LandingPage() {
       </div>
 
       {/* --- 中央內容區 --- */}
-      <div className="relative z-10 w-full max-w-7xl px-6 flex flex-col items-center">
+      <div className="relative z-10 w-full max-w-[1400px] px-6 flex flex-col items-center">
         
         {/* LOGO & Header */}
-        <div className="text-center mb-16 animate-fade-in-down flex flex-col items-center">
+        <div className="text-center mb-12 animate-fade-in-down flex flex-col items-center">
           <div className="inline-block px-4 py-1 border border-cyan-500/30 rounded-full bg-cyan-950/30 text-cyan-400 text-xs tracking-[0.3em] uppercase mb-6 shadow-[0_0_10px_rgba(6,182,212,0.2)]">
             Authorized Access
           </div>
@@ -139,11 +139,10 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* 三入口選擇器 (Grid 調整為 3 欄) */}
-        {/* 🔥 修改：max-w-4xl -> max-w-6xl，grid-cols-2 -> grid-cols-3 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
+        {/* 🔥 四入口選擇器 (Grid 調整為 2x2 或 4欄) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
           
-          {/* 1. 產線看板 */}
+          {/* 1. 產線看板 (Cyan) */}
           <Link href="/dashboard" 
             onMouseEnter={() => setIsHovered('production')}
             onMouseLeave={() => setIsHovered('none')}
@@ -166,7 +165,7 @@ export default function LandingPage() {
             </span>
           </Link>
 
-          {/* 2. 時間試算 (新增) */}
+          {/* 2. 時間試算 (Emerald) */}
           <Link href="/estimation"
             onMouseEnter={() => setIsHovered('estimation')}
             onMouseLeave={() => setIsHovered('none')}
@@ -177,13 +176,7 @@ export default function LandingPage() {
               ${isHovered !== 'none' && isHovered !== 'estimation' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
-            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 rounded border border-emerald-500/20">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-              <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">New</span>
-            </div>
-
             <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-emerald-900/50 text-slate-400 group-hover:text-emerald-400 transition-colors">
-               {/* 計算機 Icon */}
                <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                </svg>
@@ -197,7 +190,36 @@ export default function LandingPage() {
             </span>
           </Link>
 
-          {/* 3. 管理核心 */}
+          {/* 🔥 3. 任務看板 (New - Blue) */}
+          <Link href="/tasks"
+            onMouseEnter={() => setIsHovered('tasks')}
+            onMouseLeave={() => setIsHovered('none')}
+            className={`
+              group relative h-64 md:h-80 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              hover:border-blue-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]
+              ${isHovered !== 'none' && isHovered !== 'tasks' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+            `}
+          >
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 rounded border border-blue-500/20">
+              <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">New</span>
+            </div>
+
+            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-blue-900/50 text-slate-400 group-hover:text-blue-400 transition-colors">
+               <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+               </svg>
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-blue-400 transition-colors">任務看板</h2>
+            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+              部門協作、指派與追蹤。<br/>(Task Flow)
+            </p>
+            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-blue-600 group-hover:border-blue-600 group-hover:text-white transition-all">
+              OPEN BOARD &rarr;
+            </span>
+          </Link>
+
+          {/* 4. 管理核心 (Purple) */}
           <Link href="/admin"
             onMouseEnter={() => setIsHovered('admin')}
             onMouseLeave={() => setIsHovered('none')}
