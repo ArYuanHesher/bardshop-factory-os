@@ -7,8 +7,8 @@ import { supabase } from '../../../../lib/supabaseClient'
 interface Machine {
   id: number
   name: string
-  category: string      // 新增：大分類
-  station_type: string  // 實際站點 (對應工序表)
+  category: string      
+  station_type: string  
   daily_minutes: number
   is_active: boolean
 }
@@ -25,8 +25,8 @@ const STATION_MAPPING: Record<string, string[]> = {
   '雷切': ['雷切站'],
   '後加工': ['後加工站'],
   '包裝': ['包裝站'],
-  '委外': ['轉運站'], // 轉運站通常包含委外進出貨時間
-  '常平': ['印刷站(常平)', '雷切站(常平)', '後加工站(常平)', '包裝站(常平)'] // 預設常平也有這些分站
+  '委外': ['轉運站'], 
+  '常平': ['印刷站(常平)', '雷切站(常平)', '後加工站(常平)', '包裝站(常平)'] 
 }
 
 const CATEGORIES = Object.keys(STATION_MAPPING)
@@ -74,7 +74,7 @@ export default function ParametersPage() {
 }
 
 // ============================================================================
-// 子組件 1: 機台管理器 (已更新分類邏輯)
+// 子組件 1: 機台管理器 (🔥 新增即時編輯與覆寫功能)
 // ============================================================================
 function MachinesManager() {
   const [machines, setMachines] = useState<Machine[]>([])
@@ -82,11 +82,14 @@ function MachinesManager() {
   
   // 新增表單狀態
   const [newName, setNewName] = useState('')
-  const [newCategory, setNewCategory] = useState(CATEGORIES[0]) // 預設第一個大分類
-  const [newStation, setNewStation] = useState(STATION_MAPPING[CATEGORIES[0]][0]) // 預設該分類的第一個站點
+  const [newCategory, setNewCategory] = useState(CATEGORIES[0]) 
+  const [newStation, setNewStation] = useState(STATION_MAPPING[CATEGORIES[0]][0]) 
   const [newMins, setNewMins] = useState(480)
 
-  // 當大分類改變時，自動切換對應的第一個站點
+  // 編輯狀態緩存 (用於輸入框 onChange)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [tempName, setTempName] = useState('')
+
   useEffect(() => {
     setNewStation(STATION_MAPPING[newCategory][0] || '')
   }, [newCategory])
@@ -114,7 +117,6 @@ function MachinesManager() {
     if (error) alert(error.message)
     else {
       setNewName('')
-      // 不重置分類，方便連續新增
       fetchMachines()
     }
   }
@@ -125,9 +127,31 @@ function MachinesManager() {
     fetchMachines()
   }
 
+  // 🔥 更新欄位 (即時寫入 DB)
   const handleUpdate = async (id: number, field: keyof Machine, value: any) => {
+    // 樂觀更新前端
     setMachines(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m))
-    await supabase.from('production_machines').update({ [field]: value }).eq('id', id)
+    
+    const { error } = await supabase.from('production_machines').update({ [field]: value }).eq('id', id)
+    if (error) {
+        console.error('Update failed:', error)
+        fetchMachines() // 若失敗則還原
+    }
+  }
+
+  // 🔥 開始編輯名稱
+  const startEditName = (machine: Machine) => {
+      setEditingId(machine.id)
+      setTempName(machine.name)
+  }
+
+  // 🔥 儲存名稱變更
+  const saveNameEdit = async () => {
+      if (editingId && tempName.trim()) {
+          await handleUpdate(editingId, 'name', tempName.trim())
+      }
+      setEditingId(null)
+      setTempName('')
   }
 
   return (
@@ -139,8 +163,6 @@ function MachinesManager() {
           新增機台設備
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-          
-          {/* 1. 大分類選擇 */}
           <div className="md:col-span-2">
             <label className="text-xs text-slate-500 mb-1 block">大分類 (Category)</label>
             <select 
@@ -151,8 +173,6 @@ function MachinesManager() {
               {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
           </div>
-
-          {/* 2. 歸屬站點選擇 (連動) */}
           <div className="md:col-span-3">
             <label className="text-xs text-slate-500 mb-1 block">歸屬站點 (Station)</label>
             <select 
@@ -163,8 +183,6 @@ function MachinesManager() {
               {STATION_MAPPING[newCategory]?.map(st => <option key={st} value={st}>{st}</option>)}
             </select>
           </div>
-
-          {/* 3. 機台名稱 */}
           <div className="md:col-span-4">
             <label className="text-xs text-slate-500 mb-1 block">機台名稱 (Machine Name)</label>
             <input 
@@ -175,8 +193,6 @@ function MachinesManager() {
               className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2.5 text-sm focus:border-orange-500 outline-none text-white placeholder-slate-600"
             />
           </div>
-
-          {/* 4. 每日工時 */}
           <div className="md:col-span-2">
             <label className="text-xs text-slate-500 mb-1 block">每日工時 (分)</label>
             <input 
@@ -186,8 +202,6 @@ function MachinesManager() {
               className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2.5 text-sm focus:border-orange-500 outline-none text-white"
             />
           </div>
-
-          {/* 按鈕 */}
           <div className="md:col-span-1">
             <button onClick={handleAdd} className="w-full h-[42px] bg-orange-600 hover:bg-orange-500 text-white rounded font-bold transition-colors flex items-center justify-center">
               新增
@@ -203,7 +217,7 @@ function MachinesManager() {
             <tr>
               <th className="p-4 border-b border-slate-800">大分類</th>
               <th className="p-4 border-b border-slate-800">歸屬站點 (對應工序表)</th>
-              <th className="p-4 border-b border-slate-800">機台名稱</th>
+              <th className="p-4 border-b border-slate-800">機台名稱 (點擊編輯)</th>
               <th className="p-4 border-b border-slate-800 text-right">每日工時</th>
               <th className="p-4 border-b border-slate-800 text-center">狀態</th>
               <th className="p-4 border-b border-slate-800 text-center">操作</th>
@@ -228,19 +242,35 @@ function MachinesManager() {
                   {m.station_type}
                 </td>
                 <td className="p-4">
-                  <input 
-                    type="text" 
-                    value={m.name} 
-                    onChange={(e) => handleUpdate(m.id, 'name', e.target.value)}
-                    className="bg-transparent border-b border-transparent focus:border-orange-500 outline-none w-full text-white font-bold"
-                  />
+                  {/* 🔥 可編輯的名稱欄位 */}
+                  {editingId === m.id ? (
+                      <input 
+                          type="text" 
+                          value={tempName}
+                          onChange={(e) => setTempName(e.target.value)}
+                          onBlur={saveNameEdit} // 失去焦點自動儲存
+                          onKeyDown={(e) => e.key === 'Enter' && saveNameEdit()} // 按 Enter 儲存
+                          autoFocus
+                          className="bg-slate-800 border border-orange-500 rounded px-2 py-1 w-full text-white outline-none"
+                      />
+                  ) : (
+                      <div 
+                          onClick={() => startEditName(m)}
+                          className="cursor-pointer hover:text-orange-400 flex items-center gap-2 group/edit"
+                      >
+                          <span className="font-bold text-white">{m.name}</span>
+                          <svg className="w-3 h-3 text-slate-600 group-hover/edit:text-orange-500 opacity-0 group-hover/edit:opacity-100 transition-all" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                          </svg>
+                      </div>
+                  )}
                 </td>
                 <td className="p-4 text-right font-mono">
                   <input 
                     type="number" 
                     value={m.daily_minutes} 
                     onChange={(e) => handleUpdate(m.id, 'daily_minutes', Number(e.target.value))}
-                    className="bg-transparent border-b border-transparent focus:border-orange-500 outline-none w-20 text-right text-emerald-400 font-bold"
+                    className="bg-transparent border-b border-transparent hover:border-slate-600 focus:border-orange-500 outline-none w-20 text-right text-emerald-400 font-bold transition-colors"
                   />
                 </td>
                 <td className="p-4 text-center">

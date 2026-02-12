@@ -476,8 +476,9 @@ export default function DailyOperationsPage() {
         </div>
         
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <table className="w-full text-left text-[11px] border-collapse table-fixed">
-            <thead className="bg-slate-950 text-slate-400 uppercase font-mono sticky top-0 z-10 shadow-lg">
+<table className="w-full text-left text-[11px] border-collapse table-fixed">
+            {/* 🔥 修正 1: 加入 whitespace-nowrap 防止表頭文字換行 */}
+            <thead className="bg-slate-950 text-slate-400 uppercase font-mono sticky top-0 z-10 shadow-lg whitespace-nowrap">
               <tr>
                 <th className="p-2 w-8 text-center border-b border-slate-700">Del</th>
                 <th className="p-2 w-14 text-center border-b border-slate-700">狀態</th>
@@ -526,7 +527,8 @@ export default function DailyOperationsPage() {
                 </tr>
               ))}
               {tempData.length === 0 && (
-                <tr><td colSpan={15} className="p-20 text-center text-slate-600">暫存區是空的，請上傳 CSV</td></tr>
+                // 🔥 修正 2: colSpan 修正為 14 (對應表頭數量)
+                <tr><td colSpan={14} className="p-20 text-center text-slate-600">暫存區是空的，請上傳 CSV</td></tr>
               )}
             </tbody>
           </table>
