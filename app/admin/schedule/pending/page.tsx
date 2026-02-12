@@ -22,7 +22,7 @@ interface PendingItem {
   op_name: string
   station: string
   total_time_min: number
-  sequence: number // 🔥 確保介面有 sequence
+  sequence: number 
   created_at: string
 }
 
@@ -49,11 +49,11 @@ export default function SchedulePendingPage() {
   const [selections, setSelections] = useState<Record<number, string>>({})
   const [saving, setSaving] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [isAutoAssigning, setIsAutoAssigning] = useState(false)
 
   // 新增工序 Modal 狀態
   const [showAddModal, setShowAddModal] = useState(false)
   const [targetGroup, setTargetGroup] = useState<GroupedPendingOrder | null>(null)
-  // insertAfterId: 'start' 代表插在最前面，數值代表插在該 ID 後面
   const [newOpData, setNewOpData] = useState({ station: '後加工', op_name: '', total_time_min: 20, insertAfterId: 'end' })
 
   useEffect(() => {
@@ -69,7 +69,7 @@ export default function SchedulePendingPage() {
       .is('assigned_section', null)
       .order('created_at', { ascending: false })
       .order('source_order_id', { ascending: true })
-      .order('sequence', { ascending: true }) // 🔥 確保按照 sequence 排序
+      .order('sequence', { ascending: true }) 
     
     if (error) {
       console.error(error)
@@ -99,7 +99,6 @@ export default function SchedulePendingPage() {
         }
         map.get(row.source_order_id)?.items.push(row)
       })
-      // 確保每個 group 內的 items 再次依照 sequence 排序 (雙重保險)
       groups.forEach(g => g.items.sort((a, b) => a.sequence - b.sequence))
       setGroupedData(groups)
     }
@@ -110,7 +109,6 @@ export default function SchedulePendingPage() {
   const filteredGroups = useMemo(() => {
     if (!searchTerm) return groupedData
     const lowerTerm = searchTerm.toLowerCase()
-    
     return groupedData.filter(group => 
       group.order_number.toLowerCase().includes(lowerTerm) ||
       group.item_code.toLowerCase().includes(lowerTerm) ||
@@ -141,15 +139,7 @@ export default function SchedulePendingPage() {
       items: group.items.map(item => item.id === itemId ? { ...item, total_time_min: numValue } : item)
     })))
 
-    const { error } = await supabase
-      .from('station_time_summary')
-      .update({ total_time_min: numValue })
-      .eq('id', itemId)
-
-    if (error) {
-      console.error('Update time failed:', error)
-      alert('更新工時失敗，請重試')
-    }
+    await supabase.from('station_time_summary').update({ total_time_min: numValue }).eq('id', itemId)
   }
 
   // 5. 刪除工序邏輯
@@ -163,11 +153,7 @@ export default function SchedulePendingPage() {
       })).filter(group => group.items.length > 0)
     })
 
-    const { error } = await supabase
-      .from('station_time_summary')
-      .delete()
-      .eq('id', itemId)
-
+    const { error } = await supabase.from('station_time_summary').delete().eq('id', itemId)
     if (error) {
       alert('刪除失敗: ' + error.message)
       fetchPendingData()
@@ -177,19 +163,17 @@ export default function SchedulePendingPage() {
   // 6. 開啟新增視窗
   const openAddModal = (group: GroupedPendingOrder) => {
     setTargetGroup(group)
-    // 預設插在最後面 (end)
     setNewOpData({ station: '後加工', op_name: '', total_time_min: 30, insertAfterId: 'end' })
     setShowAddModal(true)
   }
 
-  // 7. 🔥 提交新增工序 (含自動重新排序邏輯)
+  // 7. 新增工序提交
   const handleAddOpSubmit = async () => {
     if (!targetGroup) return
     if (!newOpData.op_name) return alert('請輸入工序名稱')
 
     setSaving(true)
 
-    // A. 準備新工序的資料物件 (不含 sequence，稍後計算)
     const newRowBase = {
       source_order_id: targetGroup.source_order_id,
       order_number: targetGroup.order_number,
@@ -211,12 +195,8 @@ export default function SchedulePendingPage() {
     }
 
     try {
-      // B. 記憶體中重新排序 (Re-indexing Strategy)
-      // 1. 複製現有工序
       const currentItems = [...targetGroup.items]
-      
-      // 2. 決定插入點索引
-      let insertIndex = currentItems.length // 預設最後
+      let insertIndex = currentItems.length
       if (newOpData.insertAfterId === 'start') {
         insertIndex = 0
       } else if (newOpData.insertAfterId !== 'end') {
@@ -224,46 +204,20 @@ export default function SchedulePendingPage() {
         if (foundIndex !== -1) insertIndex = foundIndex + 1
       }
 
-      // 3. 插入新項目 (暫時用假ID標記，稍後DB會給真ID)
-      // 這裡我們不需要真的把物件放進去給 DB，我們只需要算出每個舊項目應該變成什麼序號
-      // 以及新項目應該是什麼序號
-      
-      // 策略：直接全部重給序號 10, 20, 30...
       const updates = []
-      
-      // 3.1 先處理舊項目 (上半部)
-      for (let i = 0; i < insertIndex; i++) {
-        updates.push({ id: currentItems[i].id, sequence: (i + 1) * 10 })
-      }
-      
-      // 3.2 這是新項目的序號
+      for (let i = 0; i < insertIndex; i++) updates.push({ id: currentItems[i].id, sequence: (i + 1) * 10 })
       const newRowSequence = (insertIndex + 1) * 10 
+      for (let i = insertIndex; i < currentItems.length; i++) updates.push({ id: currentItems[i].id, sequence: (i + 2) * 10 })
 
-      // 3.3 再處理舊項目 (下半部)
-      for (let i = insertIndex; i < currentItems.length; i++) {
-        updates.push({ id: currentItems[i].id, sequence: (i + 2) * 10 })
-      }
-
-      // C. 執行資料庫操作 (平行處理)
       const tasks = []
-
-      // 1. 更新舊項目的序號
       if (updates.length > 0) {
-        // 為了效能，我們可以一筆一筆 update，或者用 upsert (如果資料量大)
-        // 這裡因為單量不大，用 Promise.all update 比較簡單直覺
-        updates.forEach(u => {
-          tasks.push(supabase.from('station_time_summary').update({ sequence: u.sequence }).eq('id', u.id))
-        })
+        updates.forEach(u => tasks.push(supabase.from('station_time_summary').update({ sequence: u.sequence }).eq('id', u.id)))
       }
-
-      // 2. 插入新項目
       tasks.push(supabase.from('station_time_summary').insert({ ...newRowBase, sequence: newRowSequence }))
 
       await Promise.all(tasks)
-
-      // D. 完成
       setShowAddModal(false)
-      fetchPendingData() // 重新讀取以顯示正確排序
+      fetchPendingData()
       alert('工序新增並重新排序完成！')
 
     } catch (err: any) {
@@ -278,11 +232,9 @@ export default function SchedulePendingPage() {
   const handleBatchConfirm = async () => {
     const selectedIds = Object.keys(selections).map(Number)
     if (selectedIds.length === 0) return
-
     if (!confirm(`確定要將這 ${selectedIds.length} 筆工序移入排程總表嗎？`)) return
 
     setSaving(true)
-    
     const updatesBySection: Record<string, number[]> = {}
     selectedIds.forEach(id => {
       const section = selections[id]
@@ -292,29 +244,75 @@ export default function SchedulePendingPage() {
 
     try {
       const promises = Object.entries(updatesBySection).map(([sectionId, ids]) => 
-        supabase
-          .from('station_time_summary')
-          .update({ assigned_section: sectionId })
-          .in('id', ids)
+        supabase.from('station_time_summary').update({ assigned_section: sectionId }).in('id', ids)
       )
-
       await Promise.all(promises)
-
-      setGroupedData(prev => {
-        return prev.map(group => ({
-          ...group,
-          items: group.items.filter(item => !selections[item.id]) 
-        })).filter(group => group.items.length > 0) 
-      })
+      
+      setGroupedData(prev => prev.map(group => ({
+        ...group,
+        items: group.items.filter(item => !selections[item.id]) 
+      })).filter(group => group.items.length > 0))
 
       setSelections({})
       alert('🎉 排程成功！已移入排程總表。')
-
     } catch (err: any) {
-      console.error(err)
       alert('排程失敗: ' + err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  // 🔥🔥🔥 9. 修改：智慧預選 (Auto Select) - 只更新前端選取狀態
+  const handleAutoAssign = () => {
+    setIsAutoAssigning(true)
+    
+    // 1. 蒐集所有待排工序
+    const allPendingItems = groupedData.flatMap(group => group.items)
+    
+    if (allPendingItems.length === 0) {
+        alert('目前沒有待處理的工序。')
+        setIsAutoAssigning(false)
+        return
+    }
+
+    let matchCount = 0
+    // 2. 複製目前的選取狀態，準備進行更新
+    const newSelections = { ...selections }
+
+    for (const item of allPendingItems) {
+        // 如果已經有人工選取了，就不覆蓋 (或者你可以決定要不要覆蓋)
+        // 這裡設定：若未選取才自動填入
+        if (newSelections[item.id]) continue;
+
+        let targetSection = null
+        const stationName = item.station || ''
+        const docType = item.doc_type || ''
+
+        // --- 判斷邏輯 ---
+        if (stationName.includes('印刷')) targetSection = 'printing'
+        else if (stationName.includes('轉運')) {
+            targetSection = docType.includes('常平') ? 'changping' : 'outsourced'
+        }
+        else if (stationName.includes('雷切')) targetSection = 'laser'
+        else if (stationName.includes('包裝')) targetSection = 'packing'
+        else if (stationName.includes('加工') || stationName.includes('組裝')) targetSection = 'post'
+        else if (stationName.includes('常平')) targetSection = 'changping'
+        // --- 判斷結束 ---
+
+        if (targetSection) {
+            newSelections[item.id] = targetSection
+            matchCount++
+        }
+    }
+
+    // 3. 更新畫面狀態
+    setSelections(newSelections)
+    setIsAutoAssigning(false)
+    
+    if (matchCount > 0) {
+        alert(`✨ 已自動選取 ${matchCount} 筆建議站點！\n\n請檢查按鈕亮起狀況，確認無誤後點擊右下角「確認排程」送出。`)
+    } else {
+        alert('未找到符合規則的工序，或所有工序皆已選取。')
     }
   }
 
@@ -340,14 +338,33 @@ export default function SchedulePendingPage() {
             PENDING SCHEDULE // 新增/刪除/分配工序
           </p>
         </div>
-        <div className="relative w-full md:w-96">
-          <input 
-            type="text" 
-            placeholder="搜尋關鍵字..." 
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-lg block pl-4 p-2.5 focus:border-yellow-500 outline-none transition-colors shadow-lg"
-          />
+        
+        <div className="flex items-center gap-3">
+            {/* 🔥 自動預選按鈕 */}
+            <button 
+                onClick={handleAutoAssign}
+                disabled={isAutoAssigning}
+                className={`px-4 py-2.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 shadow-lg ${isAutoAssigning ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-cyan-600 hover:bg-cyan-500 text-white border-cyan-400'}`}
+            >
+                {isAutoAssigning ? (
+                    <>處理中...</>
+                ) : (
+                    <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                        一鍵智慧預選 (Auto Select)
+                    </>
+                )}
+            </button>
+
+            <div className="relative w-full md:w-96">
+                <input 
+                    type="text" 
+                    placeholder="搜尋關鍵字..." 
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 text-white text-sm rounded-lg block pl-4 p-2.5 focus:border-yellow-500 outline-none transition-colors shadow-lg"
+                />
+            </div>
         </div>
       </div>
 
@@ -420,7 +437,6 @@ export default function SchedulePendingPage() {
                         <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold mt-1 ${getStationBadge(row.station)}`}>
                           {row.station}
                         </span>
-                        {/* 顯示目前序號以便確認 */}
                         <span className="ml-2 text-[9px] text-slate-600 font-mono">#{row.sequence}</span>
                       </td>
 
@@ -460,7 +476,6 @@ export default function SchedulePendingPage() {
                         </div>
                       </td>
 
-                      {/* 刪除按鈕 */}
                       <td className="px-4 py-3 text-center align-middle">
                         <button onClick={() => handleDeleteOp(row.id, row.op_name)} className="text-slate-600 hover:text-red-500 transition-colors p-2 rounded hover:bg-red-950/30">
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -470,7 +485,6 @@ export default function SchedulePendingPage() {
                   )
                 })}
 
-                {/* 新增工序按鈕 */}
                 <tr>
                   <td colSpan={4} className="p-2 text-center border-t border-slate-800/30">
                     <button 
@@ -519,7 +533,6 @@ export default function SchedulePendingPage() {
             </p>
 
             <div className="space-y-4">
-              {/* 🔥 新增：插入位置選擇器 */}
               <div>
                 <label className="block text-xs text-cyan-400 mb-1 font-bold">插入位置 (Insert After)</label>
                 <select 
