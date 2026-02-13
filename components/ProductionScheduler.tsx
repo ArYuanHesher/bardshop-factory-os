@@ -56,57 +56,83 @@ function AlertModal({
   )
 }
 
-// --- 2. 詳細資料彈窗 (含完成/部分完成功能) ---
-function TaskDetailModal({ task, onClose }: { task: any, onClose: () => void }) {
+// --- 2. 詳細資料彈窗 (🔥 新增人員資訊與完整欄位) ---
+function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: () => void, onTaskUpdate: (id: number, updates: any) => void }) {
   const [orderStages, setOrderStages] = useState<any[]>([])
   const [isLoadingStages, setIsLoadingStages] = useState(false)
-  
   const [partialInput, setPartialInput] = useState<string>('')
   const [currentCompleted, setCurrentCompleted] = useState<number>(task?.completed_quantity || 0)
 
-  useEffect(() => {
-    if (task?.order_number) {
-      setCurrentCompleted(task.completed_quantity || 0)
-      const fetchStages = async () => {
-        setIsLoadingStages(true)
-        const { data, error } = await supabase
-          .from('station_time_summary')
-          .select(`*, production_machines ( name )`)
-          .eq('order_number', task.order_number)
-          .eq('item_code', task.item_code)
-          .eq('quantity', task.quantity)
-          .order('id', { ascending: true })
+  const fetchStages = async () => {
+    if (!task?.order_number) return
+    setIsLoadingStages(true)
+    const { data, error } = await supabase
+      .from('station_time_summary')
+      .select(`*, production_machines ( name )`)
+      .eq('order_number', task.order_number)
+      .eq('item_code', task.item_code)
+      .eq('quantity', task.quantity)
+      .order('id', { ascending: true })
 
-        if (!error && data) setOrderStages(data)
-        setIsLoadingStages(false)
-      }
+    if (!error && data) setOrderStages(data)
+    setIsLoadingStages(false)
+  }
+
+  useEffect(() => {
+    if (task) {
+      setCurrentCompleted(task.completed_quantity || 0)
       fetchStages()
     }
   }, [task])
 
   const handleFullComplete = async () => {
     if(!confirm('確定標記為「全部完成」嗎？')) return
-    const { error } = await supabase.from('station_time_summary').update({ status: 'completed', completed_quantity: task.quantity }).eq('id', task.id)
-    if (!error) { alert('已更新為完成狀態！'); window.location.reload() }
+    const updates = { status: 'completed', completed_quantity: task.quantity }
+    const { error } = await supabase.from('station_time_summary').update(updates).eq('id', task.id)
+    if (!error) { 
+        setCurrentCompleted(task.quantity)
+        onTaskUpdate(task.id, updates)
+        alert('已更新為完成狀態！') 
+    }
   }
 
   const handlePartialUpdate = async () => {
     const qty = parseInt(partialInput)
     if (isNaN(qty) || qty < 0) return alert('請輸入有效數量')
-    const newTotal = qty
-    const isFull = newTotal >= task.quantity
-    const updates: any = { completed_quantity: newTotal }
-    if (isFull) updates.status = 'completed'
+    
+    const updates: any = { completed_quantity: qty }
+    if (qty >= task.quantity) updates.status = 'completed'
     else updates.status = 'active'
+
     const { error } = await supabase.from('station_time_summary').update(updates).eq('id', task.id)
     if (!error) {
-        setCurrentCompleted(newTotal); setPartialInput('')
-        if(isFull) alert('數量已達標，自動標記為完成！'); else alert(`進度已更新：${newTotal} / ${task.quantity}`)
+        setCurrentCompleted(qty)
+        setPartialInput('')
+        fetchStages()
+        onTaskUpdate(task.id, updates)
+        if(qty >= task.quantity) alert('數量已達標，自動標記為完成！'); else alert(`進度已更新：${qty} / ${task.quantity}`)
+    }
+  }
+
+  const handleResetProgress = async () => {
+    if (!confirm('⚠️ 警告：確定要取消完成狀態並重置進度嗎？\n此動作將把「已完成數量」歸零，且無法復原。')) return
+    
+    const updates = { status: 'active', completed_quantity: 0 }
+    const { error } = await supabase.from('station_time_summary').update(updates).eq('id', task.id)
+
+    if (!error) {
+        setCurrentCompleted(0)
+        fetchStages()
+        onTaskUpdate(task.id, updates)
+        alert('🔄 已重置進度！任務狀態已恢復。')
+    } else {
+        alert('重置失敗: ' + error.message)
     }
   }
 
   if (!task) return null
   const remaining = task.quantity - currentCompleted
+  const hasProgress = currentCompleted > 0 || task.status === 'completed'
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" onClick={onClose}>
@@ -114,13 +140,26 @@ function TaskDetailModal({ task, onClose }: { task: any, onClose: () => void }) 
         <div className="bg-slate-950 px-6 py-3 border-b border-slate-800 flex justify-between items-center shrink-0">
             <div className="flex items-center gap-4">
                 <h2 className="text-2xl font-black text-white tracking-wide font-mono">{task.order_number}</h2>
+                <span className="text-xs px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-400">{task.doc_type}</span>
                 <div className="flex items-center gap-2 ml-4 bg-slate-900 p-1 rounded-lg border border-slate-800">
                     <button onClick={handleFullComplete} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded transition-colors flex items-center gap-1">✅ 全部完成</button>
                     <div className="w-[1px] h-6 bg-slate-700 mx-1"></div>
                     <div className="flex items-center gap-2">
                         <input type="number" placeholder="輸入數量" className="w-20 bg-black/50 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none focus:border-cyan-500" value={partialInput} onChange={(e) => setPartialInput(e.target.value)} />
-                        <button onClick={handlePartialUpdate} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded transition-colors">更新進度</button>
+                        <button onClick={handlePartialUpdate} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded transition-colors">更新</button>
                     </div>
+                    {hasProgress && (
+                        <>
+                            <div className="w-[1px] h-6 bg-slate-700 mx-1"></div>
+                            <button 
+                                onClick={handleResetProgress}
+                                className="px-3 py-1.5 bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-800 text-xs font-bold rounded transition-colors flex items-center gap-1"
+                                title="重置進度歸零"
+                            >
+                                ↺ 重置
+                            </button>
+                        </>
+                    )}
                     <span className="text-xs text-slate-400 ml-2 font-mono">(剩餘: <span className="text-yellow-400 font-bold">{remaining > 0 ? remaining : 0}</span>)</span>
                 </div>
             </div>
@@ -129,18 +168,31 @@ function TaskDetailModal({ task, onClose }: { task: any, onClose: () => void }) 
         <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
             <div className="flex-1 p-6 overflow-y-auto custom-scrollbar border-r border-slate-800 bg-slate-900/50">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2"><span className="w-1 h-4 bg-blue-500 rounded-full"></span> 訂單基本資料</h3>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
-                    <div className="col-span-2 grid grid-cols-2 gap-4 p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
+                <div className="space-y-4">
+                    {/* 客戶與交期 */}
+                    <div className="grid grid-cols-2 gap-4 p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
                         <div><span className="text-[10px] text-slate-500 block">客戶</span><span className="text-white font-medium">{task.customer}</span></div>
                         <div><span className="text-[10px] text-slate-500 block">交付日期</span><span className="text-yellow-400 font-bold font-mono">{task.delivery_date}</span></div>
                     </div>
-                    <div className="col-span-2 space-y-3">
+
+                    {/* 🔥 新增：人員資訊區塊 */}
+                    <div className="grid grid-cols-3 gap-2 p-2 bg-slate-800/20 rounded border border-slate-700/30">
+                        <div><span className="text-[10px] text-slate-500 block">承辦人員</span><span className="text-slate-300 text-xs font-bold">{task.handler || '-'}</span></div>
+                        <div><span className="text-[10px] text-slate-500 block">美編人員</span><span className="text-slate-300 text-xs font-bold">{task.designer || '-'}</span></div>
+                        <div><span className="text-[10px] text-slate-500 block">開單人員</span><span className="text-slate-300 text-xs font-bold">{task.issuer || '-'}</span></div>
+                    </div>
+
+                    <div className="space-y-3 pt-2">
                         <div className="border-b border-slate-800 pb-2"><span className="text-[10px] text-slate-500 block">品號</span><span className="text-purple-300 font-mono">{task.item_code}</span></div>
                         <div className="border-b border-slate-800 pb-2"><span className="text-[10px] text-slate-500 block">品名</span><span className="text-white font-bold">{task.item_name}</span></div>
                     </div>
-                    <div><span className="text-[10px] text-slate-500 block">數量</span><span className="text-white text-lg font-mono font-bold">{task.quantity}</span></div>
-                    <div><span className="text-[10px] text-slate-500 block">已完成</span><span className="text-cyan-400 text-lg font-mono font-bold">{currentCompleted}</span></div>
-                    <div><span className="text-[10px] text-slate-500 block">總工時</span><span className="text-emerald-400 font-mono font-bold">{task.total_time_min} min</span></div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <div><span className="text-[10px] text-slate-500 block">數量</span><span className="text-white text-lg font-mono font-bold">{task.quantity}</span></div>
+                        <div><span className="text-[10px] text-slate-500 block">已完成</span><span className="text-cyan-400 text-lg font-mono font-bold">{currentCompleted}</span></div>
+                        <div><span className="text-[10px] text-slate-500 block">總工時</span><span className="text-emerald-400 font-mono font-bold">{task.total_time_min} min</span></div>
+                        <div><span className="text-[10px] text-slate-500 block">盤數</span><span className="text-slate-300 font-mono">{task.plate_count || '-'}</span></div>
+                    </div>
                 </div>
             </div>
             <div className="w-full lg:w-[450px] bg-[#0a101a] flex flex-col border-l border-slate-800">
@@ -155,6 +207,12 @@ function TaskDetailModal({ task, onClose }: { task: any, onClose: () => void }) 
                                 const isCurrent = stage.id === task.id
                                 const isScheduled = !!stage.scheduled_date
                                 const machineName = stage.production_machines?.name || (stage.production_machine_id ? `機台 #${stage.production_machine_id}` : '-')
+                                
+                                const stageQty = stage.quantity || 1
+                                const stageDone = stage.completed_quantity || 0
+                                const progressPct = Math.min(100, Math.round((stageDone / stageQty) * 100))
+                                const isStageComplete = stage.status === 'completed' || stageDone >= stageQty
+
                                 return (
                                     <div key={stage.id} className={`p-3 rounded-lg border transition-all ${isCurrent ? 'bg-cyan-900/20 border-cyan-500 ring-1 ring-cyan-500/50' : 'bg-slate-900 border-slate-800'}`}>
                                         <div className="flex justify-between items-start mb-2">
@@ -164,9 +222,25 @@ function TaskDetailModal({ task, onClose }: { task: any, onClose: () => void }) 
                                             </div>
                                             <span className="text-[10px] text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{stage.assigned_section}</span>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-2 text-xs">
+                                        <div className="grid grid-cols-2 gap-2 text-xs mb-2">
                                             <div className="flex flex-col"><span className="text-slate-600 text-[10px]">預計日期</span>{isScheduled ? <span className="text-emerald-400 font-mono font-bold">{stage.scheduled_date}</span> : <span className="text-yellow-600 italic">待排程</span>}</div>
                                             <div className="flex flex-col text-right"><span className="text-slate-600 text-[10px]">機台</span><span className={isScheduled ? "text-slate-300" : "text-slate-600"}>{machineName}</span></div>
+                                        </div>
+                                        
+                                        <div className="mt-2 pt-2 border-t border-slate-800/50">
+                                            <div className="flex justify-between items-end text-[10px] mb-1">
+                                                <span className={`${isStageComplete ? 'text-emerald-400' : 'text-slate-400'}`}>
+                                                    {isStageComplete ? '已完成' : '進行中'} 
+                                                    <span className="ml-1 text-slate-500 font-mono">{stageDone}/{stageQty}</span>
+                                                </span>
+                                                <span className="font-mono text-white">{progressPct}%</span>
+                                            </div>
+                                            <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                                                <div 
+                                                    className={`h-full transition-all duration-500 ${isStageComplete ? 'bg-emerald-500' : 'bg-blue-500'}`} 
+                                                    style={{ width: `${progressPct}%` }}
+                                                ></div>
+                                            </div>
                                         </div>
                                     </div>
                                 )
@@ -181,11 +255,15 @@ function TaskDetailModal({ task, onClose }: { task: any, onClose: () => void }) 
   )
 }
 
-// --- 3. 可拖曳卡片 (含黑霧特效) ---
+// --- 3. 可拖曳卡片 (含黑霧特效 & 部分完成提示) ---
 function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: any, isOverlay?: boolean, onTaskDblClick?: (task: any) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id.toString(), data: { task } })
   const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.3 : 1 }
+  
   const isCompleted = task.status === 'completed'
+  const isPartial = !isCompleted && (task.completed_quantity > 0)
+  const progressPct = task.quantity > 0 ? Math.min(100, Math.round((task.completed_quantity / task.quantity) * 100)) : 0
+
   const getDocTypeColor = (type: string) => {
     if (!type) return 'bg-slate-700 text-slate-400 border-slate-600'
     if (type.includes('急')) return 'bg-red-900/60 text-red-300 border-red-500/50'
@@ -194,7 +272,26 @@ function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: any,
   }
 
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes} onDoubleClick={(e) => { e.stopPropagation(); if (onTaskDblClick) onTaskDblClick(task); }} className={`p-2 mb-2 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing text-xs select-none relative group transition-all flex flex-col gap-1.5 ${isOverlay ? 'bg-cyan-950 border-cyan-500 scale-105 z-50 shadow-2xl ring-2 ring-cyan-400 w-60' : 'bg-slate-800 border-slate-700 hover:border-cyan-500/50 hover:bg-slate-750 hover:shadow-md'} ${isCompleted ? 'grayscale opacity-50 bg-black/80 border-slate-800' : ''}`}>
+    <div 
+      ref={setNodeRef} 
+      style={style} 
+      {...listeners} 
+      {...attributes} 
+      onDoubleClick={(e) => { e.stopPropagation(); if (onTaskDblClick) onTaskDblClick(task); }} 
+      className={`
+        p-2 mb-2 rounded-lg border shadow-sm cursor-grab active:cursor-grabbing text-xs select-none relative group transition-all flex flex-col gap-1.5 
+        ${isOverlay ? 'bg-cyan-950 border-cyan-500 scale-105 z-50 shadow-2xl ring-2 ring-cyan-400 w-60' : 'bg-slate-800 border-slate-700 hover:border-cyan-500/50 hover:bg-slate-750 hover:shadow-md'} 
+        ${isCompleted ? 'grayscale opacity-50 bg-black/80 border-slate-800' : ''}
+      `}
+    >
+      {/* 呼吸燈 */}
+      {isPartial && !isOverlay && (
+        <span className="absolute -top-1 -right-1 flex h-3 w-3 z-10">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500 border border-slate-900"></span>
+        </span>
+      )}
+
       <div className="flex justify-between items-center border-b border-slate-700/50 pb-1.5">
         <span className={`font-mono font-black text-[13px] tracking-tight truncate ${isCompleted ? 'text-slate-500' : 'text-cyan-400'}`}>{task.order_number}</span>
         <span className={`text-[12px] px-1.5 py-0.5 rounded border font-bold shrink-0 ${isCompleted ? 'bg-slate-900 text-slate-600 border-slate-800' : getDocTypeColor(task.doc_type)}`}>{task.doc_type || '工單'}</span>
@@ -205,16 +302,25 @@ function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: any,
         <div className="flex items-center gap-1 border-l border-slate-700 pl-2"><span className="text-slate-500 text-[11px] scale-90">工時:</span><span className={`font-mono font-bold ${isCompleted ? 'text-slate-600' : 'text-emerald-500'}`}>{task.total_time_min}m</span></div>
         <div className="flex items-center gap-1 border-l border-slate-700 pl-2"><span className="text-slate-500 text-[11px] scale-90">交期:</span><span className={`font-mono font-bold ${isCompleted ? 'text-slate-600' : 'text-yellow-400'}`}>{task.delivery_date?.slice(5) || '-'}</span></div>
       </div>
+      
+      {/* 微型進度條 */}
+      {isPartial && (
+        <div className="w-full h-1 bg-slate-700 rounded-full overflow-hidden mt-1">
+            <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${progressPct}%` }}></div>
+        </div>
+      )}
+
       <div className="flex justify-between items-center text-[9px] pt-0.5">
         <div className="text-slate-400 truncate max-w-[50%]">🏢 {task.customer}</div>
         <div className="text-slate-500 font-mono truncate max-w-[45%]">{task.item_code}</div>
       </div>
+      
       {isCompleted && (<div className="absolute inset-0 flex items-center justify-center pointer-events-none"><div className="bg-black/80 rounded-full p-1 border border-slate-600"><span className="text-2xl">✅</span></div></div>)}
     </div>
   )
 }
 
-// --- 4. 行事曆格子 ---
+// --- 4. 行事曆格子 (維持不變) ---
 function DroppableDay({ date, tasks, title, isMachineSelected, isToday, dailyCapacity, onTaskDblClick }: { date: string, tasks: any[], title: string, isMachineSelected: boolean, isToday: boolean, dailyCapacity: number, onTaskDblClick: (task: any) => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: date, disabled: !isMachineSelected })
   const usedMins = tasks.reduce((sum, t) => sum + t.total_time_min, 0)
@@ -236,7 +342,7 @@ function DroppableDay({ date, tasks, title, isMachineSelected, isToday, dailyCap
   )
 }
 
-// --- 5. Unscheduled Sidebar (維持原樣) ---
+// --- 5. Unscheduled Sidebar (維持不變) ---
 function UnscheduledSidebar({ tasks, onTaskDblClick }: { tasks: any[], onTaskDblClick: (t: any) => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'unscheduled' })
   const [searchQuery, setSearchQuery] = useState('')
@@ -291,10 +397,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   const [activeDragItem, setActiveDragItem] = useState<any>(null)
   const [selectedTaskDetail, setSelectedTaskDetail] = useState<any>(null)
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean, message: string, onConfirm: () => void } | null>(null)
-  
-  // 🔥 新增：全域搜尋字串
   const [globalFilter, setGlobalFilter] = useState('')
-
   const [currentStart, setCurrentStart] = useState(new Date())
   const [showWeekends, setShowWeekends] = useState(false)
   const [showNextWeek, setShowNextWeek] = useState(false)
@@ -332,14 +435,9 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   }
   const week1Dates = generateDates(currentStart, 1); const week2Dates = generateDates(new Date(new Date(currentStart).setDate(currentStart.getDate() + 7)), 1)
 
-  // 🔥 獲取特定日期的任務 (加入 Global Filter 邏輯)
   const getTasksForDate = (date: string) => {
     if (!selectedMachineId) return []
-    
-    // 1. 先篩選日期與機台
     let dailyTasks = tasks.filter(t => t.scheduled_date === date && t.production_machine_id === selectedMachineId)
-    
-    // 2. 🔥 再套用全域搜尋 (如果有輸入的話)
     if (globalFilter.trim()) {
         const q = globalFilter.toLowerCase()
         dailyTasks = dailyTasks.filter(t => 
@@ -348,12 +446,12 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
             (t.item_name?.toLowerCase().includes(q))
         )
     }
-
-    // 3. 排序 (未完成在前)
     return dailyTasks.sort((a, b) => {
         const aCompleted = a.status === 'completed' ? 1 : 0
         const bCompleted = b.status === 'completed' ? 1 : 0
-        return aCompleted - bCompleted
+        if (aCompleted !== bCompleted) return aCompleted - bCompleted
+        const getUrgency = (t: any) => (t.doc_type || '').includes('急') ? 1 : 0
+        return getUrgency(b) - getUrgency(a)
     })
   }
   
@@ -363,6 +461,15 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
     setTasks(prev => prev.map(t => { if (t.id.toString() === taskId) { return { ...t, scheduled_date: targetDate, production_machine_id: machineId } } return t }))
     await supabase.from('station_time_summary').update({ scheduled_date: targetDate, production_machine_id: machineId }).eq('id', taskId)
     setAlertConfig(null)
+  }
+
+  const handleTaskUpdate = (taskId: number, updates: any) => {
+    setTasks(prev => prev.map(t => 
+        t.id === taskId ? { ...t, ...updates } : t
+    ))
+    if (selectedTaskDetail?.id === taskId) {
+        setSelectedTaskDetail((prev: any) => ({ ...prev, ...updates }))
+    }
   }
 
   const handleDragEnd = async (event: any) => {
@@ -386,7 +493,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   
   return (
     <DndContext onDragEnd={handleDragEnd} onDragStart={handleDragStart} sensors={sensors} collisionDetection={pointerWithin}>
-      <TaskDetailModal task={selectedTaskDetail} onClose={() => setSelectedTaskDetail(null)} />
+      <TaskDetailModal task={selectedTaskDetail} onClose={() => setSelectedTaskDetail(null)} onTaskUpdate={handleTaskUpdate} />
       <AlertModal isOpen={!!alertConfig} message={alertConfig?.message || ''} onConfirm={alertConfig?.onConfirm || (() => {})} onCancel={() => setAlertConfig(null)} />
       <div className="flex flex-col h-[calc(100vh-80px)] overflow-hidden">
         <div className="flex flex-col gap-3 mb-2 px-1">
@@ -398,7 +505,6 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                         <input type="date" value={currentStart.toISOString().split('T')[0]} onChange={handleDatePick} className="bg-transparent text-white text-sm font-bold border-none outline-none focus:ring-0 w-32 text-center"/>
                         <button onClick={() => changeWeek(1)} className="p-1 hover:text-cyan-400 text-slate-400">→</button>
                     </div>
-                    {/* 🔥 新增：全域排程搜尋框 */}
                     <div className="relative ml-2">
                         <input 
                             type="text" 
