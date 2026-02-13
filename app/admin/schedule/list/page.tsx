@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '../../../lib/supabaseClient'
-import { PRODUCTION_SECTIONS } from '../../../config/productionSections'
+import { supabase } from '../../../../lib/supabaseClient'
+import { PRODUCTION_SECTIONS } from '../../../../config/productionSections'
 
 interface ScheduledItem {
   id: number
