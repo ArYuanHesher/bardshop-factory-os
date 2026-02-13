@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 import { PRODUCTION_SECTIONS } from '../../../../config/productionSections'
+import OrderEditModal from '../../../../components/OrderEditModal'
 
 interface ScheduledItem {
   id: number
@@ -24,17 +25,37 @@ interface ScheduledItem {
   created_at: string
   scheduled_date: string | null
   production_machine_id: number | null
-  // 🔥 新增：關聯查詢出的機台資料
+  status: string // 'active' | 'completed'
+  completed_quantity: number
   production_machines: {
     name: string
   } | null
 }
 
+// 群組結構介面
+interface OrderGroup {
+  order_number: string
+  customer: string
+  item_name: string
+  item_code: string
+  delivery_date: string
+  doc_type: string
+  quantity: number
+  plate_count: string
+  designer: string
+  handler: string
+  issuer: string
+  items: ScheduledItem[]
+}
+
 export default function ScheduleListPage() {
-  const [data, setData] = useState<ScheduledItem[]>([])
+  const [orderGroups, setOrderGroups] = useState<OrderGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [filterSection, setFilterSection] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  
+  // 編輯視窗狀態
+  const [editingOrder, setEditingOrder] = useState<string | null>(null)
 
   useEffect(() => {
     fetchScheduledData()
@@ -43,15 +64,11 @@ export default function ScheduleListPage() {
   const fetchScheduledData = async () => {
     setLoading(true)
     
-    // 🔥 修改：加入關聯查詢 production_machines (name)
     let query = supabase
       .from('station_time_summary')
       .select('*, production_machines ( name )')
       .not('assigned_section', 'is', null)
-      
-    // 🔥 修改：排序邏輯改為「單號優先」，讓相同訂單排在一起
-    query = query.order('order_number', { ascending: true })
-                 .order('id', { ascending: true })
+      .order('id', { ascending: true }) // 確保工序順序正確 (ID 小 -> 大)
 
     if (filterSection !== 'all') {
       query = query.eq('assigned_section', filterSection)
@@ -59,269 +76,288 @@ export default function ScheduleListPage() {
 
     const { data, error } = await query
     
-    // 轉型強制處理 (Supabase join 類型有時需手動斷言)
     if (error) {
         console.error(error)
     } else {
-        setData((data as any) || [])
+        const rawData = (data as any) || []
+        groupDataByOrder(rawData)
     }
     setLoading(false)
   }
 
-  // 退回待排
-  const handleRevert = async (id: number, orderNumber: string) => {
-    if (!confirm(`確定要將工單 [${orderNumber}] 退回「待排表」嗎？\n(這會同時清除已排定的機台與日期)`)) return
+  // 將平鋪資料轉為以工單為單位的群組
+  const groupDataByOrder = (data: ScheduledItem[]) => {
+    const groups: Record<string, OrderGroup> = {}
+    
+    data.forEach(item => {
+        // 🔥 強制轉型為數字，避免資料庫回傳字串導致顯示錯誤
+        const currentQty = Number(item.quantity) || 0
+        const currentPlateCount = item.plate_count || '0'
 
-    const { error } = await supabase
-      .from('station_time_summary')
-      .update({ 
-          assigned_section: null,
-          scheduled_date: null,       // 同步清除日期
-          production_machine_id: null // 同步清除機台
-      })
-      .eq('id', id)
+        if (!groups[item.order_number]) {
+            // 初始化群組
+            groups[item.order_number] = {
+                order_number: item.order_number,
+                customer: item.customer,
+                item_name: item.item_name,
+                item_code: item.item_code,
+                delivery_date: item.delivery_date,
+                doc_type: item.doc_type,
+                quantity: currentQty, 
+                plate_count: currentPlateCount,
+                designer: item.designer,
+                handler: item.handler,
+                issuer: item.issuer,
+                items: []
+            }
+        } else {
+            // 🔥 關鍵修正：依照指示「抓最後一筆」
+            // 因為資料來源已按 ID 排序 (舊->新)，我們在迴圈中不斷更新 quantity，
+            // 最後留下的就會是該工單「最後一筆資料」的 quantity。
+            groups[item.order_number].quantity = currentQty
+            groups[item.order_number].plate_count = currentPlateCount
+        }
+        groups[item.order_number].items.push(item)
+    })
 
-    if (error) alert(error.message)
-    else {
-      setData(prev => prev.filter(row => row.id !== id))
-    }
+    // 轉回陣列
+    setOrderGroups(Object.values(groups))
   }
 
-  // 刪除案件
-  const handleDelete = async (id: number, orderNumber: string) => {
-    if (!confirm(`⚠️ 警告：您確定要「永久刪除」工單 [${orderNumber}] 的這筆排程資料嗎？\n\n此操作無法復原！`)) return
-    if (!confirm(`⚠️ 二次確認：刪除後資料將從系統消失。\n\n請確認是否執行刪除？`)) return
-
-    const { error } = await supabase
-      .from('station_time_summary')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      alert(`刪除失敗: ${error.message}`)
-    } else {
-      setData(prev => prev.filter(row => row.id !== id))
-    }
-  }
-
-  const handleUpdate = async (id: number, field: string, value: any) => {
-    setData(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
-    await supabase.from('station_time_summary').update({ [field]: value }).eq('id', id)
-  }
-
-  const getStationBadge = (station: string) => {
-    const s = station || ''
-    if (s.includes('印刷')) return 'text-blue-400 bg-blue-900/20'
-    if (s.includes('雷切')) return 'text-red-400 bg-red-900/20'
-    if (s.includes('包裝')) return 'text-orange-400 bg-orange-900/20'
-    if (s.includes('後加工')) return 'text-purple-400 bg-purple-900/20'
-    return 'text-slate-400 bg-slate-800'
-  }
-
-  const filteredData = data.filter(item => {
+  // 搜尋過濾邏輯
+  const filteredGroups = orderGroups.filter(g => {
     if (!searchTerm) return true
     const q = searchTerm.toLowerCase()
     return (
-      (item.order_number?.toLowerCase().includes(q)) ||
-      (item.customer?.toLowerCase().includes(q)) ||
-      (item.item_name?.toLowerCase().includes(q)) ||
-      (item.item_code?.toLowerCase().includes(q))
+      g.order_number?.toLowerCase().includes(q) ||
+      g.customer?.toLowerCase().includes(q) ||
+      g.item_name?.toLowerCase().includes(q) ||
+      g.item_code?.toLowerCase().includes(q)
     )
   })
 
+  // 計算群組總進度 (所有工序完成比例)
+  // 若需要以「數量」計算總進度，可在此修改邏輯
+  const calculateTotalProgress = (items: ScheduledItem[]) => {
+    if (items.length === 0) return 0
+    const totalItems = items.length
+    const completedItems = items.filter(i => i.status === 'completed' || (i.quantity > 0 && i.completed_quantity >= i.quantity)).length
+    return Math.round((completedItems / totalItems) * 100)
+  }
+
   return (
-    <div className="p-6 md:p-8 max-w-[1800px] mx-auto min-h-screen">
+    <div className="p-4 md:p-6 max-w-[1920px] mx-auto min-h-screen">
+      {/* 編輯視窗 */}
+      <OrderEditModal 
+        orderNumber={editingOrder || ''} 
+        isOpen={!!editingOrder} 
+        onClose={() => setEditingOrder(null)} 
+        onSaveSuccess={fetchScheduledData}
+      />
+
       <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">排程總表</h1>
-          <p className="text-blue-400 mt-1 font-mono text-sm uppercase">
-            SCHEDULED LIST // 已分配生產區塊的訂單
+          <h1 className="text-3xl font-black text-white tracking-tight">排程總表 (管理模式)</h1>
+          <p className="text-blue-400 mt-1 font-mono text-sm uppercase flex items-center gap-2">
+            <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+            MASTER SCHEDULE // 工單結構化檢視與編輯
           </p>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-3 items-end">
-            <div className="relative group">
+        <div className="flex flex-col md:flex-row gap-3 items-end w-full md:w-auto">
+            <div className="relative group w-full md:w-auto">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-4 w-4 text-slate-500 group-focus-within:text-cyan-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+                    <svg className="w-4 h-4 text-slate-500 group-focus-within:text-cyan-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 </div>
                 <input 
                     type="text" 
-                    placeholder="搜尋單號 / 客戶 / 品名..." 
+                    placeholder="🔍 搜尋單號 / 客戶 / 品名..." 
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-9 pr-4 py-1.5 bg-black/30 border border-slate-700 rounded text-sm text-slate-200 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none w-64 transition-all"
+                    className="pl-10 pr-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none w-full md:w-80 shadow-inner"
                 />
             </div>
 
-            <div className="flex gap-2 flex-wrap justify-end">
-            <button 
-                onClick={() => setFilterSection('all')}
-                className={`px-3 py-1.5 rounded text-xs border transition-all ${filterSection === 'all' ? 'bg-white text-black border-white font-bold' : 'bg-slate-900 text-slate-400 border-slate-700 hover:border-slate-500'}`}
-            >
-                全部顯示
-            </button>
-            {PRODUCTION_SECTIONS.map(s => (
-                <button
-                key={s.id}
-                onClick={() => setFilterSection(s.id)}
-                className={`px-3 py-1.5 rounded text-xs border transition-all ${filterSection === s.id ? `${s.color} text-white border-transparent font-bold shadow-[0_0_15px_rgba(var(--tw-shadow-color),0.4)]` : 'bg-slate-900 text-slate-400 border-slate-700 hover:border-slate-500'}`}
+            <div className="flex gap-1.5 flex-wrap justify-end">
+                <button 
+                    onClick={() => setFilterSection('all')}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${filterSection === 'all' ? 'bg-white text-slate-900 border-white shadow-lg' : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500 hover:bg-slate-700'}`}
                 >
-                {s.name}
+                    全部顯示
                 </button>
-            ))}
+                {PRODUCTION_SECTIONS.map(s => (
+                    <button
+                    key={s.id}
+                    onClick={() => setFilterSection(s.id)}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${filterSection === s.id ? `${s.color} text-white border-transparent shadow-[0_0_15px_rgba(var(--tw-shadow-color),0.4)] transform scale-105` : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500 hover:bg-slate-700'}`}
+                    >
+                    {s.name}
+                    </button>
+                ))}
             </div>
         </div>
       </div>
 
-      <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden min-h-[600px] flex flex-col shadow-xl">
-        <div className="flex-1 overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left text-sm text-slate-400 border-collapse">
-            <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono sticky top-0 z-10 shadow-lg">
-              <tr>
-                <th className="px-4 py-3 w-20 text-center border-b border-slate-700">操作</th>
-                <th className="px-4 py-3 w-48 border-b border-slate-700">工單資訊</th>
-                <th className="px-4 py-3 w-28 text-center border-b border-slate-700">分配區塊</th>
-                {/* 🔥 新增欄位：排程狀態 */}
-                <th className="px-4 py-3 w-32 text-center border-b border-slate-700">排程狀態</th>
-                <th className="px-4 py-3 min-w-[200px] border-b border-slate-700">品項資訊</th>
-                <th className="px-4 py-3 w-24 text-right border-b border-slate-700">數量/盤數</th>
-                <th className="px-4 py-3 w-40 border-b border-slate-700">工序與站點</th>
-                <th className="px-4 py-3 w-24 text-right border-b border-slate-700 text-emerald-400">預計總時</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/50">
-              {loading ? (
-                <tr><td colSpan={8} className="p-20 text-center text-slate-500">載入中...</td></tr>
-              ) : filteredData.length === 0 ? (
-                <tr><td colSpan={8} className="p-20 text-center text-slate-600">{searchTerm ? '無符合搜尋條件的資料' : '無符合條件的已排程資料'}</td></tr>
-              ) : filteredData.map((row, index) => {
-                const section = PRODUCTION_SECTIONS.find(s => s.id === row.assigned_section)
-                
-                // 判斷是否為同一張訂單 (視覺分隔線邏輯)
-                const isNewOrder = index === 0 || row.order_number !== filteredData[index - 1].order_number
+      <div className="space-y-6">
+        {loading ? (
+            <div className="text-center py-32 text-slate-500 animate-pulse text-lg">載入資料中...</div>
+        ) : filteredGroups.length === 0 ? (
+            <div className="text-center py-32 text-slate-600 bg-slate-900/30 rounded-xl border border-slate-800 border-dashed">
+                <p className="text-xl font-bold mb-2">無符合資料</p>
+                <p className="text-sm">請嘗試調整搜尋關鍵字或篩選條件</p>
+            </div>
+        ) : (
+            filteredGroups.map(group => {
+                // 檢查是否有盤數資料且不為0 (過濾掉 "0", "0.0", null, undefined)
+                const hasPlateCount = group.plate_count && parseFloat(group.plate_count) > 0
                 
                 return (
-                  <tr key={row.id} className={`hover:bg-slate-800/60 transition-colors group ${isNewOrder && index !== 0 ? 'border-t-2 border-slate-700' : ''}`}>
-                    {/* 1. 操作按鈕 */}
-                    <td className="px-2 py-3 text-center align-middle bg-slate-900/30">
-                      <div className="flex justify-center gap-2">
-                        <button 
-                            onClick={() => handleRevert(row.id, row.order_number)} 
-                            className="text-slate-600 hover:text-yellow-400 opacity-0 group-hover:opacity-100 transition-all p-1 hover:bg-yellow-900/20 rounded" 
-                            title="退回待排表"
-                        >
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
-                        <button 
-                            onClick={() => handleDelete(row.id, row.order_number)} 
-                            className="text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all p-1 hover:bg-red-900/20 rounded" 
-                            title="永久刪除案件"
-                        >
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                      </div>
-                    </td>
+                    <div key={group.order_number} className="bg-[#0f172a] border border-slate-700/60 rounded-xl overflow-hidden shadow-lg hover:shadow-2xl hover:border-slate-600 transition-all duration-300 relative group">
+                        
+                        {/* 工單 Header (資訊區) */}
+                        <div className="bg-slate-900/80 px-5 py-4 border-b border-slate-800 grid grid-cols-1 lg:grid-cols-[2fr_1.5fr_1fr_auto] gap-6 items-center backdrop-blur-sm">
+                            
+                            {/* 1. 基本識別與數量資訊 */}
+                            <div className="flex flex-col gap-1.5">
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <span className="text-xl font-black text-cyan-400 font-mono tracking-wide">{group.order_number}</span>
+                                    
+                                    {/* 單據種類 */}
+                                    <span className={`text-sm px-3 py-1 rounded border font-bold uppercase tracking-wider ${group.doc_type?.includes('急') ? 'bg-red-900/40 text-red-400 border-red-800' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>
+                                        {group.doc_type || '一般'}
+                                    </span>
 
-                    {/* 2. 工單資訊 */}
-                    <td className="px-4 py-3 align-top border-r border-slate-800/30 bg-slate-900/10">
-                      {isNewOrder ? (
-                          <>
-                            <div className="flex justify-between items-start">
-                                <div className="font-mono text-cyan-400 font-bold text-base">{row.order_number}</div>
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">{row.doc_type}</span>
-                            </div>
-                            <div className="mt-2 space-y-1">
-                                <div className="flex items-center gap-2 text-xs text-slate-400">
-                                <span className="text-slate-600 font-mono">交付:</span>
-                                <span className="text-white">{row.delivery_date}</span>
+                                    {/* 🔥 總數量 (顯示抓取到的最大數量) */}
+                                    <span className="text-slate-400 text-sm font-bold ml-2">
+                                        總數量: <span className="text-white font-mono text-base">{group.quantity}</span> 個
+                                    </span>
+
+                                    {/* 總盤數 (若有才顯示) */}
+                                    {hasPlateCount && (
+                                        <>
+                                            <span className="text-slate-700">|</span>
+                                            <span className="text-slate-400 text-sm font-bold">
+                                                總盤數: <span className="text-yellow-400 font-mono text-base">{group.plate_count}</span> 盤
+                                            </span>
+                                        </>
+                                    )}
                                 </div>
-                                <div className="flex items-center gap-2 text-xs text-slate-400">
-                                <span className="text-slate-600 font-mono">客戶:</span>
-                                <span className="truncate max-w-[120px]" title={row.customer}>{row.customer}</span>
+                                <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
+                                    <span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700">{group.customer}</span>
+                                    <span className="font-mono text-slate-500">{group.item_code}</span>
                                 </div>
                             </div>
-                          </>
-                      ) : (
-                          <div className="h-full border-l-2 border-slate-800 ml-2 opacity-30"></div>
-                      )}
-                    </td>
 
-                    {/* 3. 分配區塊 */}
-                    <td className="px-4 py-3 text-center align-middle border-r border-slate-800/30">
-                      {section ? (
-                        <div className={`inline-flex flex-col items-center justify-center px-3 py-1.5 rounded border ${section.color.replace('bg-', 'text-')} border-current bg-transparent shadow-[0_0_10px_rgba(0,0,0,0.2)]`}>
-                          <span className="text-xs font-black">{section.name}</span>
+                            {/* 2. 品名與人員 */}
+                            <div className="flex flex-col gap-1.5 border-l border-slate-800 pl-6">
+                                <div className="text-base font-bold text-white leading-tight">{group.item_name}</div>
+                                <div className="flex gap-4 text-xs text-slate-500 font-mono">
+                                    <span title="美編">🎨 {group.designer || '-'}</span>
+                                    <span title="承辦">👤 {group.handler || '-'}</span>
+                                    <span title="開單">📝 {group.issuer || '-'}</span>
+                                </div>
+                            </div>
+
+                            {/* 3. 交付日期 (純日期) */}
+                            <div className="flex flex-col items-center justify-center border-l border-slate-800 pl-6 h-full">
+                                <span className="text-slate-500 text-xs mb-1">預計交付</span>
+                                <span className="text-yellow-400 font-mono font-bold text-xl tracking-wide">{group.delivery_date}</span>
+                            </div>
+
+                            {/* 4. 操作按鈕 */}
+                            <div className="pl-4">
+                                <button 
+                                    onClick={() => setEditingOrder(group.order_number)}
+                                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-indigo-900/20 hover:shadow-indigo-900/40 transition-all flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                    編輯結構
+                                </button>
+                            </div>
                         </div>
-                      ) : (
-                        <span className="text-slate-600 italic">Unknown</span>
-                      )}
-                    </td>
 
-                    {/* 🔥 4. 排程狀態 (顯示機台或待排) */}
-                    <td className="px-4 py-3 text-center align-middle border-r border-slate-800/30">
-                        {row.production_machines?.name ? (
-                            <div className="flex flex-col gap-1 items-center">
-                                <span className="px-2 py-0.5 rounded bg-cyan-900/30 text-cyan-400 border border-cyan-500/50 text-xs font-bold shadow-[0_0_8px_rgba(34,211,238,0.2)]">
-                                    {row.production_machines.name}
-                                </span>
-                                <span className="text-[10px] font-mono text-yellow-500 font-bold bg-black/40 px-1.5 rounded">
-                                    {row.scheduled_date}
-                                </span>
-                            </div>
-                        ) : (
-                            <span className="px-2 py-1 rounded bg-slate-800 text-slate-500 border border-slate-700 text-[10px] animate-pulse italic">
-                                待排程
-                            </span>
-                        )}
-                    </td>
-
-                    {/* 5. 品項資訊 */}
-                    <td className="px-4 py-3 align-top border-r border-slate-800/30">
-                      <div className="font-mono text-purple-300 text-sm mb-1">{row.item_code}</div>
-                      <div className="mb-2">
-                        <input 
-                          type="text" 
-                          value={row.item_name || ''} 
-                          onChange={(e) => handleUpdate(row.id, 'item_name', e.target.value)}
-                          className="bg-transparent border-b border-transparent hover:border-slate-600 focus:border-cyan-500 outline-none w-full text-slate-300 text-sm break-words"
-                        />
-                      </div>
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500 font-mono mt-auto">
-                        <span>美: {row.designer}</span>
-                        <span>承: {row.handler}</span>
-                        <span>開: {row.issuer}</span>
-                      </div>
-                    </td>
-
-                    {/* 6. 數量/盤數 */}
-                    <td className="px-4 py-3 align-top text-right border-r border-slate-800/30">
-                      <div className="font-mono text-white text-lg font-bold">{row.quantity}</div>
-                      <div className="text-slate-500 text-xs mt-1">盤: {row.plate_count || '-'}</div>
-                    </td>
-
-                    {/* 7. 工序與站點 */}
-                    <td className="px-4 py-3 align-top border-r border-slate-800/30">
-                      <div className="text-slate-300 font-bold mb-1">{row.op_name}</div>
-                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold mt-1 ${getStationBadge(row.station)}`}>
-                        {row.station}
-                      </span>
-                    </td>
-
-                    {/* 8. 預計總時 */}
-                    <td className="px-4 py-3 align-top text-right">
-                      <span className="font-mono text-xl font-bold text-emerald-400">{row.total_time_min}</span>
-                      <span className="text-xs text-emerald-600 block mt-1">mins</span>
-                    </td>
-                  </tr>
+                        {/* 工序列表 Table */}
+                        <div className="overflow-x-auto bg-[#0b1221]">
+                            <table className="w-full text-left text-sm text-slate-400">
+                                <thead className="bg-slate-950/50 text-[10px] uppercase text-slate-500 font-mono border-b border-slate-800">
+                                    <tr>
+                                        <th className="px-5 py-3 w-14 text-center">序</th>
+                                        <th className="px-4 py-3 min-w-[200px]">工序名稱</th>
+                                        <th className="px-4 py-3 min-w-[120px]">負責區塊</th>
+                                        <th className="px-4 py-3 min-w-[250px]">機台排程</th>
+                                        <th className="px-4 py-3 min-w-[150px]">執行進度 (數量)</th>
+                                        <th className="px-4 py-3 w-24 text-right">工時</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800/30">
+                                    {group.items.map((item, idx) => {
+                                        const isCompleted = item.status === 'completed'
+                                        const itemPct = item.quantity > 0 ? Math.round((item.completed_quantity / item.quantity) * 100) : 0
+                                        const displayPct = Math.min(itemPct, 100)
+                                        
+                                        return (
+                                            <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
+                                                <td className="px-5 py-4 text-center text-slate-600 font-mono text-xs">{idx + 1}</td>
+                                                
+                                                <td className="px-4 py-4">
+                                                    <span className="font-bold text-slate-200 text-base whitespace-nowrap">{item.op_name}</span>
+                                                </td>
+                                                
+                                                <td className="px-4 py-4">
+                                                    <span className={`text-xs px-3 py-1 rounded border font-bold ${PRODUCTION_SECTIONS.find(s=>s.id===item.assigned_section)?.color.replace('bg-','text-')} border-slate-700 bg-slate-900 whitespace-nowrap`}>
+                                                        {PRODUCTION_SECTIONS.find(s=>s.id===item.assigned_section)?.name || item.assigned_section}
+                                                    </span>
+                                                </td>
+                                                
+                                                {/* 🔥 修正：機台排程順序改為 [日期] + [機台] */}
+                                                <td className="px-4 py-4">
+                                                    {item.production_machines ? (
+                                                        <div className="flex flex-row items-center gap-3">
+                                                            {/* 日期在前 */}
+                                                            <span className="text-sm font-bold text-yellow-400 font-mono whitespace-nowrap">
+                                                                {item.scheduled_date}
+                                                            </span>
+                                                            {/* 機台在後 */}
+                                                            <span className="text-cyan-400 text-sm font-bold bg-cyan-950/50 px-2 py-0.5 rounded border border-cyan-900 whitespace-nowrap">
+                                                                {item.production_machines.name}
+                                                            </span>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-slate-600 text-xs italic px-2 py-0.5 border border-dashed border-slate-700 rounded">待排程</span>
+                                                    )}
+                                                </td>
+                                                
+                                                {/* 進度顯示條 */}
+                                                <td className="px-4 py-4 align-middle">
+                                                    <div className="flex items-center gap-3 w-full">
+                                                        <div className="flex-1 h-2.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50">
+                                                            <div 
+                                                                className={`h-full rounded-full transition-all duration-500 ${isCompleted ? 'bg-emerald-500' : item.completed_quantity > 0 ? 'bg-blue-500' : 'bg-slate-600'}`} 
+                                                                style={{ width: `${displayPct}%` }}
+                                                            ></div>
+                                                        </div>
+                                                        <div className="text-right min-w-[80px]">
+                                                            <span className={`text-xs font-mono font-bold ${isCompleted ? 'text-emerald-400' : item.completed_quantity > 0 ? 'text-blue-400' : 'text-slate-500'}`}>
+                                                                {item.completed_quantity} / {item.quantity}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                
+                                                <td className="px-4 py-4 text-right font-mono text-emerald-500 font-bold text-base">
+                                                    {item.total_time_min}
+                                                    <span className="text-[10px] text-emerald-800 ml-1">m</span>
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 )
-              })}
-            </tbody>
-          </table>
-        </div>
+            })
+        )}
       </div>
     </div>
   )
