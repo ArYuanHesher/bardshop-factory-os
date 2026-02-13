@@ -56,7 +56,7 @@ function AlertModal({
   )
 }
 
-// --- 2. 詳細資料彈窗 (🔥 新增人員資訊與完整欄位) ---
+// --- 2. 詳細資料彈窗 (含人員資訊與完整欄位) ---
 function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: () => void, onTaskUpdate: (id: number, updates: any) => void }) {
   const [orderStages, setOrderStages] = useState<any[]>([])
   const [isLoadingStages, setIsLoadingStages] = useState(false)
@@ -169,13 +169,11 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
             <div className="flex-1 p-6 overflow-y-auto custom-scrollbar border-r border-slate-800 bg-slate-900/50">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2"><span className="w-1 h-4 bg-blue-500 rounded-full"></span> 訂單基本資料</h3>
                 <div className="space-y-4">
-                    {/* 客戶與交期 */}
                     <div className="grid grid-cols-2 gap-4 p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
                         <div><span className="text-[10px] text-slate-500 block">客戶</span><span className="text-white font-medium">{task.customer}</span></div>
                         <div><span className="text-[10px] text-slate-500 block">交付日期</span><span className="text-yellow-400 font-bold font-mono">{task.delivery_date}</span></div>
                     </div>
 
-                    {/* 🔥 新增：人員資訊區塊 */}
                     <div className="grid grid-cols-3 gap-2 p-2 bg-slate-800/20 rounded border border-slate-700/30">
                         <div><span className="text-[10px] text-slate-500 block">承辦人員</span><span className="text-slate-300 text-xs font-bold">{task.handler || '-'}</span></div>
                         <div><span className="text-[10px] text-slate-500 block">美編人員</span><span className="text-slate-300 text-xs font-bold">{task.designer || '-'}</span></div>
@@ -255,7 +253,7 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
   )
 }
 
-// --- 3. 可拖曳卡片 (含黑霧特效 & 部分完成提示) ---
+// --- 3. 可拖曳卡片 (🔥 修改Header顯示工序名稱) ---
 function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: any, isOverlay?: boolean, onTaskDblClick?: (task: any) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id.toString(), data: { task } })
   const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.3 : 1 }
@@ -292,10 +290,20 @@ function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: any,
         </span>
       )}
 
+      {/* 🔥 Header: 單號 + 工序名稱 + 單據種類 */}
       <div className="flex justify-between items-center border-b border-slate-700/50 pb-1.5">
-        <span className={`font-mono font-black text-[13px] tracking-tight truncate ${isCompleted ? 'text-slate-500' : 'text-cyan-400'}`}>{task.order_number}</span>
+        <span className={`font-mono font-black text-[13px] tracking-tight truncate ${isCompleted ? 'text-slate-500' : 'text-cyan-400'} max-w-[80px]`}>{task.order_number}</span>
+        
+        {/* 🔥 新增：工序名稱 (置中) */}
+        <span className="flex-1 text-center px-1">
+            <span className="text-[10px] font-bold text-slate-300 bg-slate-900/50 px-1.5 py-0.5 rounded border border-slate-700/50 truncate max-w-full block">
+                {task.op_name}
+            </span>
+        </span>
+
         <span className={`text-[12px] px-1.5 py-0.5 rounded border font-bold shrink-0 ${isCompleted ? 'bg-slate-900 text-slate-600 border-slate-800' : getDocTypeColor(task.doc_type)}`}>{task.doc_type || '工單'}</span>
       </div>
+
       <div className={`font-bold text-[11px] leading-tight break-words line-clamp-2 min-h-[1.2em] ${isCompleted ? 'text-slate-500' : 'text-white'}`} title={task.item_name}>{task.item_name}</div>
       <div className="flex items-center justify-between text-[12px] bg-black/20 p-1.5 rounded border border-slate-700/30">
         <div className="flex items-center gap-1"><span className="text-slate-500 text-[11px] scale-90">數量:</span><span className={`font-mono font-bold ${isCompleted ? 'text-slate-500' : 'text-white'}`}>{task.quantity}</span></div>
@@ -342,7 +350,7 @@ function DroppableDay({ date, tasks, title, isMachineSelected, isToday, dailyCap
   )
 }
 
-// --- 5. Unscheduled Sidebar (維持不變) ---
+// --- 5. Unscheduled Sidebar (維持原樣) ---
 function UnscheduledSidebar({ tasks, onTaskDblClick }: { tasks: any[], onTaskDblClick: (t: any) => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'unscheduled' })
   const [searchQuery, setSearchQuery] = useState('')
@@ -397,7 +405,11 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   const [activeDragItem, setActiveDragItem] = useState<any>(null)
   const [selectedTaskDetail, setSelectedTaskDetail] = useState<any>(null)
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean, message: string, onConfirm: () => void } | null>(null)
-  const [globalFilter, setGlobalFilter] = useState('')
+  
+  // 🔥 新增：全域搜尋狀態與邏輯
+  const [globalFilter, setGlobalFilter] = useState('') // 儲存觸發搜尋後的關鍵字
+  const [searchInput, setSearchInput] = useState('')   // 儲存輸入框的即時內容
+
   const [currentStart, setCurrentStart] = useState(new Date())
   const [showWeekends, setShowWeekends] = useState(false)
   const [showNextWeek, setShowNextWeek] = useState(false)
@@ -409,14 +421,47 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
     d.setDate(diff); d.setHours(0, 0, 0, 0); setCurrentStart(new Date(d));
   }, [])
 
+  // 搜尋觸發函式
+  const handleSearch = () => {
+    setGlobalFilter(searchInput.trim())
+  }
+
+  // 修正機台抓取邏輯
   useEffect(() => {
     const fetchMachines = async () => {
-      let { data } = await supabase.from('production_machines').select('*').eq('section_id', sectionId).order('id')
+      const CATEGORY_MAP: Record<string, string> = {
+        'printing': '印刷',
+        'laser': '雷切',
+        'post': '後加工',
+        'packing': '包裝',
+        'outsourced': '委外',
+        'changping': '常平'
+      }
+      const targetCategory = CATEGORY_MAP[sectionId] || sectionName.replace('產程', '')
+      let { data } = await supabase
+        .from('production_machines')
+        .select('*')
+        .eq('category', targetCategory)
+        .eq('is_active', true)
+        .order('id')
+
       if ((!data || data.length === 0) && sectionName) {
-        const { data: fallbackData } = await supabase.from('production_machines').select('*').ilike('name', `%${sectionName}%`).order('id')
+        const { data: fallbackData } = await supabase
+            .from('production_machines')
+            .select('*')
+            .ilike('name', `%${sectionName.replace('產程', '')}%`)
+            .eq('is_active', true)
+            .order('id')
         if (fallbackData && fallbackData.length > 0) data = fallbackData
       }
-      if (data && data.length > 0) { setMachines(data); setSelectedMachineId(prev => prev ? prev : data![0].id) } else { setMachines([]); setSelectedMachineId(null) }
+
+      if (data && data.length > 0) { 
+          setMachines(data); 
+          setSelectedMachineId(prev => prev ? prev : data![0].id) 
+      } else { 
+          setMachines([]); 
+          setSelectedMachineId(null) 
+      }
     }
     if (sectionId) fetchMachines()
   }, [sectionId, sectionName])
@@ -435,10 +480,15 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   }
   const week1Dates = generateDates(currentStart, 1); const week2Dates = generateDates(new Date(new Date(currentStart).setDate(currentStart.getDate() + 7)), 1)
 
+  // 🔥 修改後的 getTasksForDate (支援全域搜尋)
   const getTasksForDate = (date: string) => {
     if (!selectedMachineId) return []
+    
+    // 1. 先篩選日期與機台
     let dailyTasks = tasks.filter(t => t.scheduled_date === date && t.production_machine_id === selectedMachineId)
-    if (globalFilter.trim()) {
+    
+    // 2. 再套用全域搜尋 (如果有按搜尋才執行)
+    if (globalFilter) {
         const q = globalFilter.toLowerCase()
         dailyTasks = dailyTasks.filter(t => 
             (t.order_number?.toLowerCase().includes(q)) || 
@@ -446,6 +496,8 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
             (t.item_name?.toLowerCase().includes(q))
         )
     }
+
+    // 3. 排序邏輯
     return dailyTasks.sort((a, b) => {
         const aCompleted = a.status === 'completed' ? 1 : 0
         const bCompleted = b.status === 'completed' ? 1 : 0
@@ -505,14 +557,30 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                         <input type="date" value={currentStart.toISOString().split('T')[0]} onChange={handleDatePick} className="bg-transparent text-white text-sm font-bold border-none outline-none focus:ring-0 w-32 text-center"/>
                         <button onClick={() => changeWeek(1)} className="p-1 hover:text-cyan-400 text-slate-400">→</button>
                     </div>
-                    <div className="relative ml-2">
+                    {/* 🔥 新增：按鈕式搜尋框 */}
+                    <div className="relative ml-2 flex items-center gap-1">
                         <input 
                             type="text" 
-                            placeholder="🔍 搜尋排程單號..." 
-                            value={globalFilter}
-                            onChange={(e) => setGlobalFilter(e.target.value)}
+                            placeholder="🔍 搜尋單號/客戶..." 
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                             className="bg-black/30 border border-slate-700 rounded-lg px-3 py-1 text-sm text-white focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none w-48 transition-all"
                         />
+                        <button 
+                            onClick={handleSearch}
+                            className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded-lg text-sm border border-slate-600 transition-colors"
+                        >
+                            搜尋
+                        </button>
+                        {globalFilter && (
+                            <button 
+                                onClick={() => { setGlobalFilter(''); setSearchInput(''); }}
+                                className="text-red-400 hover:text-red-300 text-xs ml-1"
+                            >
+                                清除
+                            </button>
+                        )}
                     </div>
                 </div>
                 <div className="flex items-center gap-3"><label className="flex items-center cursor-pointer gap-2"><div className="relative"><input type="checkbox" className="sr-only" checked={showWeekends} onChange={() => setShowWeekends(!showWeekends)} /><div className={`block w-10 h-6 rounded-full transition-colors ${showWeekends ? 'bg-cyan-600' : 'bg-slate-700'}`}></div><div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${showWeekends ? 'transform translate-x-4' : ''}`}></div></div><span className="text-xs text-slate-400 font-bold">顯示週末</span></label></div>
