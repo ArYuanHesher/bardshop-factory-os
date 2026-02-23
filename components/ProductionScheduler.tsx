@@ -18,6 +18,39 @@ import {
 } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 
+const SECTION_NAME_MAP: Record<string, string> = {
+  printing: '印刷看板',
+  laser: '雷切看板',
+  post: '後加工看板',
+  packaging: '包裝看板',
+  outsourced: '委外看板',
+  changping: '常平看板'
+}
+
+const SECTION_OPTIONS: Array<{ id: string; label: string; style: string }> = [
+  { id: 'printing', label: '印刷', style: 'bg-blue-700 hover:bg-blue-600 border-blue-400' },
+  { id: 'laser', label: '雷切', style: 'bg-red-700 hover:bg-red-600 border-red-400' },
+  { id: 'post', label: '後加工', style: 'bg-purple-700 hover:bg-purple-600 border-purple-400' },
+  { id: 'packaging', label: '包裝', style: 'bg-orange-700 hover:bg-orange-600 border-orange-400' },
+  { id: 'outsourced', label: '委外', style: 'bg-slate-700 hover:bg-slate-600 border-slate-400' },
+  { id: 'changping', label: '常平', style: 'bg-emerald-700 hover:bg-emerald-600 border-emerald-400' }
+]
+
+function getTargetSection(stationRaw: string, docTypeRaw: string): string | null {
+  const station = stationRaw || ''
+  const docType = docTypeRaw || ''
+
+  if (docType.includes('常平') || station.includes('常平')) return 'changping'
+  if (station.includes('轉運')) return docType.includes('委外') ? 'outsourced' : 'outsourced'
+  if (station.includes('印刷')) return 'printing'
+  if (station.includes('雷切')) return 'laser'
+  if (station.includes('包裝')) return 'packaging'
+  if (station.includes('加工') || station.includes('組裝')) return 'post'
+  if (docType.includes('委外')) return 'outsourced'
+
+  return null
+}
+
 // --- 1. 警告確認彈窗 ---
 function AlertModal({ 
   isOpen, 
@@ -60,11 +93,13 @@ function AlertModal({
 }
 
 // --- 2. 詳細資料彈窗 (含人員資訊與完整欄位) ---
-function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask | null, onClose: () => void, onTaskUpdate: (id: number, updates: TaskUpdate) => void }) {
+function TaskDetailModal({ task, onClose, onTaskUpdate, onRefreshAll }: { task: ProductionTask | null, onClose: () => void, onTaskUpdate: (id: number, updates: TaskUpdate) => void, onRefreshAll: () => Promise<void> }) {
   const [orderStages, setOrderStages] = useState<ProductionTask[]>([])
   const [isLoadingStages, setIsLoadingStages] = useState(false)
   const [partialInput, setPartialInput] = useState<string>('')
   const [currentCompleted, setCurrentCompleted] = useState<number>(task?.completed_quantity || 0)
+  const [isUpvUpdating, setIsUpvUpdating] = useState(false)
+  const [showSectionPicker, setShowSectionPicker] = useState(false)
 
   const fetchStages = useCallback(async () => {
     if (!task?.order_number) return
@@ -98,6 +133,7 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
     if (!error) { 
         setCurrentCompleted(task.quantity)
         onTaskUpdate(task.id, updates)
+      await onRefreshAll()
         alert('已更新為完成狀態！') 
     }
   }
@@ -117,6 +153,7 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
         setPartialInput('')
         fetchStages()
         onTaskUpdate(task.id, updates)
+      await onRefreshAll()
         if(qty >= task.quantity) alert('數量已達標，自動標記為完成！'); else alert(`進度已更新：${qty} / ${task.quantity}`)
     }
   }
@@ -132,9 +169,172 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
         setCurrentCompleted(0)
         fetchStages()
         onTaskUpdate(task.id, updates)
+      await onRefreshAll()
         alert('🔄 已重置進度！任務狀態已恢復。')
     } else {
         alert('重置失敗: ' + error.message)
+    }
+  }
+
+  const suggestedSection = useMemo(() => getTargetSection(task?.station || '', task?.doc_type || ''), [task])
+
+  const handleReassignSection = () => {
+    setShowSectionPicker((prev) => !prev)
+  }
+
+  const handleAssignToSection = async (targetSection: string) => {
+    if (!task) return
+
+    const targetSectionName = SECTION_NAME_MAP[targetSection] || targetSection
+    if (!confirm(`是否將此工序重新分區到「${targetSectionName}」？`)) return
+
+    const { error } = await supabase
+      .from('station_time_summary')
+      .update({ assigned_section: targetSection })
+      .eq('id', task.id)
+
+    if (error) {
+      alert('重新分區失敗: ' + error.message)
+      return
+    }
+
+    onTaskUpdate(task.id, { assigned_section: targetSection })
+    await fetchStages()
+    await onRefreshAll()
+    setShowSectionPicker(false)
+    alert(`✅ 已重新分區至：${targetSectionName}`)
+
+    if (task.assigned_section !== targetSection) {
+      onClose()
+    }
+  }
+
+  const hasUpvApplied = useMemo(
+    () => orderStages.some((stage) => (stage.station || '').includes('印刷') && (stage.basis_text || '').includes('[上Vx2]')),
+    [orderStages]
+  )
+
+  const handleApplyUpv = async () => {
+    if (!task) return
+
+    const firstConfirm = confirm('⚠️ 將直接套用「上V」：此工單所有印刷工序時間會 ×2。\n\n是否繼續？')
+    if (!firstConfirm) return
+
+    const secondConfirm = confirm('請再次確認：要立即套用「上V ×2」嗎？\n此動作不經審核。')
+    if (!secondConfirm) return
+
+    setIsUpvUpdating(true)
+    try {
+      const { data, error } = await supabase
+        .from('station_time_summary')
+        .select('id, total_time_min, basis_text')
+        .eq('order_number', task.order_number)
+        .eq('item_code', task.item_code)
+        .eq('quantity', task.quantity)
+        .ilike('station', '%印刷%')
+
+      if (error) throw error
+      const printRows = (data || []) as Array<{ id: number; total_time_min: number | null; basis_text: string | null }>
+      if (printRows.length === 0) {
+        alert('此工單目前沒有印刷工序可套用上V。')
+        return
+      }
+
+      const updateJobs = printRows.map((row) => {
+        const currentMinutes = Number(row.total_time_min) || 0
+        const currentBasis = row.basis_text || ''
+        const nextBasis = currentBasis.includes('[上Vx2]') ? currentBasis : `${currentBasis}${currentBasis ? ' / ' : ''}[上Vx2]`
+
+        return supabase
+          .from('station_time_summary')
+          .update({
+            total_time_min: Math.round(currentMinutes * 2 * 100) / 100,
+            basis_text: nextBasis
+          })
+          .eq('id', row.id)
+      })
+
+      const results = await Promise.all(updateJobs)
+      const failed = results.find((result) => result.error)
+      if (failed?.error) throw failed.error
+
+      alert('✅ 已套用上V：印刷工序時間已全部 ×2')
+      await fetchStages()
+      if ((task.station || '').includes('印刷')) {
+        const currentTaskAfterUpdate = printRows.find((row) => row.id === task.id)
+        if (currentTaskAfterUpdate) {
+          onTaskUpdate(task.id, { total_time_min: Math.round((Number(currentTaskAfterUpdate.total_time_min) || 0) * 2 * 100) / 100 })
+        }
+      }
+      await onRefreshAll()
+    } catch (err: unknown) {
+      console.error(err)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert(`套用上V失敗：${message}`)
+    } finally {
+      setIsUpvUpdating(false)
+    }
+  }
+
+  const handleCancelUpv = async () => {
+    if (!task) return
+    if (!confirm('確定要取消「上V」？\n系統會將此工單印刷工序時間還原 ÷2。')) return
+
+    setIsUpvUpdating(true)
+    try {
+      const { data, error } = await supabase
+        .from('station_time_summary')
+        .select('id, total_time_min, basis_text')
+        .eq('order_number', task.order_number)
+        .eq('item_code', task.item_code)
+        .eq('quantity', task.quantity)
+        .ilike('station', '%印刷%')
+
+      if (error) throw error
+      const printRows = (data || []) as Array<{ id: number; total_time_min: number | null; basis_text: string | null }>
+      if (printRows.length === 0) {
+        alert('此工單目前沒有印刷工序。')
+        return
+      }
+
+      const targetRows = printRows.filter((row) => (row.basis_text || '').includes('[上Vx2]'))
+      if (targetRows.length === 0) {
+        alert('此工單尚未套用上V，不需取消。')
+        return
+      }
+
+      const updateJobs = targetRows.map((row) => {
+        const currentMinutes = Number(row.total_time_min) || 0
+        const cleanedBasis = (row.basis_text || '').replace(' / [上Vx2]', '').replace('[上Vx2]', '').trim()
+
+        return supabase
+          .from('station_time_summary')
+          .update({
+            total_time_min: Math.round((currentMinutes / 2) * 100) / 100,
+            basis_text: cleanedBasis || null
+          })
+          .eq('id', row.id)
+      })
+
+      const results = await Promise.all(updateJobs)
+      const failed = results.find((result) => result.error)
+      if (failed?.error) throw failed.error
+
+      alert('✅ 已取消上V：印刷工序時間已還原。')
+      await fetchStages()
+      if ((task.station || '').includes('印刷')) {
+        const currentTaskAfterCancel = targetRows.find((row) => row.id === task.id)
+        if (currentTaskAfterCancel) {
+          onTaskUpdate(task.id, { total_time_min: Math.round((Number(currentTaskAfterCancel.total_time_min) || 0) / 2 * 100) / 100 })
+        }
+      }
+      await onRefreshAll()
+    } catch (err: unknown) {
+      console.error(err)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert(`取消上V失敗：${message}`)
+    } finally {
+      setIsUpvUpdating(false)
     }
   }
 
@@ -150,7 +350,15 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
                 <h2 className="text-2xl font-black text-white tracking-wide font-mono">{task.order_number}</h2>
                 <span className="text-xs px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-400">{task.doc_type}</span>
                 <div className="flex items-center gap-2 ml-4 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                    <button
+                      onClick={hasUpvApplied ? handleCancelUpv : handleApplyUpv}
+                      disabled={isUpvUpdating}
+                      className={`px-3 py-1.5 text-white text-xs font-bold rounded transition-colors border ${hasUpvApplied ? 'bg-amber-700 hover:bg-amber-600 border-amber-400' : 'bg-red-700 hover:bg-red-600 border-red-400'} disabled:bg-slate-700 disabled:border-slate-600 disabled:text-slate-400`}
+                    >
+                      {isUpvUpdating ? '處理中...' : hasUpvApplied ? '取消上V' : '上V x2'}
+                    </button>
                     <button onClick={handleFullComplete} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded transition-colors flex items-center gap-1">✅ 全部完成</button>
+                    <button onClick={handleReassignSection} className="px-3 py-1.5 bg-fuchsia-700 hover:bg-fuchsia-600 text-white text-xs font-bold rounded transition-colors">重新分區</button>
                     <div className="w-[1px] h-6 bg-slate-700 mx-1"></div>
                     <div className="flex items-center gap-2">
                         <input type="number" placeholder="輸入數量" className="w-20 bg-black/50 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none focus:border-cyan-500" value={partialInput} onChange={(e) => setPartialInput(e.target.value)} />
@@ -173,6 +381,32 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
             </div>
             <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 rounded-full w-8 h-8 flex items-center justify-center">✕</button>
         </div>
+        {showSectionPicker && (
+          <div className="px-6 py-3 border-b border-fuchsia-700/40 bg-fuchsia-950/20">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-fuchsia-300 font-bold mr-2">選擇分區：</span>
+              {SECTION_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  onClick={() => { void handleAssignToSection(option.id) }}
+                  className={`px-3 py-1.5 text-white text-xs font-bold rounded border transition-colors ${option.style}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setShowSectionPicker(false)}
+                className="px-3 py-1.5 text-xs font-bold rounded border border-slate-600 bg-slate-800 text-slate-300 hover:bg-slate-700"
+              >
+                取消
+              </button>
+            </div>
+            <div className="mt-2 text-[11px] text-slate-400">
+              建議分區：
+              <span className="text-cyan-300 font-bold ml-1">{suggestedSection ? SECTION_NAME_MAP[suggestedSection] : '無法判斷，請手動選擇'}</span>
+            </div>
+          </div>
+        )}
         <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
             <div className="flex-1 p-6 overflow-y-auto custom-scrollbar border-r border-slate-800 bg-slate-900/50">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2"><span className="w-1 h-4 bg-blue-500 rounded-full"></span> 訂單基本資料</h3>
@@ -462,16 +696,17 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
     if (sectionId) fetchMachines()
   }, [sectionId, sectionName])
 
+  const fetchTasks = useCallback(async () => {
+    const { data } = await supabase
+      .from('station_time_summary')
+      .select('*')
+      .eq('assigned_section', sectionId)
+    setTasks((data as ProductionTask[]) || [])
+  }, [sectionId])
+
   useEffect(() => {
-    const fetchTasks = async () => {
-      const { data } = await supabase
-        .from('station_time_summary')
-        .select('*')
-        .eq('assigned_section', sectionId)
-      setTasks((data as ProductionTask[]) || [])
-    }
-    fetchTasks()
-  }, [sectionId, selectedMachineId])
+    void fetchTasks()
+  }, [sectionId, selectedMachineId, fetchTasks])
 
   const currentMachine = machines.find(m => m.id === selectedMachineId); const currentDailyCap = currentMachine?.daily_minutes || 480 
   
@@ -561,7 +796,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   
   return (
     <DndContext onDragEnd={handleDragEnd} onDragStart={handleDragStart} sensors={sensors} collisionDetection={pointerWithin}>
-      <TaskDetailModal key={selectedTaskDetail?.id ?? 'empty-task'} task={selectedTaskDetail} onClose={() => setSelectedTaskDetail(null)} onTaskUpdate={handleTaskUpdate} />
+      <TaskDetailModal key={selectedTaskDetail?.id ?? 'empty-task'} task={selectedTaskDetail} onClose={() => setSelectedTaskDetail(null)} onTaskUpdate={handleTaskUpdate} onRefreshAll={fetchTasks} />
       <AlertModal isOpen={!!alertConfig} message={alertConfig?.message || ''} onConfirm={alertConfig?.onConfirm || (() => {})} onCancel={() => setAlertConfig(null)} />
       <div className="flex flex-col h-[calc(100vh-80px)] overflow-hidden">
         <div className="flex flex-col gap-3 mb-2 px-1">

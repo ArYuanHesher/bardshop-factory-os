@@ -24,6 +24,7 @@ export interface ProductionTask {
   customer?: string | null
   item_name?: string | null
   total_time_min?: number | null
+  basis_text?: string | null
   delivery_date?: string | null
   doc_type?: string | null
   plate_count?: number | null
@@ -34,7 +35,7 @@ export interface ProductionTask {
 }
 
 export type TaskUpdate = Partial<
-  Pick<ProductionTask, 'status' | 'completed_quantity' | 'scheduled_date' | 'production_machine_id'>
+  Pick<ProductionTask, 'status' | 'completed_quantity' | 'scheduled_date' | 'production_machine_id' | 'total_time_min' | 'assigned_section'>
 >
 
 export const PRODUCTION_CATEGORY_MAP: Record<string, string> = {
