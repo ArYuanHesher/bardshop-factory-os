@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '../../lib/supabaseClient' // 引入 Supabase
+import { supabase } from '../../../lib/supabaseClient' // 引入 Supabase
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)

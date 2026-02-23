@@ -2,8 +2,8 @@
 
 import { useParams } from 'next/navigation'
 // 🔥 修正：這裡多加了一個 ../ (原本只有三個，現在改為四個)
-import ProductionViewer from '../../../../components/ProductionViewer'
-import { PRODUCTION_SECTIONS } from '../../../../config/productionSections'
+import ProductionViewer from '../../../../../components/ProductionViewer'
+import { PRODUCTION_SECTIONS } from '../../../../../config/productionSections'
 
 export default function DashboardSectionPage() {
   const params = useParams()
