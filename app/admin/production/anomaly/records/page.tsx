@@ -68,7 +68,6 @@ const DEFAULT_CREATE_FORM: CreateFormState = {
 export default function QaRecordsPage() {
   const [reports, setReports] = useState<AnomalyReport[]>([])
   const [loading, setLoading] = useState(true)
-  const [processingId, setProcessingId] = useState<number | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<CreateFormState>(DEFAULT_CREATE_FORM)
   const [savingEdit, setSavingEdit] = useState(false)
@@ -133,29 +132,6 @@ export default function QaRecordsPage() {
   useEffect(() => {
     void fetchReports()
   }, [fetchReports])
-
-  const handleConfirm = async (report: AnomalyReport) => {
-    if (!confirm(`確認處理此筆異常回報？\n\n單號：${report.order_number}`)) return
-
-    setProcessingId(report.id)
-    try {
-      const { error: updateError } = await supabase
-        .from('schedule_anomaly_reports')
-        .update({ status: 'confirmed', processed_at: new Date().toISOString() })
-        .eq('id', report.id)
-
-      if (updateError) throw updateError
-
-      alert('✅ 已確認並結案。')
-      fetchReports()
-    } catch (err: unknown) {
-      console.error(err)
-      const message = err instanceof Error ? err.message : '未知錯誤'
-      alert(`處理失敗：${message}`)
-    } finally {
-      setProcessingId(null)
-    }
-  }
 
   const pendingReports = reports.filter((report) => report.status === 'pending')
   const completedReports = reports.filter((report) => report.status !== 'pending')
@@ -498,23 +474,12 @@ export default function QaRecordsPage() {
                     </td>
 
                     <td className="p-3 text-center min-w-[130px]">
-                      <div className="flex flex-col gap-2 items-center">
-                        <button
-                          onClick={() => openEditModal(report)}
-                          className="px-3 py-1.5 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-900/30 text-xs"
-                        >
-                          編輯
-                        </button>
-                        {report.status === 'pending' ? (
-                          <button
-                            onClick={() => handleConfirm(report)}
-                            disabled={processingId === report.id}
-                            className="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-bold disabled:bg-slate-700 disabled:text-slate-400"
-                          >
-                            {processingId === report.id ? '處理中...' : '確認'}
-                          </button>
-                        ) : null}
-                      </div>
+                      <button
+                        onClick={() => openEditModal(report)}
+                        className="px-3 py-1.5 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-900/30 text-xs"
+                      >
+                        編輯
+                      </button>
                     </td>
                   </tr>
                 )

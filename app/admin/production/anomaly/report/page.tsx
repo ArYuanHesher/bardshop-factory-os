@@ -5,24 +5,28 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../../../../lib/supabaseClient'
 
 const DEFAULT_PERSONNEL_OPTIONS = ['王小明', '李小華', '陳建宏', '課長A', '主管B', '品保C', '作業員A', '作業員B', '技術員C']
+const DEFAULT_CATEGORY_OPTIONS = ['品質異常', '製程異常', '資料異常']
+
+const getTodayDateInput = () => new Date().toISOString().slice(0, 10)
 
 export default function QaReportFormPage() {
+  const [createdDate, setCreatedDate] = useState(getTodayDateInput())
   const [orderNumber, setOrderNumber] = useState('')
-  const [itemCode, setItemCode] = useState('')
-  const [quantity, setQuantity] = useState<number>(0)
-  const [opName, setOpName] = useState('')
-  const [station, setStation] = useState('')
+  const [status] = useState<'pending'>('pending')
   const [reason, setReason] = useState('')
   const [reporter, setReporter] = useState('')
   const [personnelOptions, setPersonnelOptions] = useState<string[]>(DEFAULT_PERSONNEL_OPTIONS)
+  const [categoryOptions, setCategoryOptions] = useState<string[]>(DEFAULT_CATEGORY_OPTIONS)
+  const [category, setCategory] = useState('')
+  const [handlers, setHandlers] = useState<string[]>([])
+  const [responsible, setResponsible] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    const fetchPersonnelOptions = async () => {
+    const fetchOptions = async () => {
       const { data, error } = await supabase
         .from('qa_anomaly_option_items')
-        .select('option_value')
-        .eq('option_type', 'personnel')
+        .select('option_type, option_value')
         .order('option_value', { ascending: true })
 
       if (error) {
@@ -30,19 +34,27 @@ export default function QaReportFormPage() {
         return
       }
 
-      const options = ((data as Array<{ option_value: string }>) || [])
+      const rows = (data as Array<{ option_type: string; option_value: string }>) || []
+      const personnel = rows
+        .filter((item) => item.option_type === 'personnel')
         .map((item) => item.option_value)
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
 
-      setPersonnelOptions(options.length ? options : DEFAULT_PERSONNEL_OPTIONS)
+      const categories = rows
+        .filter((item) => item.option_type === 'category')
+        .map((item) => item.option_value)
+        .filter((value) => typeof value === 'string' && value.trim().length > 0)
+
+      setPersonnelOptions(personnel.length ? personnel : DEFAULT_PERSONNEL_OPTIONS)
+      setCategoryOptions(categories.length ? categories : DEFAULT_CATEGORY_OPTIONS)
     }
 
-    void fetchPersonnelOptions()
+    void fetchOptions()
   }, [])
 
   const handleSubmit = async () => {
-    if (!orderNumber.trim() || !itemCode.trim()) {
-      alert('請至少填寫工單號與品號')
+    if (!orderNumber.trim()) {
+      alert('請填寫相關單號')
       return
     }
 
@@ -56,29 +68,33 @@ export default function QaReportFormPage() {
       const payload = {
         report_type: 'qa',
         reason: reason.trim(),
-        status: 'pending',
+        status,
         source_order_id: null,
         task_id: null,
         order_number: orderNumber.trim(),
-        item_code: itemCode.trim(),
-        quantity: Number.isFinite(quantity) ? quantity : 0,
-        op_name: opName.trim() || null,
-        station: station.trim() || null,
+        item_code: '',
+        quantity: 0,
+        op_name: null,
+        station: null,
         section_id: null,
+        created_at: createdDate ? `${createdDate}T00:00:00.000Z` : new Date().toISOString(),
         qa_reporter: reporter.trim() || null,
+        qa_handlers: handlers,
+        qa_category: category || null,
+        qa_responsible: responsible,
       }
 
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
       if (error) throw error
 
       alert('✅ 已送出異常回報單')
+      setCreatedDate(getTodayDateInput())
       setOrderNumber('')
-      setItemCode('')
-      setQuantity(0)
-      setOpName('')
-      setStation('')
       setReason('')
       setReporter('')
+      setHandlers([])
+      setCategory('')
+      setResponsible([])
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '未知錯誤'
       alert(`送出失敗：${message}`)
@@ -102,7 +118,17 @@ export default function QaReportFormPage() {
       <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-6 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="text-xs text-slate-400">工單號</label>
+            <label className="text-xs text-slate-400">日期</label>
+            <input
+              type="date"
+              value={createdDate}
+              onChange={(e) => setCreatedDate(e.target.value)}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">相關單號</label>
             <input
               value={orderNumber}
               onChange={(e) => setOrderNumber(e.target.value)}
@@ -111,23 +137,10 @@ export default function QaReportFormPage() {
           </div>
 
           <div>
-            <label className="text-xs text-slate-400">品號</label>
-            <input
-              value={itemCode}
-              onChange={(e) => setItemCode(e.target.value)}
-              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs text-slate-400">數量</label>
-            <input
-              type="number"
-              min={0}
-              value={quantity}
-              onChange={(e) => setQuantity(parseInt(e.target.value, 10) || 0)}
-              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            />
+            <label className="text-xs text-slate-400">狀態</label>
+            <div className="mt-1 px-3 py-2 rounded border border-amber-700 bg-amber-900/30 text-amber-300 text-sm font-bold">
+              待處理
+            </div>
           </div>
 
           <div>
@@ -145,26 +158,51 @@ export default function QaReportFormPage() {
           </div>
 
           <div>
-            <label className="text-xs text-slate-400">工序名稱</label>
-            <input
-              value={opName}
-              onChange={(e) => setOpName(e.target.value)}
-              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            />
+            <label className="text-xs text-slate-400">異常處理人</label>
+            <div className="mt-1 space-y-2">
+              <div className="flex flex-wrap gap-1">
+                {handlers.map((name) => (
+                  <span key={name} className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700 text-cyan-200 text-xs flex items-center gap-1">
+                    {name}
+                    <button type="button" onClick={() => setHandlers((prev) => prev.filter((item) => item !== name))}>×</button>
+                  </span>
+                ))}
+              </div>
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  const value = e.target.value
+                  if (!value) return
+                  setHandlers((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                  e.currentTarget.value = ''
+                }}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+              >
+                <option value="">+ 新增處理人</option>
+                {personnelOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div>
-            <label className="text-xs text-slate-400">站別</label>
-            <input
-              value={station}
-              onChange={(e) => setStation(e.target.value)}
+            <label className="text-xs text-slate-400">異常分類</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            />
+            >
+              <option value="">請選擇</option>
+              {categoryOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
           </div>
         </div>
 
         <div>
-          <label className="text-xs text-slate-400">異常原因</label>
+          <label className="text-xs text-slate-400">異常原因（手填）</label>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -172,6 +210,35 @@ export default function QaReportFormPage() {
             placeholder="請填寫異常描述..."
             className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
           />
+        </div>
+
+        <div>
+          <label className="text-xs text-slate-400">缺失人員</label>
+          <div className="mt-1 space-y-2">
+            <div className="flex flex-wrap gap-1">
+              {responsible.map((name) => (
+                <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
+                  {name}
+                  <button type="button" onClick={() => setResponsible((prev) => prev.filter((item) => item !== name))}>×</button>
+                </span>
+              ))}
+            </div>
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const value = e.target.value
+                if (!value) return
+                setResponsible((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                e.currentTarget.value = ''
+              }}
+              className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            >
+              <option value="">+ 新增缺失人員</option>
+              {personnelOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex justify-end">
