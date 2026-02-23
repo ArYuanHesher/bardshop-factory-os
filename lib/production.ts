@@ -39,6 +39,7 @@ export const PRODUCTION_CATEGORY_MAP: Record<string, string> = {
   printing: '印刷',
   laser: '雷切',
   post: '後加工',
+  packaging: '包裝',
   packing: '包裝',
   outsourced: '委外',
   changping: '常平'

@@ -34,7 +34,7 @@ const CATEGORIES = [
     )
   },
   {
-    id: 'packing',
+    id: 'packaging',
     name: '包裝產程',
     eng: 'Packaging',
     desc: '產品包裝、貼標、出貨前準備',

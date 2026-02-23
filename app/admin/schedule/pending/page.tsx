@@ -296,7 +296,7 @@ export default function SchedulePendingPage() {
             targetSection = docType.includes('常平') ? 'changping' : 'outsourced'
         }
         else if (stationName.includes('雷切')) targetSection = 'laser'
-        else if (stationName.includes('包裝')) targetSection = 'packing'
+        else if (stationName.includes('包裝')) targetSection = 'packaging'
         else if (stationName.includes('加工') || stationName.includes('組裝')) targetSection = 'post'
         else if (stationName.includes('常平')) targetSection = 'changping'
         // --- 判斷結束 ---
