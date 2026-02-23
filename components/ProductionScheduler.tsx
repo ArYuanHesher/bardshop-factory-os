@@ -1,12 +1,15 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback, type ChangeEvent } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { PRODUCTION_CATEGORY_MAP, getCurrentWeekStart, type ProductionMachine, type ProductionTask, type TaskUpdate } from '../lib/production'
 import { 
   DndContext, 
   useDraggable, 
   useDroppable, 
   DragOverlay,
+  type DragEndEvent,
+  type DragStartEvent,
   useSensor,
   useSensors,
   PointerSensor,
@@ -57,13 +60,13 @@ function AlertModal({
 }
 
 // --- 2. 詳細資料彈窗 (含人員資訊與完整欄位) ---
-function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: () => void, onTaskUpdate: (id: number, updates: any) => void }) {
-  const [orderStages, setOrderStages] = useState<any[]>([])
+function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask | null, onClose: () => void, onTaskUpdate: (id: number, updates: TaskUpdate) => void }) {
+  const [orderStages, setOrderStages] = useState<ProductionTask[]>([])
   const [isLoadingStages, setIsLoadingStages] = useState(false)
   const [partialInput, setPartialInput] = useState<string>('')
   const [currentCompleted, setCurrentCompleted] = useState<number>(task?.completed_quantity || 0)
 
-  const fetchStages = async () => {
+  const fetchStages = useCallback(async () => {
     if (!task?.order_number) return
     setIsLoadingStages(true)
     const { data, error } = await supabase
@@ -74,18 +77,21 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
       .eq('quantity', task.quantity)
       .order('id', { ascending: true })
 
-    if (!error && data) setOrderStages(data)
+    if (!error && data) setOrderStages(data as ProductionTask[])
     setIsLoadingStages(false)
-  }
+  }, [task])
 
   useEffect(() => {
     if (task) {
-      setCurrentCompleted(task.completed_quantity || 0)
-      fetchStages()
+      const timer = setTimeout(() => {
+        void fetchStages()
+      }, 0)
+      return () => clearTimeout(timer)
     }
-  }, [task])
+  }, [task, fetchStages])
 
   const handleFullComplete = async () => {
+    if (!task) return
     if(!confirm('確定標記為「全部完成」嗎？')) return
     const updates = { status: 'completed', completed_quantity: task.quantity }
     const { error } = await supabase.from('station_time_summary').update(updates).eq('id', task.id)
@@ -97,10 +103,11 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
   }
 
   const handlePartialUpdate = async () => {
-    const qty = parseInt(partialInput)
+    const qty = parseInt(partialInput, 10)
     if (isNaN(qty) || qty < 0) return alert('請輸入有效數量')
     
-    const updates: any = { completed_quantity: qty }
+    if (!task) return
+    const updates: TaskUpdate = { completed_quantity: qty }
     if (qty >= task.quantity) updates.status = 'completed'
     else updates.status = 'active'
 
@@ -115,6 +122,7 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
   }
 
   const handleResetProgress = async () => {
+    if (!task) return
     if (!confirm('⚠️ 警告：確定要取消完成狀態並重置進度嗎？\n此動作將把「已完成數量」歸零，且無法復原。')) return
     
     const updates = { status: 'active', completed_quantity: 0 }
@@ -254,15 +262,16 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
 }
 
 // --- 3. 可拖曳卡片 (🔥 修改Header顯示工序名稱) ---
-function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: any, isOverlay?: boolean, onTaskDblClick?: (task: any) => void }) {
+function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: ProductionTask, isOverlay?: boolean, onTaskDblClick?: (task: ProductionTask) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id.toString(), data: { task } })
   const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.3 : 1 }
   
   const isCompleted = task.status === 'completed'
-  const isPartial = !isCompleted && (task.completed_quantity > 0)
-  const progressPct = task.quantity > 0 ? Math.min(100, Math.round((task.completed_quantity / task.quantity) * 100)) : 0
+  const completedQty = task.completed_quantity ?? 0
+  const isPartial = !isCompleted && completedQty > 0
+  const progressPct = task.quantity > 0 ? Math.min(100, Math.round((completedQty / task.quantity) * 100)) : 0
 
-  const getDocTypeColor = (type: string) => {
+  const getDocTypeColor = (type?: string | null) => {
     if (!type) return 'bg-slate-700 text-slate-400 border-slate-600'
     if (type.includes('急')) return 'bg-red-900/60 text-red-300 border-red-500/50'
     if (type.includes('樣')) return 'bg-purple-900/60 text-purple-300 border-purple-500/50'
@@ -304,7 +313,7 @@ function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: any,
         <span className={`text-[12px] px-1.5 py-0.5 rounded border font-bold shrink-0 ${isCompleted ? 'bg-slate-900 text-slate-600 border-slate-800' : getDocTypeColor(task.doc_type)}`}>{task.doc_type || '工單'}</span>
       </div>
 
-      <div className={`font-bold text-[11px] leading-tight break-words line-clamp-2 min-h-[1.2em] ${isCompleted ? 'text-slate-500' : 'text-white'}`} title={task.item_name}>{task.item_name}</div>
+      <div className={`font-bold text-[11px] leading-tight break-words line-clamp-2 min-h-[1.2em] ${isCompleted ? 'text-slate-500' : 'text-white'}`} title={task.item_name ?? undefined}>{task.item_name || '-'}</div>
       <div className="flex items-center justify-between text-[12px] bg-black/20 p-1.5 rounded border border-slate-700/30">
         <div className="flex items-center gap-1"><span className="text-slate-500 text-[11px] scale-90">數量:</span><span className={`font-mono font-bold ${isCompleted ? 'text-slate-500' : 'text-white'}`}>{task.quantity}</span></div>
         <div className="flex items-center gap-1 border-l border-slate-700 pl-2"><span className="text-slate-500 text-[11px] scale-90">工時:</span><span className={`font-mono font-bold ${isCompleted ? 'text-slate-600' : 'text-emerald-500'}`}>{task.total_time_min}m</span></div>
@@ -329,9 +338,9 @@ function DraggableTask({ task, isOverlay = false, onTaskDblClick }: { task: any,
 }
 
 // --- 4. 行事曆格子 (維持不變) ---
-function DroppableDay({ date, tasks, title, isMachineSelected, isToday, dailyCapacity, onTaskDblClick }: { date: string, tasks: any[], title: string, isMachineSelected: boolean, isToday: boolean, dailyCapacity: number, onTaskDblClick: (task: any) => void }) {
+function DroppableDay({ date, tasks, title, isMachineSelected, isToday, dailyCapacity, onTaskDblClick }: { date: string, tasks: ProductionTask[], title: string, isMachineSelected: boolean, isToday: boolean, dailyCapacity: number, onTaskDblClick: (task: ProductionTask) => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: date, disabled: !isMachineSelected })
-  const usedMins = tasks.reduce((sum, t) => sum + t.total_time_min, 0)
+  const usedMins = tasks.reduce((sum, t) => sum + (t.total_time_min ?? 0), 0)
   const remainingMins = dailyCapacity - usedMins
   const isOverloaded = remainingMins < 0
   return (
@@ -351,7 +360,7 @@ function DroppableDay({ date, tasks, title, isMachineSelected, isToday, dailyCap
 }
 
 // --- 5. Unscheduled Sidebar (維持原樣) ---
-function UnscheduledSidebar({ tasks, onTaskDblClick }: { tasks: any[], onTaskDblClick: (t: any) => void }) {
+function UnscheduledSidebar({ tasks, onTaskDblClick }: { tasks: ProductionTask[], onTaskDblClick: (t: ProductionTask) => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'unscheduled' })
   const [searchQuery, setSearchQuery] = useState('')
   const [sortConfig, setSortConfig] = useState<{ key: 'delivery_date' | 'item_code' | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' })
@@ -398,28 +407,22 @@ function UnscheduledSidebar({ tasks, onTaskDblClick }: { tasks: any[], onTaskDbl
 
 // --- 6. 主框架元件 ---
 export default function ProductionScheduler({ sectionId, sectionName }: { sectionId: string, sectionName: string }) {
-  const [tasks, setTasks] = useState<any[]>([])
-  const [machines, setMachines] = useState<any[]>([])
+  const [tasks, setTasks] = useState<ProductionTask[]>([])
+  const [machines, setMachines] = useState<ProductionMachine[]>([])
   const [selectedMachineId, setSelectedMachineId] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [activeDragItem, setActiveDragItem] = useState<any>(null)
-  const [selectedTaskDetail, setSelectedTaskDetail] = useState<any>(null)
+  const [activeDragItem, setActiveDragItem] = useState<ProductionTask | null>(null)
+  const [selectedTaskDetail, setSelectedTaskDetail] = useState<ProductionTask | null>(null)
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean, message: string, onConfirm: () => void } | null>(null)
   
   // 🔥 新增：全域搜尋狀態與邏輯
   const [globalFilter, setGlobalFilter] = useState('') // 儲存觸發搜尋後的關鍵字
   const [searchInput, setSearchInput] = useState('')   // 儲存輸入框的即時內容
 
-  const [currentStart, setCurrentStart] = useState(new Date())
+  const [currentStart, setCurrentStart] = useState(getCurrentWeekStart)
   const [showWeekends, setShowWeekends] = useState(false)
   const [showNextWeek, setShowNextWeek] = useState(false)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }))
-
-  useEffect(() => {
-    const d = new Date(); const day = d.getDay(); const diff = d.getDate() - (day === 0 ? 6 : day - 1);
-    d.setDate(diff); d.setHours(0, 0, 0, 0); setCurrentStart(new Date(d));
-  }, [])
 
   // 搜尋觸發函式
   const handleSearch = () => {
@@ -429,15 +432,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   // 修正機台抓取邏輯
   useEffect(() => {
     const fetchMachines = async () => {
-      const CATEGORY_MAP: Record<string, string> = {
-        'printing': '印刷',
-        'laser': '雷切',
-        'post': '後加工',
-        'packing': '包裝',
-        'outsourced': '委外',
-        'changping': '常平'
-      }
-      const targetCategory = CATEGORY_MAP[sectionId] || sectionName.replace('產程', '')
+      const targetCategory = PRODUCTION_CATEGORY_MAP[sectionId] || sectionName.replace('產程', '')
       let { data } = await supabase
         .from('production_machines')
         .select('*')
@@ -455,9 +450,10 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
         if (fallbackData && fallbackData.length > 0) data = fallbackData
       }
 
-      if (data && data.length > 0) { 
-          setMachines(data); 
-          setSelectedMachineId(prev => prev ? prev : data![0].id) 
+      if (data && data.length > 0) {
+          const machineData = data as ProductionMachine[]
+          setMachines(machineData)
+          setSelectedMachineId(prev => prev ? prev : machineData[0].id)
       } else { 
           setMachines([]); 
           setSelectedMachineId(null) 
@@ -466,17 +462,30 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
     if (sectionId) fetchMachines()
   }, [sectionId, sectionName])
 
-  useEffect(() => { const fetchTasks = async () => { setLoading(true); const { data } = await supabase.from('station_time_summary').select('*').eq('assigned_section', sectionId); setTasks(data || []); setLoading(false) }; fetchTasks() }, [sectionId, selectedMachineId])
+  useEffect(() => {
+    const fetchTasks = async () => {
+      const { data } = await supabase
+        .from('station_time_summary')
+        .select('*')
+        .eq('assigned_section', sectionId)
+      setTasks((data as ProductionTask[]) || [])
+    }
+    fetchTasks()
+  }, [sectionId, selectedMachineId])
 
   const currentMachine = machines.find(m => m.id === selectedMachineId); const currentDailyCap = currentMachine?.daily_minutes || 480 
   
-  const generateDates = (startDate: Date, weeks: number) => { 
-      const arr = []; const start = new Date(startDate); 
-      for (let i = 0; i < weeks * 7; i++) { 
-          const d = new Date(start); d.setDate(start.getDate() + i); 
-          const dayOfWeek = d.getDay(); if (!showWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) continue; 
-          arr.push(d.toISOString().split('T')[0]) 
-      } return arr 
+    const generateDates = (startDate: Date, weeks: number) => {
+      const arr: string[] = []
+      const start = new Date(startDate)
+      for (let i = 0; i < weeks * 7; i++) {
+        const d = new Date(start)
+        d.setDate(start.getDate() + i)
+        const dayOfWeek = d.getDay()
+        if (!showWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) continue
+        arr.push(d.toISOString().split('T')[0])
+      }
+      return arr
   }
   const week1Dates = generateDates(currentStart, 1); const week2Dates = generateDates(new Date(new Date(currentStart).setDate(currentStart.getDate() + 7)), 1)
 
@@ -502,50 +511,57 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
         const aCompleted = a.status === 'completed' ? 1 : 0
         const bCompleted = b.status === 'completed' ? 1 : 0
         if (aCompleted !== bCompleted) return aCompleted - bCompleted
-        const getUrgency = (t: any) => (t.doc_type || '').includes('急') ? 1 : 0
+        const getUrgency = (t: ProductionTask) => (t.doc_type || '').includes('急') ? 1 : 0
         return getUrgency(b) - getUrgency(a)
     })
   }
   
   const todayStr = new Date().toISOString().split('T')[0]
 
-  const executeUpdate = async (taskId: string, targetDate: string | null, machineId: number | null) => {
-    setTasks(prev => prev.map(t => { if (t.id.toString() === taskId) { return { ...t, scheduled_date: targetDate, production_machine_id: machineId } } return t }))
+  const executeUpdate = async (taskId: string | number, targetDate: string | null, machineId: number | null) => {
+    setTasks(prev => prev.map(t => { if (t.id.toString() === taskId.toString()) { return { ...t, scheduled_date: targetDate, production_machine_id: machineId } } return t }))
     await supabase.from('station_time_summary').update({ scheduled_date: targetDate, production_machine_id: machineId }).eq('id', taskId)
     setAlertConfig(null)
   }
 
-  const handleTaskUpdate = (taskId: number, updates: any) => {
+  const handleTaskUpdate = (taskId: number, updates: TaskUpdate) => {
     setTasks(prev => prev.map(t => 
         t.id === taskId ? { ...t, ...updates } : t
     ))
     if (selectedTaskDetail?.id === taskId) {
-        setSelectedTaskDetail((prev: any) => ({ ...prev, ...updates }))
+        setSelectedTaskDetail(prev => (prev ? { ...prev, ...updates } : prev))
     }
   }
 
-  const handleDragEnd = async (event: any) => {
-    const { active, over } = event; setActiveDragItem(null); if (!over) return
-    const taskId = active.id; const targetId = over.id as string; const currentTask = active.data.current.task
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    setActiveDragItem(null)
+    if (!over) return
+
+    const taskId = active.id
+    const targetId = over.id as string
+    const currentTask = active.data.current?.task as ProductionTask | undefined
+    if (!currentTask) return
     if (targetId === 'unscheduled') { executeUpdate(taskId, null, null); return }
     if (!selectedMachineId) { alert('請先選擇機台！'); return }
     const newDate = targetId
     const { data: allStages } = await supabase.from('station_time_summary').select('*').eq('order_number', currentTask.order_number).eq('item_code', currentTask.item_code).eq('quantity', currentTask.quantity).order('id', { ascending: true })
     if (!allStages) { executeUpdate(taskId, newDate, selectedMachineId); return }
-    const currentIndex = allStages.findIndex((s: any) => s.id === currentTask.id)
+    const typedStages = allStages as ProductionTask[]
+    const currentIndex = typedStages.findIndex((s) => s.id === currentTask.id)
     let warningMsg = ""
-    if (currentIndex > 0) { const prev = allStages[currentIndex - 1]; if (!prev.scheduled_date) warningMsg += `⚠️ 前工序 [${prev.op_name}] 尚未排程！\n`; else if (new Date(newDate) <= new Date(prev.scheduled_date)) warningMsg += `⚠️ 日期衝突：需在 [${prev.op_name}] (${prev.scheduled_date}) 之後。\n` }
-    if (currentIndex < allStages.length - 1) { const next = allStages[currentIndex + 1]; if (next.scheduled_date && new Date(newDate) >= new Date(next.scheduled_date)) warningMsg += `⚠️ 日期衝突：需在 [${next.op_name}] (${next.scheduled_date}) 之前。\n` }
+    if (currentIndex > 0) { const prev = typedStages[currentIndex - 1]; if (!prev.scheduled_date) warningMsg += `⚠️ 前工序 [${prev.op_name}] 尚未排程！\n`; else if (new Date(newDate) <= new Date(prev.scheduled_date)) warningMsg += `⚠️ 日期衝突：需在 [${prev.op_name}] (${prev.scheduled_date}) 之後。\n` }
+    if (currentIndex < typedStages.length - 1) { const next = typedStages[currentIndex + 1]; if (next.scheduled_date && new Date(newDate) >= new Date(next.scheduled_date)) warningMsg += `⚠️ 日期衝突：需在 [${next.op_name}] (${next.scheduled_date}) 之前。\n` }
     if (warningMsg) setAlertConfig({ isOpen: true, message: warningMsg, onConfirm: () => executeUpdate(taskId, newDate, selectedMachineId) }); else executeUpdate(taskId, newDate, selectedMachineId)
   }
 
-  const handleDragStart = (event: any) => { setActiveDragItem(event.active.data.current.task) }
+  const handleDragStart = (event: DragStartEvent) => { setActiveDragItem(event.active.data.current?.task as ProductionTask) }
   const changeWeek = (offset: number) => { const newStart = new Date(currentStart); newStart.setDate(newStart.getDate() + (offset * 7)); setCurrentStart(newStart); setShowNextWeek(false) }
-  const handleDatePick = (e: any) => { const date = new Date(e.target.value); if (!isNaN(date.getTime())) { const day = date.getDay(); const diff = date.getDate() - (day === 0 ? 6 : day - 1); date.setDate(diff); setCurrentStart(new Date(date)); setShowNextWeek(false) } }
+  const handleDatePick = (e: ChangeEvent<HTMLInputElement>) => { const date = new Date(e.target.value); if (!isNaN(date.getTime())) { const day = date.getDay(); const diff = date.getDate() - (day === 0 ? 6 : day - 1); date.setDate(diff); setCurrentStart(new Date(date)); setShowNextWeek(false) } }
   
   return (
     <DndContext onDragEnd={handleDragEnd} onDragStart={handleDragStart} sensors={sensors} collisionDetection={pointerWithin}>
-      <TaskDetailModal task={selectedTaskDetail} onClose={() => setSelectedTaskDetail(null)} onTaskUpdate={handleTaskUpdate} />
+      <TaskDetailModal key={selectedTaskDetail?.id ?? 'empty-task'} task={selectedTaskDetail} onClose={() => setSelectedTaskDetail(null)} onTaskUpdate={handleTaskUpdate} />
       <AlertModal isOpen={!!alertConfig} message={alertConfig?.message || ''} onConfirm={alertConfig?.onConfirm || (() => {})} onCancel={() => setAlertConfig(null)} />
       <div className="flex flex-col h-[calc(100vh-80px)] overflow-hidden">
         <div className="flex flex-col gap-3 mb-2 px-1">

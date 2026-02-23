@@ -4,32 +4,25 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import Link from 'next/link'
 
+interface WidgetTask {
+  id: number
+  title?: string | null
+  content?: string | null
+  status?: string | null
+  is_read?: boolean | null
+  target_dept?: string | null
+  sender_name?: string | null
+  created_at?: string | null
+}
+
 export default function TaskFloatingWidget() {
   const [isOpen, setIsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'list' | 'chat'>('list')
-  const [tasks, setTasks] = useState<any[]>([])
-  const [selectedTask, setSelectedTask] = useState<any>(null)
+  const [tasks, setTasks] = useState<WidgetTask[]>([])
+  const [selectedTask, setSelectedTask] = useState<WidgetTask | null>(null)
   const [unreadCount, setUnreadCount] = useState(0)
-  
-  // 模擬當前使用者 (實際應從 Auth Context 或 LocalStorage 取得)
-  const currentUser = { id: 'user-123', name: '張肇元', dept: '生產管理' }
-
-  useEffect(() => {
-    fetchTasks()
-    
-    // 訂閱即時更新
-    const channel = supabase
-      .channel('tasks-widget')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
-        fetchTasks()
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [])
 
   const fetchTasks = async () => {
-    // 抓取任務 (這裡示範抓取最新的 10 筆)
     const { data } = await supabase
       .from('tasks')
       .select('*')
@@ -37,17 +30,40 @@ export default function TaskFloatingWidget() {
       .limit(10)
 
     if (data) {
-      setTasks(data)
-      // 計算未讀數量 (status 為 pending 或 is_read 為 false)
-      // 這裡示範簡單邏輯：只要是 pending 就算未讀，您可根據需求調整
-      const count = data.filter(t => !t.is_read).length
+      const typedData = data as WidgetTask[]
+      setTasks(typedData)
+      const count = typedData.filter(t => !t.is_read).length
       setUnreadCount(count)
     }
   }
 
-  const handleOpenTask = (task: any) => {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchTasks()
+    }, 0)
+    
+    // 訂閱即時更新
+    const channel = supabase
+      .channel('tasks-widget')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
+        void fetchTasks()
+      })
+      .subscribe()
+
+    return () => {
+      clearTimeout(timer)
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
+  const handleOpenTask = (task: WidgetTask) => {
     setSelectedTask(task)
     setActiveTab('chat')
+
+    if (task.is_read) {
+      return
+    }
+
     // 點擊後標記為已讀 (更新資料庫)
     supabase.from('tasks').update({ is_read: true }).eq('id', task.id).then(() => {
        // 本地扣除未讀數，讓 UI 即時反應
@@ -61,6 +77,11 @@ export default function TaskFloatingWidget() {
   // 基礎 1 倍 + (每則訊息 * 0.1 倍)
   // Math.min 取最小值，確保不超過 3 倍 (300%)
   const scale = Math.min(1 + unreadCount * 0.1, 3)
+
+  const formatTime = (value?: string | null) => {
+    if (!value) return '--:--'
+    return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
 
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end font-sans">
@@ -105,7 +126,7 @@ export default function TaskFloatingWidget() {
                     >
                         <div className="flex justify-between items-start mb-1">
                         <span className="text-xs font-bold text-blue-400">[{task.target_dept}]</span>
-                        <span className="text-[10px] text-slate-500 font-mono">{new Date(task.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">{formatTime(task.created_at)}</span>
                         </div>
                         <h4 className={`text-sm text-white mb-1 truncate ${!task.is_read ? 'font-bold' : 'font-normal'}`}>{task.title}</h4>
                         <p className="text-xs text-slate-400 truncate">{task.content}</p>

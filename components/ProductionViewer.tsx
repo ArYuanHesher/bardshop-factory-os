@@ -1,19 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { supabase } from '../lib/supabaseClient'
+import { PRODUCTION_CATEGORY_MAP, getCurrentWeekStart, type ProductionMachine, type ProductionTask, type TaskUpdate } from '../lib/production'
 
 // --- 1. 詳細資料彈窗 (現場看板專用版：無重置功能) ---
-function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: () => void, onTaskUpdate: (id: number, updates: any) => void }) {
-  const [orderStages, setOrderStages] = useState<any[]>([])
-  const [isLoadingStages, setIsLoadingStages] = useState(false)
+function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask | null, onClose: () => void, onTaskUpdate: (id: number, updates: TaskUpdate) => void }) {
+  const [orderStages, setOrderStages] = useState<ProductionTask[]>([])
+  const [isLoadingStages, setIsLoadingStages] = useState(true)
   const [partialInput, setPartialInput] = useState<string>('')
   const [currentCompleted, setCurrentCompleted] = useState<number>(task?.completed_quantity || 0)
 
-  const fetchStages = async () => {
+  const fetchStages = useCallback(async () => {
     if (!task?.order_number) return
-    setIsLoadingStages(true)
     const { data, error } = await supabase
       .from('station_time_summary')
       .select(`*, production_machines ( name )`)
@@ -22,19 +22,22 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
       .eq('quantity', task.quantity)
       .order('id', { ascending: true })
 
-    if (!error && data) setOrderStages(data)
+    if (!error && data) setOrderStages(data as ProductionTask[])
     setIsLoadingStages(false)
-  }
+  }, [task])
 
   useEffect(() => {
     if (task) {
-      setCurrentCompleted(task.completed_quantity || 0)
-      fetchStages()
+      const timer = setTimeout(() => {
+        void fetchStages()
+      }, 0)
+      return () => clearTimeout(timer)
     }
-  }, [task])
+  }, [task, fetchStages])
 
   // 功能 A: 全部完成
   const handleFullComplete = async () => {
+    if (!task) return
     if(!confirm('確定標記為「全部完成」嗎？')) return
     const updates = { status: 'completed', completed_quantity: task.quantity }
     const { error } = await supabase.from('station_time_summary').update(updates).eq('id', task.id)
@@ -47,10 +50,11 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
 
   // 功能 B: 部分完成 (更新數量)
   const handlePartialUpdate = async () => {
-    const qty = parseInt(partialInput)
+    const qty = parseInt(partialInput, 10)
     if (isNaN(qty) || qty < 0) return alert('請輸入有效數量')
     
-    const updates: any = { completed_quantity: qty }
+    if (!task) return
+    const updates: TaskUpdate = { completed_quantity: qty }
     // 若數量達標則自動完成，否則保持 active
     if (qty >= task.quantity) updates.status = 'completed'
     else updates.status = 'active'
@@ -187,12 +191,13 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: any, onClose: 
 }
 
 // --- 2. 互動式任務卡片 (🔥 修改Header顯示工序名稱) ---
-function InteractiveTaskCard({ task, onClick }: { task: any, onClick: () => void }) {
+function InteractiveTaskCard({ task, onClick }: { task: ProductionTask, onClick: () => void }) {
   const isCompleted = task.status === 'completed'
-  const isPartial = !isCompleted && (task.completed_quantity > 0)
-  const progressPct = task.quantity > 0 ? Math.min(100, Math.round((task.completed_quantity / task.quantity) * 100)) : 0
+  const completedQty = task.completed_quantity ?? 0
+  const isPartial = !isCompleted && completedQty > 0
+  const progressPct = task.quantity > 0 ? Math.min(100, Math.round((completedQty / task.quantity) * 100)) : 0
 
-  const getDocTypeColor = (type: string) => {
+  const getDocTypeColor = (type?: string | null) => {
     if (!type) return 'bg-slate-700 text-slate-400 border-slate-600'
     if (type.includes('急')) return 'bg-red-900/60 text-red-300 border-red-500/50'
     if (type.includes('樣')) return 'bg-purple-900/60 text-purple-300 border-purple-500/50'
@@ -230,7 +235,7 @@ function InteractiveTaskCard({ task, onClick }: { task: any, onClick: () => void
         <span className={`text-[12px] px-1.5 py-0.5 rounded border font-bold shrink-0 ${isCompleted ? 'bg-slate-900 text-slate-600 border-slate-800' : getDocTypeColor(task.doc_type)}`}>{task.doc_type || '工單'}</span>
       </div>
 
-      <div className={`font-bold text-[11px] leading-tight break-words line-clamp-2 min-h-[1.2em] ${isCompleted ? 'text-slate-500' : 'text-white'}`} title={task.item_name}>{task.item_name}</div>
+      <div className={`font-bold text-[11px] leading-tight break-words line-clamp-2 min-h-[1.2em] ${isCompleted ? 'text-slate-500' : 'text-white'}`} title={task.item_name ?? undefined}>{task.item_name || '-'}</div>
       <div className="flex items-center justify-between text-[12px] bg-black/20 p-1.5 rounded border border-slate-700/30">
         <div className="flex items-center gap-1"><span className="text-slate-500 text-[11px] scale-90">數量:</span><span className={`font-mono font-bold ${isCompleted ? 'text-slate-500' : 'text-white'}`}>{task.quantity}</span></div>
         <div className="flex items-center gap-1 border-l border-slate-700 pl-2"><span className="text-slate-500 text-[11px] scale-90">工時:</span><span className={`font-mono font-bold ${isCompleted ? 'text-slate-600' : 'text-emerald-500'}`}>{task.total_time_min}m</span></div>
@@ -265,14 +270,14 @@ function DayColumn({
   onTaskClick 
 }: { 
   date: string, 
-  tasks: any[], 
+  tasks: ProductionTask[], 
   title: string, 
   isMachineSelected: boolean, 
   isToday: boolean,
   dailyCapacity: number,
-  onTaskClick: (task: any) => void
+  onTaskClick: (task: ProductionTask) => void
 }) {
-  const usedMins = tasks.reduce((sum, t) => sum + t.total_time_min, 0)
+  const usedMins = tasks.reduce((sum, t) => sum + (t.total_time_min ?? 0), 0)
   const remainingMins = dailyCapacity - usedMins
   const isOverloaded = remainingMins < 0
 
@@ -320,42 +325,28 @@ function DayColumn({
 
 // --- 4. 主框架 (現場看板模式：可操作但無重置、無拖拉、無右側Sidebar) ---
 export default function ProductionViewer({ sectionId, sectionName }: { sectionId: string, sectionName: string }) {
-  const [tasks, setTasks] = useState<any[]>([])
-  const [machines, setMachines] = useState<any[]>([])
+  const [tasks, setTasks] = useState<ProductionTask[]>([])
+  const [machines, setMachines] = useState<ProductionMachine[]>([])
   const [selectedMachineId, setSelectedMachineId] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
   
   // 互動狀態
-  const [selectedTaskDetail, setSelectedTaskDetail] = useState<any>(null)
+  const [selectedTaskDetail, setSelectedTaskDetail] = useState<ProductionTask | null>(null)
 
   // 日期控制
-  const [currentStart, setCurrentStart] = useState(new Date())
+  const [currentStart, setCurrentStart] = useState(getCurrentWeekStart)
   const [showWeekends, setShowWeekends] = useState(false)
   const [showNextWeek, setShowNextWeek] = useState(false)
 
-  // 1分鐘自動重整
-  useEffect(() => {
-    const interval = setInterval(() => { fetchTasks() }, 60000)
-    return () => clearInterval(interval)
-  }, [sectionId, selectedMachineId])
-
-  useEffect(() => {
-    const d = new Date(); const day = d.getDay(); const diff = d.getDate() - (day === 0 ? 6 : day - 1);
-    d.setDate(diff); d.setHours(0, 0, 0, 0); setCurrentStart(new Date(d));
-  }, [])
+  const fetchTasks = useCallback(async () => {
+    const { data, error } = await supabase.from('station_time_summary').select('*').eq('assigned_section', sectionId)
+    if (error) console.error(error)
+    else setTasks((data as ProductionTask[]) || [])
+  }, [sectionId])
 
   // 抓取機台 (使用新的 category 邏輯)
   useEffect(() => {
     const fetchMachines = async () => {
-      const CATEGORY_MAP: Record<string, string> = {
-        'printing': '印刷',
-        'laser': '雷切',
-        'post': '後加工',
-        'packing': '包裝',
-        'outsourced': '委外',
-        'changping': '常平'
-      }
-      const targetCategory = CATEGORY_MAP[sectionId] || sectionName.replace('產程', '')
+      const targetCategory = PRODUCTION_CATEGORY_MAP[sectionId] || sectionName.replace('產程', '')
       
       let { data } = await supabase
         .from('production_machines')
@@ -375,8 +366,9 @@ export default function ProductionViewer({ sectionId, sectionName }: { sectionId
       }
 
       if (data && data.length > 0) {
-        setMachines(data)
-        setSelectedMachineId(data[0].id)
+        const machineData = data as ProductionMachine[]
+        setMachines(machineData)
+        setSelectedMachineId(machineData[0].id)
       } else {
         setMachines([])
         setSelectedMachineId(null)
@@ -386,24 +378,25 @@ export default function ProductionViewer({ sectionId, sectionName }: { sectionId
   }, [sectionId, sectionName])
 
   useEffect(() => {
-    fetchTasks()
-  }, [sectionId, selectedMachineId])
+    const timer = setTimeout(() => {
+      void fetchTasks()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [sectionId, selectedMachineId, fetchTasks])
 
-  const fetchTasks = async () => {
-    setLoading(true)
-    const { data, error } = await supabase.from('station_time_summary').select('*').eq('assigned_section', sectionId)
-    if (error) console.error(error)
-    else setTasks(data || [])
-    setLoading(false)
-  }
+  // 1分鐘自動重整
+  useEffect(() => {
+    const interval = setInterval(() => { fetchTasks() }, 60000)
+    return () => clearInterval(interval)
+  }, [sectionId, selectedMachineId, fetchTasks])
 
   // 處理任務更新 (即時反應在 UI)
-  const handleTaskUpdate = (taskId: number, updates: any) => {
+  const handleTaskUpdate = (taskId: number, updates: TaskUpdate) => {
     setTasks(prev => prev.map(t => 
         t.id === taskId ? { ...t, ...updates } : t
     ))
     if (selectedTaskDetail?.id === taskId) {
-        setSelectedTaskDetail((prev: any) => ({ ...prev, ...updates }))
+        setSelectedTaskDetail(prev => (prev ? { ...prev, ...updates } : prev))
     }
   }
 
@@ -435,13 +428,13 @@ export default function ProductionViewer({ sectionId, sectionName }: { sectionId
 
   const getTasksForDate = (date: string) => {
     if (!selectedMachineId) return []
-    let dailyTasks = tasks.filter(t => t.scheduled_date === date && t.production_machine_id === selectedMachineId)
+    const dailyTasks = tasks.filter(t => t.scheduled_date === date && t.production_machine_id === selectedMachineId)
     // 排序：未完成 > 急件 > 一般 > 已完成
     return dailyTasks.sort((a, b) => {
         const aCompleted = a.status === 'completed' ? 1 : 0
         const bCompleted = b.status === 'completed' ? 1 : 0
         if (aCompleted !== bCompleted) return aCompleted - bCompleted
-        const getUrgency = (t: any) => (t.doc_type || '').includes('急') ? 1 : 0
+      const getUrgency = (t: ProductionTask) => (t.doc_type || '').includes('急') ? 1 : 0
         return getUrgency(b) - getUrgency(a)
     })
   }
@@ -451,7 +444,7 @@ export default function ProductionViewer({ sectionId, sectionName }: { sectionId
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] overflow-hidden">
         {/* 互動視窗 */}
-        <TaskDetailModal task={selectedTaskDetail} onClose={() => setSelectedTaskDetail(null)} onTaskUpdate={handleTaskUpdate} />
+        <TaskDetailModal key={selectedTaskDetail?.id ?? 'empty-task'} task={selectedTaskDetail} onClose={() => setSelectedTaskDetail(null)} onTaskUpdate={handleTaskUpdate} />
 
         {/* Header */}
         <div className="flex flex-col gap-3 mb-2 px-1">
