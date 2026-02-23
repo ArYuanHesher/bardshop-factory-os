@@ -55,7 +55,7 @@ function getBaseOrderNumber(orderNo: string) {
   return orderNo.replace(/\(\d+\)$/, '')
 }
 
-type EditableField = 'op_name' | 'assigned_section' | 'total_time_min'
+type EditableField = 'op_name' | 'assigned_section' | 'total_time_min' | 'quantity'
 
 // --- 可排序的單一工序列 ---
 function SortableItem({ item, onDelete, onUpdate }: { item: StageItem, onDelete: (id: number) => void, onUpdate: (id: number, field: EditableField, val: string | number) => void }) {
@@ -116,6 +116,18 @@ function SortableItem({ item, onDelete, onUpdate }: { item: StageItem, onDelete:
           value={item.total_time_min} 
           onChange={(e) => onUpdate(item.id, 'total_time_min', parseInt(e.target.value) || 0)}
           className="bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-emerald-400 font-mono w-full text-right focus:border-emerald-500 outline-none"
+        />
+      </div>
+
+      {/* 生產數量 */}
+      <div className="w-24">
+        <label className="text-[9px] text-slate-500 block mb-0.5">生產數量</label>
+        <input
+          type="number"
+          min={0}
+          value={item.quantity}
+          onChange={(e) => onUpdate(item.id, 'quantity', parseInt(e.target.value, 10) || 0)}
+          className="bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-cyan-300 font-mono w-full text-right focus:border-cyan-500 outline-none"
         />
       </div>
 
@@ -304,23 +316,8 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
 
     const originalSnapshot = stages.map(s => ({ id: s.id, quantity: s.quantity, total_time_min: s.total_time_min }))
     const rowsToInsert: Array<Omit<StageItem, 'id'>> = []
-    const sourceOrderNo = stages[0]?.order_number || orderNumber
-    const baseOrderNo = getBaseOrderNumber(sourceOrderNo)
-    const orderNo1 = `${baseOrderNo}(1)`
-    const orderNo2 = `${baseOrderNo}(2)`
 
     try {
-      for (const stage of stages) {
-        const { error: orderRenameError } = await supabase
-          .from('station_time_summary')
-          .update({ order_number: orderNo1 })
-          .eq('id', stage.id)
-
-        if (orderRenameError) {
-          throw new Error(`更新原訂單號失敗: ${orderRenameError.message}`)
-        }
-      }
-
       for (const draft of selectedSplit) {
         const source = stages.find(s => s.id === draft.sourceId)
         if (!source) continue
@@ -342,7 +339,7 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
         }
 
         rowsToInsert.push({
-          order_number: orderNo2,
+          order_number: source.order_number,
           item_code: source.item_code,
           item_name: source.item_name,
           quantity: splitQty,
@@ -353,7 +350,7 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
           handler: source.handler,
           issuer: source.issuer,
           plate_count: source.plate_count,
-          op_name: source.op_name,
+          op_name: source.op_name.includes('第二道') ? source.op_name : `${source.op_name} (第二道)`,
           assigned_section: source.assigned_section,
           total_time_min: splitTime,
           status: source.status,
@@ -369,13 +366,13 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
       await onSaveSuccess()
       setMode('edit')
       setSplitStages([])
-      alert(`✅ 拆單完成：已建立 ${orderNo1} 與 ${orderNo2}`)
+      alert('✅ 拆單完成：已在同一張單內拆出第二道工序。')
       onClose()
     } catch (error) {
       for (const snapshot of originalSnapshot) {
         await supabase
           .from('station_time_summary')
-          .update({ quantity: snapshot.quantity, total_time_min: snapshot.total_time_min, order_number: sourceOrderNo })
+          .update({ quantity: snapshot.quantity, total_time_min: snapshot.total_time_min })
           .eq('id', snapshot.id)
       }
 
@@ -431,22 +428,38 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
 
   const handleSaveAll = async () => {
     setLoading(true)
-    // 這裡我們透過 delete + re-insert 或者 update 來保存順序
-    // 為了簡單起見，我們更新每一筆資料的內容 (如果未來有 sort_order 欄位，也要在這裡更新)
-    const promises = stages.map((stage) => {
-        return supabase.from('station_time_summary').update({
-            op_name: stage.op_name,
-            assigned_section: stage.assigned_section,
-            total_time_min: stage.total_time_min,
-            // sort_order: index // 若資料庫有此欄位可啟用
-        }).eq('id', stage.id)
-    })
+    try {
+      const results = await Promise.all(
+        stages.map(async (stage) => {
+          const { error } = await supabase
+            .from('station_time_summary')
+            .update({
+              op_name: stage.op_name,
+              assigned_section: stage.assigned_section,
+              total_time_min: stage.total_time_min,
+              quantity: stage.quantity,
+            })
+            .eq('id', stage.id)
 
-    await Promise.all(promises)
-    setLoading(false)
-    alert('✅ 工序結構與內容已儲存！')
-    onSaveSuccess()
-    onClose()
+          return { id: stage.id, error }
+        })
+      )
+
+      const failed = results.find((result) => result.error)
+      if (failed?.error) {
+        alert(`❌ 儲存失敗（工序 ID: ${failed.id}）：${failed.error.message}`)
+        return
+      }
+
+      alert('✅ 工序結構與內容已儲存！')
+      onSaveSuccess()
+      onClose()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert(`❌ 儲存失敗：${message}`)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleDeleteEntireOrder = async () => {

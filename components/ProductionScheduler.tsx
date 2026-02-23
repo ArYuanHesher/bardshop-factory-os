@@ -644,6 +644,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   const [tasks, setTasks] = useState<ProductionTask[]>([])
   const [machines, setMachines] = useState<ProductionMachine[]>([])
   const [selectedMachineId, setSelectedMachineId] = useState<number | null>(null)
+  const [isSyncing, setIsSyncing] = useState(false)
   const [activeDragItem, setActiveDragItem] = useState<ProductionTask | null>(null)
   const [selectedTaskDetail, setSelectedTaskDetail] = useState<ProductionTask | null>(null)
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean, message: string, onConfirm: () => void } | null>(null)
@@ -661,6 +662,15 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   // 搜尋觸發函式
   const handleSearch = () => {
     setGlobalFilter(searchInput.trim())
+  }
+
+  const handleManualSync = async () => {
+    setIsSyncing(true)
+    try {
+      await fetchTasks()
+    } finally {
+      setIsSyncing(false)
+    }
   }
 
   // 修正機台抓取邏輯
@@ -707,6 +717,14 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   useEffect(() => {
     void fetchTasks()
   }, [sectionId, selectedMachineId, fetchTasks])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void fetchTasks()
+    }, 60000)
+
+    return () => clearInterval(interval)
+  }, [fetchTasks])
 
   const currentMachine = machines.find(m => m.id === selectedMachineId); const currentDailyCap = currentMachine?.daily_minutes || 480 
   
@@ -834,7 +852,16 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                         )}
                     </div>
                 </div>
-                <div className="flex items-center gap-3"><label className="flex items-center cursor-pointer gap-2"><div className="relative"><input type="checkbox" className="sr-only" checked={showWeekends} onChange={() => setShowWeekends(!showWeekends)} /><div className={`block w-10 h-6 rounded-full transition-colors ${showWeekends ? 'bg-cyan-600' : 'bg-slate-700'}`}></div><div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${showWeekends ? 'transform translate-x-4' : ''}`}></div></div><span className="text-xs text-slate-400 font-bold">顯示週末</span></label></div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => { void handleManualSync() }}
+                    disabled={isSyncing}
+                    className="px-3 py-1 rounded-lg text-xs font-bold border border-cyan-700 bg-cyan-900/40 text-cyan-300 hover:bg-cyan-800/60 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isSyncing ? '同步中...' : '立即同步'}
+                  </button>
+                  <label className="flex items-center cursor-pointer gap-2"><div className="relative"><input type="checkbox" className="sr-only" checked={showWeekends} onChange={() => setShowWeekends(!showWeekends)} /><div className={`block w-10 h-6 rounded-full transition-colors ${showWeekends ? 'bg-cyan-600' : 'bg-slate-700'}`}></div><div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${showWeekends ? 'transform translate-x-4' : ''}`}></div></div><span className="text-xs text-slate-400 font-bold">顯示週末</span></label>
+                </div>
             </div>
             <div className="flex flex-wrap gap-2 p-2 bg-slate-900/30 rounded-lg border border-slate-800">
                 {machines.map(machine => (<button key={machine.id} onClick={() => setSelectedMachineId(machine.id)} className={`px-4 py-2 rounded border transition-all text-xs font-bold flex items-center gap-2 grow-0 ${selectedMachineId === machine.id ? 'bg-cyan-600 text-white border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}><span className={`w-2 h-2 rounded-full ${selectedMachineId === machine.id ? 'bg-white animate-pulse' : 'bg-slate-500'}`}></span>{machine.name}</button>))}
