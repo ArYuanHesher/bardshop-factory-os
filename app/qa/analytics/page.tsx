@@ -89,6 +89,7 @@ export default function QaAnalyticsPage() {
       const { data, error } = await supabase
         .from('schedule_anomaly_reports')
         .select('created_at, status, reason, qa_reporter, qa_handlers, qa_responsible')
+        .eq('report_type', 'qa')
         .gte('created_at', `${startDate}T00:00:00.000Z`)
         .lte('created_at', `${endDate}T23:59:59.999Z`)
 

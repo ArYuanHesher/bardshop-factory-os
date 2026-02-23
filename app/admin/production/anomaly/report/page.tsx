@@ -7,7 +7,6 @@ import { supabase } from '../../../../../lib/supabaseClient'
 const DEFAULT_PERSONNEL_OPTIONS = ['王小明', '李小華', '陳建宏', '課長A', '主管B', '品保C', '作業員A', '作業員B', '技術員C']
 
 export default function QaReportFormPage() {
-  const [reportType, setReportType] = useState<'upv' | 'other'>('other')
   const [orderNumber, setOrderNumber] = useState('')
   const [itemCode, setItemCode] = useState('')
   const [quantity, setQuantity] = useState<number>(0)
@@ -47,7 +46,7 @@ export default function QaReportFormPage() {
       return
     }
 
-    if (reportType === 'other' && !reason.trim()) {
+    if (!reason.trim()) {
       alert('請填寫異常原因')
       return
     }
@@ -55,8 +54,8 @@ export default function QaReportFormPage() {
     setSubmitting(true)
     try {
       const payload = {
-        report_type: reportType,
-        reason: reportType === 'upv' ? '此為上V' : reason.trim(),
+        report_type: 'qa',
+        reason: reason.trim(),
         status: 'pending',
         source_order_id: null,
         task_id: null,
@@ -73,7 +72,6 @@ export default function QaReportFormPage() {
       if (error) throw error
 
       alert('✅ 已送出異常回報單')
-      setReportType('other')
       setOrderNumber('')
       setItemCode('')
       setQuantity(0)
@@ -103,18 +101,6 @@ export default function QaReportFormPage() {
 
       <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-6 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs text-slate-400">回報類型</label>
-            <select
-              value={reportType}
-              onChange={(e) => setReportType(e.target.value as 'upv' | 'other')}
-              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            >
-              <option value="other">其他異常</option>
-              <option value="upv">此為上V</option>
-            </select>
-          </div>
-
           <div>
             <label className="text-xs text-slate-400">工單號</label>
             <input

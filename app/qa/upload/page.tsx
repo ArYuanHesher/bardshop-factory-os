@@ -180,6 +180,7 @@ export default function QaBatchUploadPage() {
       const { data: existed, error: checkError } = await supabase
         .from('schedule_anomaly_reports')
         .select('order_number')
+        .eq('report_type', 'qa')
         .in('order_number', orderNumbers)
 
       if (checkError) throw checkError
@@ -192,7 +193,7 @@ export default function QaBatchUploadPage() {
       }
 
       const payload = validRows.map((row) => ({
-        report_type: 'other',
+        report_type: 'qa',
         reason: row.reason,
         status: 'pending',
         source_order_id: null,

@@ -6,7 +6,7 @@ import { supabase } from '../../../../../lib/supabaseClient'
 
 interface AnomalyReport {
   id: number
-  report_type: 'upv' | 'other' | string
+  report_type: 'qa' | 'upv' | 'other' | string
   reason: string | null
   status: 'pending' | 'confirmed' | string
   source_order_id: number | null
@@ -117,6 +117,7 @@ export default function QaRecordsPage() {
     const { data, error } = await supabase
       .from('schedule_anomaly_reports')
       .select('*')
+      .eq('report_type', 'qa')
       .order('status', { ascending: true })
       .order('created_at', { ascending: false })
 
@@ -133,49 +134,11 @@ export default function QaRecordsPage() {
     void fetchReports()
   }, [fetchReports])
 
-  const applyUpvDoubleForOrder = async (report: AnomalyReport) => {
-    let query = supabase
-      .from('station_time_summary')
-      .select('id, total_time_min')
-      .ilike('station', '%印刷%')
-
-    if (report.source_order_id) {
-      query = query.eq('source_order_id', report.source_order_id)
-    } else {
-      query = query
-        .eq('order_number', report.order_number)
-        .eq('item_code', report.item_code)
-        .eq('quantity', report.quantity)
-    }
-
-    const { data: printRows, error: fetchError } = await query
-    if (fetchError) throw fetchError
-
-    const rows = (printRows || []) as Array<{ id: number; total_time_min: number | null }>
-    if (rows.length === 0) return
-
-    const updateJobs = rows.map((row) => {
-      const currentMinutes = Number(row.total_time_min) || 0
-      return supabase
-        .from('station_time_summary')
-        .update({ total_time_min: Math.round(currentMinutes * 2 * 100) / 100 })
-        .eq('id', row.id)
-    })
-
-    const results = await Promise.all(updateJobs)
-    const failed = results.find((result) => result.error)
-    if (failed?.error) throw failed.error
-  }
-
   const handleConfirm = async (report: AnomalyReport) => {
-    if (!confirm(`確認處理此筆異常回報？\n\n工單：${report.order_number}\n類型：${report.report_type === 'upv' ? '此為上V' : '其他異常'}`)) return
+    if (!confirm(`確認處理此筆異常回報？\n\n單號：${report.order_number}`)) return
 
     setProcessingId(report.id)
     try {
-      if (report.report_type === 'upv') {
-        await applyUpvDoubleForOrder(report)
-      }
-
       const { error: updateError } = await supabase
         .from('schedule_anomaly_reports')
         .update({ status: 'confirmed', processed_at: new Date().toISOString() })
@@ -183,7 +146,7 @@ export default function QaRecordsPage() {
 
       if (updateError) throw updateError
 
-      alert(report.report_type === 'upv' ? '✅ 已確認，印刷時間已雙倍。' : '✅ 已確認並結案。')
+      alert('✅ 已確認並結案。')
       fetchReports()
     } catch (err: unknown) {
       console.error(err)
