@@ -16,11 +16,11 @@ export function proxy(request: NextRequest) {
     }
 
     if (isAdminPath && role !== 'admin') {
-      return NextResponse.redirect(new URL('/', request.url))
+      return NextResponse.redirect(new URL('/403', request.url))
     }
 
     if (isOpsPath && role !== 'admin' && role !== 'ops') {
-      return NextResponse.redirect(new URL('/login', request.url))
+      return NextResponse.redirect(new URL('/403', request.url))
     }
   } else {
     if (!isPublicPath) {
