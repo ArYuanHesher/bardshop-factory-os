@@ -45,8 +45,9 @@ export default function LoginPage() {
       // 使用 router.push 比 window.location.href 更平滑
       router.push('/')
 
-    } catch (err: any) {
-      setErrorMsg(err.message || '登入失敗')
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : '登入失敗'
+      setErrorMsg(errorMessage)
       setIsLoading(false)
     }
   }

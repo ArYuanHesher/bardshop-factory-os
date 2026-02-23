@@ -3,19 +3,38 @@
 import { useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 
+type CSVRow = Record<string, string>
+
+interface ItemRouteInsert {
+  item_code: string
+  route_id: string
+}
+
+interface RouteOperationInsert {
+  route_id: string
+  sequence: number
+  op_name: string
+}
+
+interface OperationTimeInsert {
+  op_name: string
+  station: string
+  std_time_min: number
+}
+
 // --- 輔助函式：簡易 CSV 解析器 (處理中文編碼與換行) ---
 const parseCSV = (content: string) => {
   const lines = content.split(/\r?\n/).filter(line => line.trim() !== '')
   if (lines.length === 0) return []
   
   const headers = lines[0].split(',').map(h => h.trim())
-  const data = []
+  const data: CSVRow[] = []
 
   for (let i = 1; i < lines.length; i++) {
     const currentLine = lines[i].split(',')
     // 簡單防呆：如果欄位數不符，略過 (或視情況補空值)
     if (currentLine.length === headers.length) {
-      const row: any = {}
+      const row: CSVRow = {}
       headers.forEach((header, index) => {
         row[header] = (currentLine[index] || '').trim()
       })
@@ -26,7 +45,7 @@ const parseCSV = (content: string) => {
 }
 
 // --- 輔助函式：分批寫入 (Batch Insert) ---
-const batchInsert = async (table: string, data: any[], statusCallback: (msg: string) => void) => {
+const batchInsert = async <T extends object>(table: string, data: T[], statusCallback: (msg: string) => void) => {
   const BATCH_SIZE = 1000
   for (let i = 0; i < data.length; i += BATCH_SIZE) {
     const chunk = data.slice(i, i + BATCH_SIZE)
@@ -79,21 +98,23 @@ export default function UploadPage() {
       // -----------------------------------------------------------
       // Step 0: 預先解析所有檔案 (確保檔案沒問題再開始刪資料)
       // -----------------------------------------------------------
-      let dataItemRoutes: any[] = []
-      let dataRouteOps: any[] = []
-      let dataOpTimes: any[] = []
+      const dataItemRoutes: ItemRouteInsert[] = []
+      const dataRouteOps: RouteOperationInsert[] = []
+      let dataOpTimes: OperationTimeInsert[] = []
 
       // A. 解析：品項對途程
       if (files.itemRoutes) {
         addLog('📖 讀取檔案：品項對途程...')
         const text = await files.itemRoutes.text()
         const raw = parseCSV(text)
-        dataItemRoutes = raw
-          .filter((row: any) => row['品項編碼'] && row['途程名稱'])
-          .map((row: any) => ({
-            item_code: row['品項編碼'].toUpperCase(),
-            route_id: row['途程名稱']
-          }))
+        raw
+          .filter((row) => row['品項編碼'] && row['途程名稱'])
+          .forEach((row) => {
+            dataItemRoutes.push({
+              item_code: row['品項編碼'].toUpperCase(),
+              route_id: row['途程名稱']
+            })
+          })
       }
 
       // B. 解析：途程對工序
@@ -102,7 +123,7 @@ export default function UploadPage() {
         const text = await files.routeOps.text()
         const raw = parseCSV(text)
         
-        raw.forEach((row: any) => {
+        raw.forEach((row) => {
           const routeId = row['途程']
           if (!routeId) return
           for (let i = 1; i <= 20; i++) {
@@ -126,7 +147,7 @@ export default function UploadPage() {
         
         // 這裡一定要去重複，不然資料庫會報錯
         const uniqueOps = new Map()
-        raw.forEach((row: any) => {
+        raw.forEach((row) => {
             const name = row['製程名稱']?.trim()
             if (name && !uniqueOps.has(name)) {
                 uniqueOps.set(name, {
@@ -189,10 +210,11 @@ export default function UploadPage() {
       addLog('🎉 全部更新作業成功！')
       alert('資料庫已成功覆寫更新！')
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      addLog(`❌ 錯誤：${err.message}`)
-      alert(`更新失敗：${err.message}`)
+      const errorMessage = err instanceof Error ? err.message : String(err)
+      addLog(`❌ 錯誤：${errorMessage}`)
+      alert(`更新失敗：${errorMessage}`)
     } finally {
       setLoading(false)
     }

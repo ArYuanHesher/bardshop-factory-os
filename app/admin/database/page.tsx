@@ -1,12 +1,23 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 // 🔥 修正路徑：往上三層即可找到 src/lib (src/app/admin/database -> src)
 import { supabase } from '../../../lib/supabaseClient'
 
+interface DatabaseRow {
+  item_code?: string
+  item_name?: string
+  route_id?: string
+  sequence?: number
+  op_name?: string
+  station?: string
+  std_time_min?: number
+  created_at?: string
+}
+
 export default function DatabaseViewer() {
   const [activeTab, setActiveTab] = useState<'ops' | 'routes' | 'items'>('ops')
-  const [data, setData] = useState<any[]>([])
+  const [data, setData] = useState<DatabaseRow[]>([])
   const [loading, setLoading] = useState(false)
   
   // 分頁與搜尋狀態
@@ -15,10 +26,63 @@ export default function DatabaseViewer() {
   const [totalCount, setTotalCount] = useState(0) // 資料庫總筆數
   const PAGE_SIZE = 100 // 每頁顯示筆數
 
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    
+    try {
+      let query = supabase.from(
+        activeTab === 'ops' ? 'operation_times' : 
+        activeTab === 'routes' ? 'route_operations' : 'item_routes'
+      )
+      .select('*', { count: 'exact' }) 
+
+      if (searchTerm) {
+        if (activeTab === 'ops') {
+          query = query.or(`op_name.ilike.%${searchTerm}%,station.ilike.%${searchTerm}%`)
+        } else if (activeTab === 'routes') {
+          query = query.or(`route_id.ilike.%${searchTerm}%,op_name.ilike.%${searchTerm}%`)
+        } else if (activeTab === 'items') {
+          query = query.or(`item_code.ilike.%${searchTerm}%,item_name.ilike.%${searchTerm}%,route_id.ilike.%${searchTerm}%`)
+        }
+      }
+
+      if (activeTab === 'ops') {
+        query = query.order('op_name', { ascending: true })
+      } else if (activeTab === 'routes') {
+        query = query.order('route_id', { ascending: true }).order('sequence', { ascending: true })
+      } else if (activeTab === 'items') {
+        query = query.order('item_code', { ascending: true })
+      }
+
+      const from = page * PAGE_SIZE
+      const to = from + PAGE_SIZE - 1
+      query = query.range(from, to)
+
+      const { data: result, count, error } = await query
+      
+      if (error) throw error
+
+      setData((result as DatabaseRow[]) || [])
+      setTotalCount(count || 0)
+
+    } catch (err: unknown) {
+      console.error('讀取失敗:', err)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('讀取資料失敗: ' + message)
+    } finally {
+      setLoading(false)
+    }
+  }, [activeTab, page, searchTerm])
+
+  const formatDate = (value?: string) => {
+    if (!value) return '-'
+    return new Date(value).toLocaleDateString()
+  }
+
   // 當 分頁、搜尋關鍵字 或 頁碼 改變時，觸發抓取
   useEffect(() => {
     fetchData()
-  }, [activeTab, page, searchTerm])
+  }, [fetchData])
 
   // 當切換分頁時，重置搜尋與頁碼
   const handleTabChange = (tab: 'ops' | 'routes' | 'items') => {
@@ -32,59 +96,6 @@ export default function DatabaseViewer() {
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value)
     setPage(0) 
-  }
-
-  const fetchData = async () => {
-    setLoading(true)
-    
-    try {
-      let query = supabase.from(
-        activeTab === 'ops' ? 'operation_times' : 
-        activeTab === 'routes' ? 'route_operations' : 'item_routes'
-      )
-      .select('*', { count: 'exact' }) 
-
-      // --- 1. 搜尋邏輯 (全欄位搜尋) ---
-      if (searchTerm) {
-        if (activeTab === 'ops') {
-          // 搜尋 工序名稱 OR 站點
-          query = query.or(`op_name.ilike.%${searchTerm}%,station.ilike.%${searchTerm}%`)
-        } else if (activeTab === 'routes') {
-          // 搜尋 RouteID OR OpName
-          query = query.or(`route_id.ilike.%${searchTerm}%,op_name.ilike.%${searchTerm}%`)
-        } else if (activeTab === 'items') {
-          // 搜尋 ItemCode OR ItemName OR 對應途程ID
-          query = query.or(`item_code.ilike.%${searchTerm}%,item_name.ilike.%${searchTerm}%,route_id.ilike.%${searchTerm}%`)
-        }
-      }
-
-      // --- 2. 排序邏輯 ---
-      if (activeTab === 'ops') {
-        query = query.order('op_name', { ascending: true })
-      } else if (activeTab === 'routes') {
-        query = query.order('route_id', { ascending: true }).order('sequence', { ascending: true })
-      } else if (activeTab === 'items') {
-        query = query.order('item_code', { ascending: true })
-      }
-
-      // --- 3. 分頁邏輯 ---
-      const from = page * PAGE_SIZE
-      const to = from + PAGE_SIZE - 1
-      query = query.range(from, to)
-
-      const { data: result, count, error } = await query
-      
-      if (error) throw error
-
-      setData(result || [])
-      setTotalCount(count || 0)
-
-    } catch (err: any) {
-      console.error('讀取失敗:', err)
-      alert('讀取資料失敗: ' + err.message)
-    } finally {
-      setLoading(false)
-    }
   }
 
   return (
@@ -187,7 +198,7 @@ export default function DatabaseViewer() {
                             <td className="px-6 py-3">{row.item_name || '-'}</td>
                             <td className="px-6 py-3 text-right font-mono text-purple-400">{row.route_id}</td>
                             <td className="px-6 py-3 text-right text-xs text-slate-600 font-mono">
-                               {new Date(row.created_at).toLocaleDateString()}
+                               {formatDate(row.created_at)}
                             </td>
                           </>
                         )}
@@ -197,7 +208,7 @@ export default function DatabaseViewer() {
                             <td className="px-6 py-3 text-center font-mono text-slate-500">{row.sequence}</td>
                             <td className="px-6 py-3 text-slate-300">{row.op_name}</td>
                             <td className="px-6 py-3 text-right text-xs text-slate-600 font-mono">
-                               {new Date(row.created_at).toLocaleDateString()}
+                               {formatDate(row.created_at)}
                             </td>
                           </>
                         )}
@@ -207,7 +218,7 @@ export default function DatabaseViewer() {
                             <td className="px-6 py-3 text-slate-500">{row.station}</td>
                             <td className="px-6 py-3 text-right font-mono text-green-400">{row.std_time_min}</td>
                             <td className="px-6 py-3 text-right text-xs text-slate-600 font-mono">
-                               {new Date(row.created_at).toLocaleDateString()}
+                               {formatDate(row.created_at)}
                             </td>
                           </>
                         )}

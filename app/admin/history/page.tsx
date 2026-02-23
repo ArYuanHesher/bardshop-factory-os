@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 
 // 定義資料介面 (與 DailyOperations 保持一致)
@@ -30,11 +30,7 @@ export default function HistoryPage() {
   // 簡單的搜尋過濾
   const [searchTerm, setSearchTerm] = useState('')
 
-  useEffect(() => {
-    fetchHistory()
-  }, [])
-
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     setLoading(true)
     // 限制抓取最近 500 筆，避免資料量過大卡頓
     const { data, error } = await supabase
@@ -44,9 +40,16 @@ export default function HistoryPage() {
       .limit(500)
     
     if (error) console.error(error)
-    else setData(data || [])
+    else setData((data as OrderHistory[]) || [])
     setLoading(false)
-  }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchHistory()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [fetchHistory])
 
   // 前端過濾邏輯
   const filteredData = data.filter(row => {

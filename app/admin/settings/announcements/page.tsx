@@ -1,21 +1,25 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 // 🔥 修正路徑：往上四層即可 (../../../../)
 import { supabase } from '../../../../lib/supabaseClient'
 
+interface Announcement {
+  id: number
+  title: string
+  content: string | null
+  is_active: boolean
+  created_at: string
+}
+
 export default function AnnouncementsPage() {
-  const [list, setList] = useState<any[]>([])
+  const [list, setList] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  useEffect(() => {
-    fetchData()
-  }, [])
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     const { data, error } = await supabase
       .from('system_announcements')
@@ -23,9 +27,16 @@ export default function AnnouncementsPage() {
       .order('created_at', { ascending: false })
     
     if (error) console.error(error)
-    else setList(data || [])
+    else setList((data as Announcement[]) || [])
     setLoading(false)
-  }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchData()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [fetchData])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,7 +52,7 @@ export default function AnnouncementsPage() {
     } else {
       setTitle('')
       setContent('')
-      fetchData()
+      void fetchData()
     }
     setIsSubmitting(false)
   }
@@ -63,7 +74,7 @@ export default function AnnouncementsPage() {
       
     if (error) {
       alert('更新狀態失敗')
-      fetchData() // 失敗則重抓
+      void fetchData() // 失敗則重抓
     }
   }
 

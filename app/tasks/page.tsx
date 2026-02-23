@@ -19,6 +19,29 @@ interface Department {
   name: string
 }
 
+interface TaskItem {
+  id: number
+  title: string
+  content: string
+  sender_id?: number
+  sender_name: string
+  target_dept: string
+  assigned_to: string[]
+  status: string
+  transfer_count?: number
+  is_read?: boolean
+  updated_at: string
+}
+
+interface TaskMessage {
+  id: number
+  task_id: number
+  user_name: string
+  content: string
+  type: string
+  created_at: string
+}
+
 export default function TaskBoardPage() {
   const router = useRouter()
   
@@ -29,7 +52,7 @@ export default function TaskBoardPage() {
   const [currentUser, setCurrentUser] = useState<{ id: string, name: string, dept: string, email?: string, is_admin: boolean } | null>(null)
 
   // --- 任務狀態 ---
-  const [tasks, setTasks] = useState<any[]>([])
+  const [tasks, setTasks] = useState<TaskItem[]>([])
   const [filter, setFilter] = useState<'all' | 'mine' | 'sent'>('all')
   const [deptFilter, setDeptFilter] = useState<string>('ALL')
   
@@ -37,14 +60,63 @@ export default function TaskBoardPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [isSearching, setIsSearching] = useState(false) // 搜尋讀取動畫用
 
-  const [selectedTask, setSelectedTask] = useState<any>(null)
+  const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   
   const [newTask, setNewTask] = useState({ title: '', content: '', targetDept: '', targetUsers: [] as string[] })
   const [activeUserSelectTab, setActiveUserSelectTab] = useState<string>('') 
   
   const [chatInput, setChatInput] = useState('')
-  const [messages, setMessages] = useState<any[]>([])
+  const [messages, setMessages] = useState<TaskMessage[]>([])
+
+  const fetchTasks = useCallback(async (query = '') => {
+    setIsSearching(true)
+    let taskData: TaskItem[] = []
+
+    if (!query.trim()) {
+      const { data } = await supabase.from('tasks').select('*').order('updated_at', { ascending: false }).limit(50)
+      if (data) taskData = data as TaskItem[]
+    } else {
+      const term = `%${query.trim()}%`
+
+      const { data: tasksByMeta } = await supabase
+        .from('tasks')
+        .select('*')
+        .or(`title.ilike.${term},content.ilike.${term},sender_name.ilike.${term}`)
+
+      const { data: msgs } = await supabase
+        .from('task_messages')
+        .select('task_id')
+        .ilike('content', term)
+
+      const msgTaskIds = Array.from(new Set((msgs || []).map(m => m.task_id)))
+
+      let tasksByMsg: TaskItem[] = []
+      if (msgTaskIds.length > 0) {
+        const { data } = await supabase
+          .from('tasks')
+          .select('*')
+          .in('id', msgTaskIds)
+        if (data) tasksByMsg = data as TaskItem[]
+      }
+
+      const combined = new Map<number, TaskItem>()
+      tasksByMeta?.forEach(t => combined.set(t.id, t as TaskItem))
+      tasksByMsg.forEach(t => combined.set(t.id, t))
+
+      taskData = Array.from(combined.values())
+      taskData.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    }
+
+    setTasks(taskData)
+    setIsSearching(false)
+  }, [])
+
+  const fetchMessages = useCallback(async (taskId: number) => {
+    const { data } = await supabase.from('task_messages').select('*').eq('task_id', taskId).order('created_at', { ascending: true })
+    if (data) setMessages(data as TaskMessage[])
+    else setMessages([])
+  }, [])
 
   // --- 1. 初始化 ---
   useEffect(() => {
@@ -60,7 +132,7 @@ export default function TaskBoardPage() {
         return
       }
 
-      let myProfile = {
+      const myProfile = {
         id: 'temp_id',
         name: storedName || storedEmail, 
         dept: '讀取中...',
@@ -104,13 +176,15 @@ export default function TaskBoardPage() {
 
     initData()
     // 初始載入任務 (無搜尋關鍵字)
-    fetchTasks('')
+    const initFetchTimer = setTimeout(() => {
+      void fetchTasks('')
+    }, 0)
 
     // 訂閱任務更新 (當有人新增任務時自動更新列表)
     const taskChannel = supabase.channel('tasks-page')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
          // 只有在「沒有搜尋」的時候才自動更新，避免搜尋到一半列表亂跳
-         if (!searchTerm) fetchTasks('')
+        if (!searchTerm) void fetchTasks('')
       })
       .subscribe()
 
@@ -118,89 +192,31 @@ export default function TaskBoardPage() {
     const msgChannel = supabase.channel('messages-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_messages' }, (payload) => {
         if (selectedTask && payload.new.task_id === selectedTask.id) {
-           fetchMessages(selectedTask.id)
+           void fetchMessages(selectedTask.id)
         }
       })
       .subscribe()
 
     return () => { 
+      clearTimeout(initFetchTimer)
       supabase.removeChannel(taskChannel) 
       supabase.removeChannel(msgChannel)
     }
-  }, [router, selectedTask, searchTerm]) // 注意依賴項
-
-  // 🔥 核心搜尋功能 (包含對話內容搜尋)
-  const fetchTasks = async (query = '') => {
-    setIsSearching(true)
-    let taskData: any[] = []
-
-    if (!query.trim()) {
-      // A. 一般模式：抓取最新 50 筆任務
-      const { data } = await supabase.from('tasks').select('*').order('updated_at', { ascending: false }).limit(50)
-      if (data) taskData = data
-    } else {
-      // B. 搜尋模式 (Search Mode)
-      const term = `%${query.trim()}%`
-
-      // 1. 搜尋任務本身的標題、內容、發送者
-      const { data: tasksByMeta } = await supabase
-        .from('tasks')
-        .select('*')
-        .or(`title.ilike.${term},content.ilike.${term},sender_name.ilike.${term}`)
-
-      // 2. 搜尋「訊息內容」 (Join Search)
-      const { data: msgs } = await supabase
-        .from('task_messages')
-        .select('task_id')
-        .ilike('content', term)
-
-      // 取出有相關訊息的 Task IDs (去重)
-      const msgTaskIds = Array.from(new Set(msgs?.map(m => m.task_id) || []))
-
-      // 3. 如果有從訊息找到 ID，去抓出這些任務的詳情
-      let tasksByMsg: any[] = []
-      if (msgTaskIds.length > 0) {
-        const { data } = await supabase
-          .from('tasks')
-          .select('*')
-          .in('id', msgTaskIds)
-        if (data) tasksByMsg = data
-      }
-
-      // 4. 合併兩邊的結果並去除重複 (Merge & Deduplicate)
-      const combined = new Map()
-      tasksByMeta?.forEach(t => combined.set(t.id, t)) // 先放 metadata 搜到的
-      tasksByMsg.forEach(t => combined.set(t.id, t))   // 再放 message 搜到的 (如有重複會覆蓋，沒差)
-
-      taskData = Array.from(combined.values())
-      // 重新排序：最新的在上面
-      taskData.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-    }
-
-    setTasks(taskData)
-    setIsSearching(false)
-  }
+  }, [router, selectedTask, searchTerm, fetchTasks, fetchMessages]) // 注意依賴項
 
   // 🔥 自動防抖搜尋 (Debounce)
   // 當 searchTerm 改變時，設定一個 500ms 的計時器，時間到才執行 fetchTasks
   useEffect(() => {
     const delaySearch = setTimeout(() => {
-      fetchTasks(searchTerm)
+      void fetchTasks(searchTerm)
     }, 500)
 
     return () => clearTimeout(delaySearch)
-  }, [searchTerm])
+  }, [searchTerm, fetchTasks])
 
-
-  const fetchMessages = async (taskId: number) => {
-    const { data } = await supabase.from('task_messages').select('*').eq('task_id', taskId).order('created_at', { ascending: true })
-    if (data) setMessages(data)
-    else setMessages([])
-  }
-
-  const handleSelectTask = (task: any) => {
+  const handleSelectTask = (task: TaskItem) => {
     setSelectedTask(task)
-    fetchMessages(task.id)
+    void fetchMessages(task.id)
   }
 
   const handleSendMessage = async () => {
@@ -213,7 +229,7 @@ export default function TaskBoardPage() {
     })
     if (!error) {
       setChatInput('')
-      fetchMessages(selectedTask.id)
+      void fetchMessages(selectedTask.id)
     } else {
       alert("訊息發送失敗")
     }
@@ -247,14 +263,14 @@ export default function TaskBoardPage() {
       title: newTask.title, content: newTask.content, sender_id: senderId, sender_name: currentUser.name, 
       target_dept: newTask.targetDept, assigned_to: newTask.targetUsers, status: 'pending', transfer_count: 0
     })
-    if (!error) { setIsCreateModalOpen(false); setNewTask({ title: '', content: '', targetDept: '', targetUsers: [] }); fetchTasks(searchTerm) } else { alert('發送失敗：' + error.message) }
+    if (!error) { setIsCreateModalOpen(false); setNewTask({ title: '', content: '', targetDept: '', targetUsers: [] }); void fetchTasks(searchTerm) } else { alert('發送失敗：' + error.message) }
   }
 
   const handleAcceptTask = async () => {
     if (!selectedTask) return
     await supabase.from('tasks').update({ status: 'accepted' }).eq('id', selectedTask.id)
     await supabase.from('task_messages').insert({ task_id: selectedTask.id, user_name: 'System', content: `任務已被 ${currentUser?.name} 接收`, type: 'system' })
-    setSelectedTask({ ...selectedTask, status: 'accepted' }); fetchMessages(selectedTask.id)
+    setSelectedTask({ ...selectedTask, status: 'accepted' }); void fetchMessages(selectedTask.id)
   }
 
   const handleTransferTask = async () => {
@@ -272,7 +288,7 @@ export default function TaskBoardPage() {
       await supabase.from('tasks').update({ target_dept: newDept, assigned_to: [], status: 'pending', transfer_count: newCount, is_read: false }).eq('id', selectedTask.id)
       await supabase.from('task_messages').insert({ task_id: selectedTask.id, user_name: 'System', content: `任務轉移至 [${newDept}]`, type: 'system' })
     }
-    fetchTasks(searchTerm); setSelectedTask(null)
+    void fetchTasks(searchTerm); setSelectedTask(null)
   }
 
   // --- 🔥 權限過濾邏輯 (Security Gate) ---
@@ -346,8 +362,8 @@ export default function TaskBoardPage() {
         <button onClick={() => setIsCreateModalOpen(true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 mb-6 transition-all active:scale-95 flex items-center justify-center gap-2">建立新任務</button>
 
         <nav className="space-y-1">
-           {['all', 'mine', 'sent'].map((f) => (
-             <button key={f} onClick={() => setFilter(f as any)} className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition-colors ${filter === f ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900'}`}>
+           {(['all', 'mine', 'sent'] as const).map((f) => (
+             <button key={f} onClick={() => setFilter(f)} className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition-colors ${filter === f ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900'}`}>
                {f === 'all' && '📌 所有任務'}
                {f === 'mine' && '📥 指派給我'}
                {f === 'sent' && '📤 我發出的'}

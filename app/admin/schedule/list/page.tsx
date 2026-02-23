@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 import { PRODUCTION_SECTIONS } from '../../../../config/productionSections'
 import OrderEditModal from '../../../../components/OrderEditModal'
@@ -57,11 +57,39 @@ export default function ScheduleListPage() {
   // 編輯視窗狀態
   const [editingOrder, setEditingOrder] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchScheduledData()
-  }, [filterSection])
+    function groupDataByOrder(data: ScheduledItem[]) {
+        const groups: Record<string, OrderGroup> = {}
 
-  const fetchScheduledData = async () => {
+        data.forEach(item => {
+            const currentQty = Number(item.quantity) || 0
+            const currentPlateCount = item.plate_count || '0'
+
+            if (!groups[item.order_number]) {
+                groups[item.order_number] = {
+                    order_number: item.order_number,
+                    customer: item.customer,
+                    item_name: item.item_name,
+                    item_code: item.item_code,
+                    delivery_date: item.delivery_date,
+                    doc_type: item.doc_type,
+                    quantity: currentQty,
+                    plate_count: currentPlateCount,
+                    designer: item.designer,
+                    handler: item.handler,
+                    issuer: item.issuer,
+                    items: []
+                }
+            } else {
+                groups[item.order_number].quantity = currentQty
+                groups[item.order_number].plate_count = currentPlateCount
+            }
+            groups[item.order_number].items.push(item)
+        })
+
+        setOrderGroups(Object.values(groups))
+    }
+
+    const fetchScheduledData = useCallback(async () => {
     setLoading(true)
     
     let query = supabase
@@ -76,53 +104,21 @@ export default function ScheduleListPage() {
 
     const { data, error } = await query
     
-    if (error) {
-        console.error(error)
+        if (error) {
+            console.error(error)
     } else {
-        const rawData = (data as any) || []
-        groupDataByOrder(rawData)
+            const rawData = (data as ScheduledItem[]) || []
+            groupDataByOrder(rawData)
     }
     setLoading(false)
-  }
+    }, [filterSection])
 
-  // 將平鋪資料轉為以工單為單位的群組
-  const groupDataByOrder = (data: ScheduledItem[]) => {
-    const groups: Record<string, OrderGroup> = {}
-    
-    data.forEach(item => {
-        // 🔥 強制轉型為數字，避免資料庫回傳字串導致顯示錯誤
-        const currentQty = Number(item.quantity) || 0
-        const currentPlateCount = item.plate_count || '0'
-
-        if (!groups[item.order_number]) {
-            // 初始化群組
-            groups[item.order_number] = {
-                order_number: item.order_number,
-                customer: item.customer,
-                item_name: item.item_name,
-                item_code: item.item_code,
-                delivery_date: item.delivery_date,
-                doc_type: item.doc_type,
-                quantity: currentQty, 
-                plate_count: currentPlateCount,
-                designer: item.designer,
-                handler: item.handler,
-                issuer: item.issuer,
-                items: []
-            }
-        } else {
-            // 🔥 關鍵修正：依照指示「抓最後一筆」
-            // 因為資料來源已按 ID 排序 (舊->新)，我們在迴圈中不斷更新 quantity，
-            // 最後留下的就會是該工單「最後一筆資料」的 quantity。
-            groups[item.order_number].quantity = currentQty
-            groups[item.order_number].plate_count = currentPlateCount
-        }
-        groups[item.order_number].items.push(item)
-    })
-
-    // 轉回陣列
-    setOrderGroups(Object.values(groups))
-  }
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            void fetchScheduledData()
+        }, 0)
+        return () => clearTimeout(timer)
+    }, [fetchScheduledData])
 
   // 搜尋過濾邏輯
   const filteredGroups = orderGroups.filter(g => {
@@ -136,15 +132,6 @@ export default function ScheduleListPage() {
     )
   })
 
-  // 計算群組總進度 (所有工序完成比例)
-  // 若需要以「數量」計算總進度，可在此修改邏輯
-  const calculateTotalProgress = (items: ScheduledItem[]) => {
-    if (items.length === 0) return 0
-    const totalItems = items.length
-    const completedItems = items.filter(i => i.status === 'completed' || (i.quantity > 0 && i.completed_quantity >= i.quantity)).length
-    return Math.round((completedItems / totalItems) * 100)
-  }
-
   return (
     <div className="p-4 md:p-6 max-w-[1920px] mx-auto min-h-screen">
       {/* 編輯視窗 */}
@@ -152,7 +139,7 @@ export default function ScheduleListPage() {
         orderNumber={editingOrder || ''} 
         isOpen={!!editingOrder} 
         onClose={() => setEditingOrder(null)} 
-        onSaveSuccess={fetchScheduledData}
+                onSaveSuccess={() => { void fetchScheduledData() }}
       />
 
       <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">

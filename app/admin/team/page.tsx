@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 
 // 定義成員資料介面
@@ -44,11 +44,6 @@ export default function TeamPage() {
     { key: 'admin', label: '管理核心 (Admin Core)' }
   ]
 
-  useEffect(() => {
-    fetchData()
-    checkCurrentUser()
-  }, [])
-
   function getEmptyForm(): Member {
     return {
       real_name: '',
@@ -62,12 +57,12 @@ export default function TeamPage() {
     }
   }
 
-  const checkCurrentUser = async () => {
+  const checkCurrentUser = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (user && user.email) setCurrentUserEmail(user.email)
-  }
+  }, [])
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     const [membersRes, deptsRes] = await Promise.all([
       supabase.from('members').select('*').order('is_admin', { ascending: false }).order('id', { ascending: true }),
@@ -75,13 +70,21 @@ export default function TeamPage() {
     ])
 
     if (membersRes.error) console.error(membersRes.error)
-    else setMembers(membersRes.data || [])
+    else setMembers((membersRes.data as Member[]) || [])
 
     if (deptsRes.error) console.error(deptsRes.error)
-    else setDepartments(deptsRes.data || [])
+    else setDepartments((deptsRes.data as Department[]) || [])
 
     setLoading(false)
-  }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchData()
+      void checkCurrentUser()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [fetchData, checkCurrentUser])
 
   // --- 成員儲存邏輯 ---
   const handleSaveMember = async (e: React.FormEvent) => {
@@ -124,7 +127,7 @@ export default function TeamPage() {
     } else {
       alert('成員儲存成功！資料已同步至任務系統。')
       setIsDrawerOpen(false)
-      fetchData()
+      void fetchData()
     }
   }
 
@@ -134,7 +137,7 @@ export default function TeamPage() {
     
     const { error } = await supabase.from('members').delete().eq('id', member.id)
     if (error) alert(error.message)
-    else fetchData()
+    else void fetchData()
   }
 
   // --- 部門管理邏輯 ---
@@ -145,7 +148,7 @@ export default function TeamPage() {
       alert('新增失敗 (名稱可能重複)')
     } else {
       setNewDeptName('')
-      fetchData()
+      void fetchData()
     }
   }
 
@@ -159,7 +162,7 @@ export default function TeamPage() {
     if (!confirm(`確定要刪除部門「${deptName}」嗎？`)) return
     const { error } = await supabase.from('departments').delete().eq('id', id)
     if (error) alert(error.message)
-    else fetchData()
+    else void fetchData()
   }
 
   // --- UI 控制 ---

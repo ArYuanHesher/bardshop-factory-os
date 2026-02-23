@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 import Papa from 'papaparse'
 
@@ -31,13 +31,18 @@ interface MasterDataCache {
   ready: boolean
 }
 
+interface ItemRouteRow {
+  item_code: string
+  route_id: string
+}
+
 // --- 輔助函式：建立資料指紋 (用於嚴格比對) ---
-const createFingerprint = (row: any) => {
+const createFingerprint = (row: Partial<OrderData>) => {
   return JSON.stringify({
     order_number: (row.order_number || '').toString().trim(),
     item_code: (row.item_code || '').toString().trim().toUpperCase(),
     item_name: (row.item_name || '').toString().trim(),
-    quantity: parseFloat(row.quantity) || 0,
+    quantity: Number(row.quantity) || 0,
     plate_count: (row.plate_count || '').toString().trim(),
     customer: (row.customer || '').toString().trim(),
     doc_type: (row.doc_type || '').toString().trim(),
@@ -59,10 +64,6 @@ export default function DailyOperationsPage() {
     ready: false
   })
 
-  useEffect(() => {
-    initData()
-  }, [])
-
   const addLog = (msg: string, type = 'info') => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false })
     const prefix = type === 'error' ? '[ERROR]' : type === 'success' ? '[SUCCESS]' : type === 'warning' ? '[WARN]' : '[INFO]'
@@ -70,43 +71,8 @@ export default function DailyOperationsPage() {
     if (type === 'error' || type === 'warning') setShowLogs(true)
   }
 
-  // --- 核心初始化 ---
-  const initData = async () => {
-    setLoading(true)
-    await Promise.all([fetchTempData(), loadMasterData()])
-    setLoading(false)
-  }
-
-  // --- 讀取母資料 ---
-  const loadMasterData = async () => {
-    try {
-      const itemRoutes = await fetchAllRows('item_routes', 'item_code, route_id')
-      if (!itemRoutes) return
-
-      const normalize = (str: string) => str ? str.toString().trim().toUpperCase() : ''
-      const itemMap = new Map(itemRoutes.map((i: any) => [normalize(i.item_code), i.route_id]))
-      
-      masterDataRef.current = { itemMap, ready: true }
-      console.log('Master Data Loaded (Validation Only):', itemMap.size)
-
-    } catch (err) {
-      console.error('Master Data Load Error', err)
-    }
-  }
-
-  // --- 抓取暫存資料並排序 ---
-  const fetchTempData = async () => {
-    const { data, error } = await supabase.from('temp_orders').select('*')
-    if (error) {
-      console.error(error)
-    } else {
-      const sorted = sortData(data || [])
-      setTempData(sorted)
-    }
-  }
-
   // --- 自動排序邏輯：Error 置頂 ---
-  const sortData = (data: OrderData[]) => {
+  const sortData = useCallback((data: OrderData[]) => {
     return [...data].sort((a, b) => {
       const getWeight = (status: string) => {
         if (status === 'Error') return 0
@@ -115,11 +81,11 @@ export default function DailyOperationsPage() {
       }
       return getWeight(a.status) - getWeight(b.status)
     })
-  }
+  }, [])
 
   // 通用型「抓取所有資料」函式
-  const fetchAllRows = async (tableName: string, selectQuery: string) => {
-    let allData: any[] = []
+  const fetchAllRows = useCallback(async (tableName: string, selectQuery: string) => {
+    let allData: unknown[] = []
     let page = 0
     const pageSize = 1000
     let hasMore = true
@@ -141,7 +107,49 @@ export default function DailyOperationsPage() {
       }
     }
     return allData
-  }
+  }, [])
+
+  // --- 讀取母資料 ---
+  const loadMasterData = useCallback(async () => {
+    try {
+      const itemRoutes = await fetchAllRows('item_routes', 'item_code, route_id')
+      if (!itemRoutes) return
+
+      const normalize = (str: string) => str ? str.toString().trim().toUpperCase() : ''
+      const typedItemRoutes = itemRoutes as ItemRouteRow[]
+      const itemMap = new Map(typedItemRoutes.map((i) => [normalize(i.item_code), i.route_id]))
+      
+      masterDataRef.current = { itemMap, ready: true }
+      console.log('Master Data Loaded (Validation Only):', itemMap.size)
+
+    } catch (err) {
+      console.error('Master Data Load Error', err)
+    }
+  }, [fetchAllRows])
+
+  // --- 抓取暫存資料並排序 ---
+  const fetchTempData = useCallback(async () => {
+    const { data, error } = await supabase.from('temp_orders').select('*')
+    if (error) {
+      console.error(error)
+    } else {
+      const sorted = sortData(data || [])
+      setTempData(sorted)
+    }
+  }, [sortData])
+
+  const initData = useCallback(async () => {
+    setLoading(true)
+    await Promise.all([fetchTempData(), loadMasterData()])
+    setLoading(false)
+  }, [fetchTempData, loadMasterData])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void initData()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [initData])
 
   // --- 單列驗證邏輯 ---
   const calculateRow = (row: OrderData, mData: MasterDataCache): OrderData => {
@@ -153,7 +161,7 @@ export default function DailyOperationsPage() {
     const docType = row.doc_type || ''
     
     let status = 'OK'
-    let logMsgParts: string[] = []
+    const logMsgParts: string[] = []
 
     const exemptKeywords = ['素材單', '包裝單', '改單', '示意圖']
     const isExempt = exemptKeywords.some(keyword => docType.includes(keyword))
@@ -187,7 +195,7 @@ export default function DailyOperationsPage() {
     }
 
     const routeId = mData.itemMap.get(itemCodeNormalized)
-    let totalTime = 0 
+    const totalTime = 0 
 
     if (!routeId && !isExempt && status === 'OK') {
         status = 'Miss_Route'; logMsgParts.push('無對應途程');
@@ -204,7 +212,7 @@ export default function DailyOperationsPage() {
   }
 
   // --- 編輯功能 ---
-  const handleCellChange = (id: number, field: keyof OrderData, value: any) => {
+  const handleCellChange = (id: number, field: keyof OrderData, value: string | number) => {
     setTempData(prev => prev.map(row => {
       if (row.id !== id) return row
       let updatedRow = { ...row, [field]: value }
@@ -254,8 +262,8 @@ export default function DailyOperationsPage() {
     addLog(`開始讀取檔案: ${file.name}`)
 
     try {
-      const csvData: any[] = await new Promise((resolve, reject) => {
-        Papa.parse(file, { header: true, skipEmptyLines: true, complete: (res) => resolve(res.data), error: reject })
+      const csvData: Record<string, string>[] = await new Promise((resolve, reject) => {
+        Papa.parse(file, { header: true, skipEmptyLines: true, complete: (res) => resolve(res.data as Record<string, string>[]), error: reject })
       })
 
       if (!masterDataRef.current.ready) {
@@ -350,8 +358,9 @@ export default function DailyOperationsPage() {
          fetchTempData()
       }
 
-    } catch (err: any) {
-      addLog(`錯誤: ${err.message}`, 'error')
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err)
+      addLog(`錯誤: ${errorMessage}`, 'error')
     } finally {
       setLoading(false)
       e.target.value = ''
@@ -391,11 +400,13 @@ export default function DailyOperationsPage() {
     setLoading(true)
     try {
       // 準備要寫入的資料 (移除 id，避免主鍵衝突)
-      const dataToMove = tempData.map(({ id, ...rest }) => ({
-        ...rest,
-        // 🔥🔥🔥 關鍵修正：如果是 Error，強制將 log_msg 寫入 error_reason
-        error_reason: rest.status === 'Error' ? rest.log_msg : null
-      }))
+      const dataToMove = tempData.map((row) => {
+        const rest = Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'id')) as Omit<OrderData, 'id'>
+        return {
+          ...rest,
+          error_reason: rest.status === 'Error' ? rest.log_msg : null
+        }
+      })
 
       const { error: insertError } = await supabase.from('daily_orders').insert(dataToMove)
       if (insertError) throw insertError
@@ -412,8 +423,9 @@ export default function DailyOperationsPage() {
       alert('發單成功！請至「訂單查詢表」或「待處理資料表」查看。')
       setShowLogs(false)
 
-    } catch (err: any) {
-      addLog(`提交失敗: ${err.message}`, 'error')
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err)
+      addLog(`提交失敗: ${errorMessage}`, 'error')
     } finally {
       setLoading(false)
     }
@@ -421,7 +433,7 @@ export default function DailyOperationsPage() {
 
   const TableInput = ({ 
     value, onChange, onBlur, type = "text", className = "" 
-  }: { value: any, onChange: (val: any) => void, onBlur: () => void, type?: string, className?: string }) => (
+  }: { value: string | number | null | undefined, onChange: (val: string) => void, onBlur: () => void, type?: string, className?: string }) => (
     <input 
       type={type}
       className={`w-full bg-transparent border-b border-transparent hover:border-slate-600 focus:border-cyan-500 focus:bg-slate-800 focus:outline-none px-1 py-0.5 transition-colors ${className}`}

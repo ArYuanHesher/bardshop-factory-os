@@ -220,9 +220,10 @@ export default function SchedulePendingPage() {
       fetchPendingData()
       alert('工序新增並重新排序完成！')
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      alert('新增失敗: ' + err.message)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('新增失敗: ' + message)
     } finally {
       setSaving(false)
     }
@@ -255,8 +256,9 @@ export default function SchedulePendingPage() {
 
       setSelections({})
       alert('🎉 排程成功！已移入排程總表。')
-    } catch (err: any) {
-      alert('排程失敗: ' + err.message)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('排程失敗: ' + message)
     } finally {
       setSaving(false)
     }

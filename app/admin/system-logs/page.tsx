@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 
 interface Log {
@@ -17,11 +17,7 @@ export default function SystemLogsPage() {
   const [loading, setLoading] = useState(true)
   const [filterUser, setFilterUser] = useState('')
 
-  useEffect(() => {
-    fetchLogs()
-  }, [])
-
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async (userFilter: string = '') => {
     setLoading(true)
     let query = supabase
       .from('system_logs')
@@ -29,14 +25,21 @@ export default function SystemLogsPage() {
       .order('created_at', { ascending: false })
       .limit(100) // 只抓最近 100 筆，避免太慢
 
-    if (filterUser) {
-      query = query.ilike('user_name', `%${filterUser}%`)
+    if (userFilter) {
+      query = query.ilike('user_name', `%${userFilter}%`)
     }
 
     const { data } = await query
-    if (data) setLogs(data)
+    if (data) setLogs(data as Log[])
     setLoading(false)
-  }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchLogs('')
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [fetchLogs])
 
   const getActionColor = (action: string) => {
     if (action.includes('刪除')) return 'text-red-400'
@@ -59,9 +62,9 @@ export default function SystemLogsPage() {
                 className="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-cyan-500 outline-none"
                 value={filterUser}
                 onChange={e => setFilterUser(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && fetchLogs()}
+                onKeyDown={e => e.key === 'Enter' && fetchLogs(filterUser)}
             />
-            <button onClick={fetchLogs} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded transition-colors">重新整理</button>
+              <button onClick={() => fetchLogs(filterUser)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded transition-colors">重新整理</button>
         </div>
       </div>
 

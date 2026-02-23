@@ -249,8 +249,9 @@ export default function EstimationPage() {
       setIsCalculating(false)
       setShowResults(true)
 
-    } catch (err: any) {
-      addLog(`CRITICAL ERROR: ${err.message}`)
+      } catch (err: unknown) {
+         const errorMessage = err instanceof Error ? err.message : String(err)
+         addLog(`CRITICAL ERROR: ${errorMessage}`)
       setIsCalculating(false)
     }
   }

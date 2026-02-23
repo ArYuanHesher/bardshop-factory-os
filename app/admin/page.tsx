@@ -4,6 +4,13 @@ import Link from 'next/link'
 import { useFavorites } from '../../context/FavoritesContext'
 import { NAV_GROUPS } from '../../config/menuItems'
 
+interface ColorClasses {
+  icon: string
+  bg: string
+  border: string
+  bar: string
+}
+
 export default function AdminDashboard() {
   const { favorites, loading } = useFavorites()
 
@@ -15,7 +22,7 @@ export default function AdminDashboard() {
 
   // 顏色對照表
   const getColorClasses = (theme: string) => {
-    const maps: Record<string, any> = {
+    const maps: Record<string, ColorClasses> = {
       cyan: { icon: "text-cyan-400", bg: "hover:bg-cyan-950/30", border: "hover:border-cyan-500/50", bar: "bg-cyan-400" },
       purple: { icon: "text-purple-400", bg: "hover:bg-purple-950/30", border: "hover:border-purple-500/50", bar: "bg-purple-400" },
       blue: { icon: "text-blue-400", bg: "hover:bg-blue-950/30", border: "hover:border-blue-500/50", bar: "bg-blue-400" },

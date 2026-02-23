@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 
 // --- 介面定義 ---
@@ -29,33 +29,30 @@ interface MasterData {
   ready: boolean
 }
 
+interface ItemRouteRow {
+  item_code: string
+  route_id: string
+}
+
+interface EditableCellProps {
+  value: string | number | null | undefined
+  onChange: (value: string) => void
+  className?: string
+}
+
 export default function PendingPage() {
   const [orderErrors, setOrderErrors] = useState<PendingOrder[]>([])
   const [conversionErrors, setConversionErrors] = useState<PendingOrder[]>([])
-  const [loading, setLoading] = useState(true)
   
   const masterDataRef = useRef<MasterData>({ itemMap: new Map(), ready: false })
 
-  useEffect(() => {
-    initData()
-  }, [])
-
-  const initData = async () => {
-    setLoading(true)
-    await Promise.all([fetchData(), loadMasterData()])
-    setLoading(false)
-  }
-
-  // 1. 讀取兩類錯誤資料
-  const fetchData = async () => {
-    // A. 上半部：訂單更新表待修正 (Status = 'Error')
+  const fetchData = useCallback(async () => {
     const { data: errOrders } = await supabase
       .from('daily_orders')
       .select('*')
       .eq('status', 'Error')
       .order('created_at', { ascending: false })
 
-    // B. 下半部：工時轉換表待修正 (Conversion Status = 'failed')
     const { data: convOrders } = await supabase
       .from('daily_orders')
       .select('*')
@@ -64,22 +61,31 @@ export default function PendingPage() {
 
     setOrderErrors(errOrders || [])
     setConversionErrors(convOrders || [])
-  }
+  }, [])
 
-  // 2. 讀取驗證用母資料
-  const loadMasterData = async () => {
+  const loadMasterData = useCallback(async () => {
     const { data } = await supabase.from('item_routes').select('item_code, route_id')
     const map = new Map<string, string>()
-    data?.forEach((i: any) => map.set(i.item_code.toUpperCase().trim(), i.route_id))
+    ;(data as ItemRouteRow[] | null)?.forEach((item) =>
+      map.set(item.item_code.toUpperCase().trim(), item.route_id)
+    )
     masterDataRef.current = { itemMap: map, ready: true }
-  }
+  }, [])
+
+  const initData = useCallback(async () => {
+    await Promise.all([fetchData(), loadMasterData()])
+  }, [fetchData, loadMasterData])
+
+  useEffect(() => {
+    initData()
+  }, [initData])
 
   // --- 通用編輯處理 ---
   const handleEdit = (
     type: 'order' | 'conversion', 
     id: number, 
     field: keyof PendingOrder, 
-    value: any
+    value: PendingOrder[keyof PendingOrder]
   ) => {
     const setter = type === 'order' ? setOrderErrors : setConversionErrors
     
@@ -150,9 +156,10 @@ export default function PendingPage() {
       alert('✅ 已發送回「訂單更新表」，請回到該頁面重新進行確認與發單。')
       setOrderErrors(prev => prev.filter(r => r.id !== id))
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      alert('操作失敗: ' + err.message)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('操作失敗: ' + message)
     }
   }
 
@@ -180,7 +187,7 @@ export default function PendingPage() {
     }
   }
 
-  const EditableCell = ({ value, onChange, className="" }: any) => (
+  const EditableCell = ({ value, onChange, className="" }: EditableCellProps) => (
     <input 
       value={value || ''} 
       onChange={e => onChange(e.target.value)} 

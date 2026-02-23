@@ -6,6 +6,15 @@ import { ReactNode } from 'react'
 import { NAV_GROUPS } from '../../config/menuItems' // 引入共用設定
 import { FavoritesProvider, useFavorites } from '../../context/FavoritesContext' // 引入 Context
 
+interface ThemeColors {
+  text: string
+  activeBg: string
+  border: string
+  glow: string
+  hoverText: string
+  menuBorder: string
+}
+
 // 抽離出一個內部組件來使用 useFavorites (因為 Provider 必須在更外層)
 function AdminNavbar() {
   const router = useRouter()
@@ -14,7 +23,7 @@ function AdminNavbar() {
 
   // 輔助顏色函式 (維持不變)
   const getThemeColors = (theme: string) => {
-    const colors: Record<string, any> = {
+    const colors: Record<string, ThemeColors> = {
       cyan: { text: "text-cyan-400", activeBg: "bg-cyan-950/80", border: "border-cyan-400", glow: "shadow-[0_0_20px_rgba(34,211,238,0.6)]", hoverText: "hover:text-cyan-300", menuBorder: "border-cyan-500/50 shadow-[0_0_30px_rgba(34,211,238,0.2)]" },
       purple: { text: "text-purple-400", activeBg: "bg-purple-950/80", border: "border-purple-400", glow: "shadow-[0_0_20px_rgba(192,132,252,0.6)]", hoverText: "hover:text-purple-300", menuBorder: "border-purple-500/50 shadow-[0_0_30px_rgba(192,132,252,0.2)]" },
       blue: { text: "text-blue-400", activeBg: "bg-blue-950/80", border: "border-blue-400", glow: "shadow-[0_0_20px_rgba(96,165,250,0.6)]", hoverText: "hover:text-blue-300", menuBorder: "border-blue-500/50 shadow-[0_0_30px_rgba(96,165,250,0.2)]" },

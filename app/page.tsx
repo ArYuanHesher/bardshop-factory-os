@@ -5,13 +5,21 @@ import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
+interface Announcement {
+  id: number
+  title: string
+  content: string | null
+  is_active: boolean
+  created_at: string
+}
+
 export default function LandingPage() {
   const router = useRouter()
   const [time, setTime] = useState('')
   // 🔥 新增 'tasks' 狀態
   const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin' | 'estimation' | 'tasks'>('none')
   
-  const [announcements, setAnnouncements] = useState<any[]>([])
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [currentAnnoIndex, setCurrentAnnoIndex] = useState(0)
   const [showModal, setShowModal] = useState(false)
 
@@ -31,7 +39,7 @@ export default function LandingPage() {
         .order('created_at', { ascending: false })
       
       if (data && data.length > 0) {
-        setAnnouncements(data)
+        setAnnouncements(data as Announcement[])
       }
     }
     fetchAnnouncements()

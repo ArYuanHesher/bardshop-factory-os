@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 
 // --- 型別定義 ---
@@ -78,7 +78,6 @@ export default function ParametersPage() {
 // ============================================================================
 function MachinesManager() {
   const [machines, setMachines] = useState<Machine[]>([])
-  const [loading, setLoading] = useState(false)
   
   // 新增表單狀態
   const [newName, setNewName] = useState('')
@@ -90,20 +89,17 @@ function MachinesManager() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [tempName, setTempName] = useState('')
 
-  useEffect(() => {
-    setNewStation(STATION_MAPPING[newCategory][0] || '')
-  }, [newCategory])
-
-  useEffect(() => {
-    fetchMachines()
+  const fetchMachines = useCallback(async () => {
+    const { data } = await supabase.from('production_machines').select('*').order('category').order('station_type')
+    if (data) setMachines(data as Machine[])
   }, [])
 
-  const fetchMachines = async () => {
-    setLoading(true)
-    const { data } = await supabase.from('production_machines').select('*').order('category').order('station_type')
-    if (data) setMachines(data)
-    setLoading(false)
-  }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchMachines()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [fetchMachines])
 
   const handleAdd = async () => {
     if (!newName) return alert('請輸入機台名稱')
@@ -117,25 +113,25 @@ function MachinesManager() {
     if (error) alert(error.message)
     else {
       setNewName('')
-      fetchMachines()
+      void fetchMachines()
     }
   }
 
   const handleDelete = async (id: number) => {
     if (!confirm('確定要刪除此機台嗎？')) return
     await supabase.from('production_machines').delete().eq('id', id)
-    fetchMachines()
+    void fetchMachines()
   }
 
   // 🔥 更新欄位 (即時寫入 DB)
-  const handleUpdate = async (id: number, field: keyof Machine, value: any) => {
+  const handleUpdate = async (id: number, field: keyof Machine, value: string | number | boolean) => {
     // 樂觀更新前端
     setMachines(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m))
     
     const { error } = await supabase.from('production_machines').update({ [field]: value }).eq('id', id)
     if (error) {
         console.error('Update failed:', error)
-        fetchMachines() // 若失敗則還原
+        void fetchMachines() // 若失敗則還原
     }
   }
 
@@ -167,7 +163,11 @@ function MachinesManager() {
             <label className="text-xs text-slate-500 mb-1 block">大分類 (Category)</label>
             <select 
               value={newCategory} 
-              onChange={e => setNewCategory(e.target.value)}
+              onChange={e => {
+                const category = e.target.value
+                setNewCategory(category)
+                setNewStation(STATION_MAPPING[category][0] || '')
+              }}
               className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2.5 text-sm focus:border-orange-500 outline-none text-white"
             >
               {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
@@ -301,21 +301,15 @@ function MachinesManager() {
 function FactoryCalendar() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [overrides, setOverrides] = useState<Map<string, CalendarOverride>>(new Map())
-  const [loading, setLoading] = useState(false)
 
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth() 
   const firstDay = new Date(year, month, 1)
-  const lastDay = new Date(year, month + 1, 0)
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
   
-  useEffect(() => {
-    fetchMonthData()
-  }, [currentDate])
-
-  const fetchMonthData = async () => {
-    setLoading(true)
+  const fetchMonthData = useCallback(async () => {
     const startStr = `${year}-${String(month + 1).padStart(2, '0')}-01`
-    const endStr = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay.getDate()}`
+    const endStr = `${year}-${String(month + 1).padStart(2, '0')}-${daysInMonth}`
     
     const { data } = await supabase
       .from('factory_calendar')
@@ -326,8 +320,14 @@ function FactoryCalendar() {
     const map = new Map()
     data?.forEach((d: CalendarOverride) => map.set(d.date, d))
     setOverrides(map)
-    setLoading(false)
-  }
+  }, [year, month, daysInMonth])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchMonthData()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [fetchMonthData])
 
   const toggleDateStatus = async (day: number) => {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
@@ -336,7 +336,7 @@ function FactoryCalendar() {
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
     
     const currentOverride = overrides.get(dateStr)
-    let currentIsHoliday = currentOverride ? currentOverride.is_holiday : isWeekend
+    const currentIsHoliday = currentOverride ? currentOverride.is_holiday : isWeekend
 
     const newIsHoliday = !currentIsHoliday
     let note = ''
@@ -363,7 +363,6 @@ function FactoryCalendar() {
     setCurrentDate(new Date(year, month + offset, 1))
   }
 
-  const daysInMonth = lastDay.getDate()
   const startDayOfWeek = firstDay.getDay()
   const calendarGrid = []
 

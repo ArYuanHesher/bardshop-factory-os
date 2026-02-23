@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { 
   DndContext, 
   closestCenter,
+  type DragEndEvent,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -20,8 +21,30 @@ import { CSS } from '@dnd-kit/utilities'
 import { supabase } from '../lib/supabaseClient'
 import { PRODUCTION_SECTIONS } from '../config/productionSections'
 
+interface StageItem {
+  id: number
+  order_number: string
+  item_code: string
+  item_name: string
+  quantity: number
+  customer: string
+  delivery_date: string
+  doc_type: string
+  designer: string
+  handler: string
+  issuer: string
+  plate_count: string
+  op_name: string
+  assigned_section: string
+  total_time_min: number
+  status: string
+  created_at: string
+}
+
+type EditableField = 'op_name' | 'assigned_section' | 'total_time_min'
+
 // --- 可排序的單一工序列 ---
-function SortableItem({ item, onDelete, onUpdate }: { item: any, onDelete: (id: number) => void, onUpdate: (id: number, field: string, val: any) => void }) {
+function SortableItem({ item, onDelete, onUpdate }: { item: StageItem, onDelete: (id: number) => void, onUpdate: (id: number, field: EditableField, val: string | number) => void }) {
   const {
     attributes,
     listeners,
@@ -31,12 +54,12 @@ function SortableItem({ item, onDelete, onUpdate }: { item: any, onDelete: (id: 
     isDragging
   } = useSortable({ id: item.id })
 
-  const style = {
+  const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
     zIndex: isDragging ? 999 : 'auto',
-    position: 'relative' as 'relative'
+    position: 'relative'
   }
 
   return (
@@ -96,7 +119,7 @@ function SortableItem({ item, onDelete, onUpdate }: { item: any, onDelete: (id: 
 
 // --- 編輯視窗主體 ---
 export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuccess }: { orderNumber: string, isOpen: boolean, onClose: () => void, onSaveSuccess: () => void }) {
-  const [stages, setStages] = useState<any[]>([])
+  const [stages, setStages] = useState<StageItem[]>([])
   const [loading, setLoading] = useState(false)
   
   const sensors = useSensors(
@@ -104,13 +127,7 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  useEffect(() => {
-    if (isOpen && orderNumber) {
-        fetchStages()
-    }
-  }, [isOpen, orderNumber])
-
-  const fetchStages = async () => {
+  const fetchStages = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase
       .from('station_time_summary')
@@ -118,13 +135,23 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
       .eq('order_number', orderNumber)
       .order('id', { ascending: true }) // 預設依 ID 排序，如有 sort_order 欄位更佳
     
-    if (data) setStages(data)
+    if (data) setStages(data as StageItem[])
     setLoading(false)
-  }
+  }, [orderNumber])
+
+  useEffect(() => {
+    if (isOpen && orderNumber) {
+      const timer = setTimeout(() => {
+        void fetchStages()
+      }, 0)
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen, orderNumber, fetchStages])
 
   // --- CRUD 操作 ---
-  const handleDragEnd = (event: any) => {
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
+    if (!over) return
     if (active.id !== over.id) {
       setStages((items) => {
         const oldIndex = items.findIndex(i => i.id === active.id)
@@ -144,7 +171,7 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
     }
   }
 
-  const handleUpdateStage = (id: number, field: string, val: any) => {
+  const handleUpdateStage = (id: number, field: EditableField, val: string | number) => {
     setStages(prev => prev.map(s => s.id === id ? { ...s, [field]: val } : s))
   }
 
@@ -184,7 +211,7 @@ export default function OrderEditModal({ orderNumber, isOpen, onClose, onSaveSuc
     setLoading(true)
     // 這裡我們透過 delete + re-insert 或者 update 來保存順序
     // 為了簡單起見，我們更新每一筆資料的內容 (如果未來有 sort_order 欄位，也要在這裡更新)
-    const promises = stages.map((stage, index) => {
+    const promises = stages.map((stage) => {
         return supabase.from('station_time_summary').update({
             op_name: stage.op_name,
             assigned_section: stage.assigned_section,

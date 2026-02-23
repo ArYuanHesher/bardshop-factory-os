@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 
 // --- 介面定義 ---
@@ -51,6 +51,23 @@ interface FailedRow {
   reason: string
 }
 
+interface ItemRouteRow {
+  item_code: string
+  route_id: string
+}
+
+interface RouteOperationRow {
+  route_id: string
+  sequence: number
+  op_name: string
+}
+
+interface OperationTimeRow {
+  op_name: string
+  station: string
+  std_time_min: number
+}
+
 interface MasterData {
   itemRoutes: Map<string, string>
   routeOps: Map<string, { sequence: number, op_name: string }[]>
@@ -73,18 +90,8 @@ export default function ConversionPage() {
   const [movingFailed, setMovingFailed] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
 
-  useEffect(() => {
-    initData()
-  }, [])
-
-  const initData = async () => {
-    setLoading(true)
-    await Promise.all([fetchOrders(), fetchMasterData()])
-    setLoading(false)
-  }
-
   // 1. 讀取待處理工單
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     const { data, error } = await supabase
       .from('daily_orders')
       .select('id, order_number, doc_type, item_code, item_name, quantity, plate_count, delivery_date, designer, customer, handler, issuer, status')
@@ -96,11 +103,11 @@ export default function ConversionPage() {
     
     if (error) console.error('Fetch Orders Error:', error)
     else setOrders(data || [])
-  }
+  }, [])
 
   // 分頁讀取函式
-  const fetchAllData = async (table: string, selectColumns: string) => {
-    let allData: any[] = []
+  const fetchAllData = async <T,>(table: string, selectColumns: string): Promise<T[]> => {
+    const allData: T[] = []
     let from = 0
     const size = 1000
     
@@ -113,7 +120,7 @@ export default function ConversionPage() {
       if (error) throw error
       if (!data || data.length === 0) break 
       
-      allData.push(...data)
+      allData.push(...(data as T[]))
       
       if (data.length < size) break 
       from += size 
@@ -122,31 +129,34 @@ export default function ConversionPage() {
   }
 
   // 2. 讀取母資料
-  const fetchMasterData = async () => {
+  const fetchMasterData = useCallback(async () => {
     try {
-      const ir = await fetchAllData('item_routes', 'item_code, route_id')
+      const ir = await fetchAllData<ItemRouteRow>('item_routes', 'item_code, route_id')
       const irMap = new Map<string, string>()
-      ir.forEach((i: any) => {
-        const cleanCode = (i.item_code || '').trim().toUpperCase()
-        const cleanRoute = (i.route_id || '').trim()
+      ir.forEach((item) => {
+        const cleanCode = (item.item_code || '').trim().toUpperCase()
+        const cleanRoute = (item.route_id || '').trim()
         if (cleanCode && cleanRoute) irMap.set(cleanCode, cleanRoute)
       })
 
-      const ro = await fetchAllData('route_operations', 'route_id, sequence, op_name')
-      ro.sort((a: any, b: any) => a.sequence - b.sequence)
-      const roMap = new Map<string, any[]>()
-      ro.forEach((r: any) => {
-        const cleanRouteId = (r.route_id || '').trim()
-        if (cleanRouteId && r.op_name) {
+      const ro = await fetchAllData<RouteOperationRow>('route_operations', 'route_id, sequence, op_name')
+      ro.sort((a, b) => a.sequence - b.sequence)
+      const roMap = new Map<string, { sequence: number; op_name: string }[]>()
+      ro.forEach((routeOp) => {
+        const cleanRouteId = (routeOp.route_id || '').trim()
+        if (cleanRouteId && routeOp.op_name) {
           if (!roMap.has(cleanRouteId)) roMap.set(cleanRouteId, [])
-          roMap.get(cleanRouteId)?.push(r)
+          roMap.get(cleanRouteId)?.push({
+            sequence: routeOp.sequence,
+            op_name: routeOp.op_name,
+          })
         }
       })
 
-      const ot = await fetchAllData('operation_times', 'op_name, station, std_time_min')
-      const otMap = new Map(ot.map((o: any) => [
-        (o.op_name || '').trim(), 
-        { station: (o.station || '').trim(), std_time: o.std_time_min }
+      const ot = await fetchAllData<OperationTimeRow>('operation_times', 'op_name, station, std_time_min')
+      const otMap = new Map<string, { station: string; std_time: number }>(ot.map((operationTime) => [
+        (operationTime.op_name || '').trim(), 
+        { station: (operationTime.station || '').trim(), std_time: operationTime.std_time_min }
       ]))
 
       setMasterData({ itemRoutes: irMap, routeOps: roMap, opTimes: otMap, ready: true })
@@ -160,7 +170,17 @@ export default function ConversionPage() {
       console.error('Fetch Master Data Error', e)
       alert('母資料讀取失敗，請檢查網路或 Console')
     }
-  }
+  }, [])
+
+  const initData = useCallback(async () => {
+    setLoading(true)
+    await Promise.all([fetchOrders(), fetchMasterData()])
+    setLoading(false)
+  }, [fetchOrders, fetchMasterData])
+
+  useEffect(() => {
+    initData()
+  }, [initData])
 
   const toggleSelect = (id: number) => {
     const newSet = new Set(selectedIds)
@@ -300,7 +320,11 @@ export default function ConversionPage() {
         await supabase.from('station_time_summary').delete().in('source_order_id', processedOrderIds)
       }
 
-      const dataToInsert = results.map(({ unique_id, ...rest }) => rest)
+      const dataToInsert = results.map((row) => {
+        const { unique_id, ...rest } = row
+        void unique_id
+        return rest
+      })
       const { error: insertError } = await supabase.from('station_time_summary').insert(dataToInsert)
       if (insertError) throw insertError
 
@@ -319,9 +343,10 @@ export default function ConversionPage() {
       setSelectedIds(new Set())
       fetchOrders() 
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      alert('寫入失敗: ' + err.message)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('寫入失敗: ' + message)
     } finally {
       setSaving(false)
     }
@@ -346,9 +371,10 @@ export default function ConversionPage() {
       setFailedRows([])
       fetchOrders() 
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      alert('移動失敗: ' + err.message)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('移動失敗: ' + message)
     } finally {
       setMovingFailed(false)
     }

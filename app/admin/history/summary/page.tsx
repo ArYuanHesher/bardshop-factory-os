@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 
 // 定義資料介面
@@ -22,11 +22,7 @@ export default function StationSummaryPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
 
-  useEffect(() => {
-    fetchData()
-  }, [])
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     // 預設抓取最近 1000 筆，可依需求調整 limit
     const { data, error } = await supabase
@@ -36,9 +32,16 @@ export default function StationSummaryPage() {
       .limit(1000)
     
     if (error) console.error(error)
-    else setData(data || [])
+    else setData((data as StationSummaryRow[]) || [])
     setLoading(false)
-  }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchData()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [fetchData])
 
   // 前端篩選邏輯
   const filteredData = data.filter(row => {

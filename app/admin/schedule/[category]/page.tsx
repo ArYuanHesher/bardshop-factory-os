@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '../../../../lib/supabaseClient'
 
@@ -34,35 +34,32 @@ export default function CategorySchedulePage() {
   const [data, setData] = useState<ScheduleItem[]>([])
   const [loading, setLoading] = useState(true)
 
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data: result, error } = await supabase
+        .from('station_time_summary')
+        .select('*')
+        .ilike('station', `%${categoryName}%`)
+        .order('created_at', { ascending: false })
+        .limit(200)
+
+      if (error) throw error
+      setData(result || [])
+    } catch (err: unknown) {
+      console.error(err)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('讀取失敗: ' + message)
+    } finally {
+      setLoading(false)
+    }
+  }, [categoryName])
+
   useEffect(() => {
     if (CATEGORY_MAP[categoryId]) {
       fetchData()
     }
-  }, [categoryId])
-
-  const fetchData = async () => {
-    setLoading(true)
-    try {
-      // 1. 根據大分類，找出所有相關的站點 (Mapping)
-      // 這裡使用模糊搜尋，只要 station 欄位包含該分類名稱 (例如 "印刷") 就抓出來
-      // 您也可以改用精確的 STATION_MAPPING 對照表
-      const { data: result, error } = await supabase
-        .from('station_time_summary') // 假設資料存於此表
-        .select('*')
-        .ilike('station', `%${categoryName}%`) // 🔥 關鍵過濾：只抓該分類的資料
-        .order('created_at', { ascending: false })
-        .limit(200) // 先抓 200 筆示範
-
-      if (error) throw error
-      setData(result || [])
-
-    } catch (err: any) {
-      console.error(err)
-      alert('讀取失敗: ' + err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+  }, [categoryId, fetchData])
 
   // 如果網址亂打，顯示 404 風格
   if (!CATEGORY_MAP[categoryId]) {

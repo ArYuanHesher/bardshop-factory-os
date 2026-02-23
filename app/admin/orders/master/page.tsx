@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 
 interface ScheduleItem {
@@ -38,6 +38,13 @@ interface GroupedOrder {
   items: ScheduleItem[]
 }
 
+interface EditableCellProps {
+  value: string | number | null | undefined
+  onChange: (value: string) => void
+  type?: string
+  className?: string
+}
+
 export default function MasterSchedulePage() {
   const [groupedData, setGroupedData] = useState<GroupedOrder[]>([])
   const [loading, setLoading] = useState(true)
@@ -47,23 +54,12 @@ export default function MasterSchedulePage() {
   const [totalCount, setTotalCount] = useState(0)
   const PAGE_SIZE = 100 
 
-  useEffect(() => {
-    fetchData()
-  }, [page, searchTerm])
-
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(e.target.value)
-    setPage(0) 
-  }
-
-  // --- 1. 讀取與分組邏輯 ---
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     try {
       let query = supabase
         .from('station_time_summary')
         .select('*', { count: 'exact' })
-        // 🔥 重要：一定要先照 source_order_id 排序，才能確保分組在一起
         .order('created_at', { ascending: false }) 
         .order('source_order_id', { ascending: true })
         .order('id', { ascending: true })
@@ -80,18 +76,17 @@ export default function MasterSchedulePage() {
 
       if (error) throw error
 
-      // --- 前端資料分組 (Grouping) ---
       const groups: GroupedOrder[] = []
       const map = new Map<number, GroupedOrder>()
 
       rawData?.forEach((row: ScheduleItem) => {
         if (!map.has(row.source_order_id)) {
-          const newGroup = {
+          const newGroup: GroupedOrder = {
             source_order_id: row.source_order_id,
             order_number: row.order_number,
             item_code: row.item_code,
             item_name: row.item_name,
-            delivery_date: row.delivery_date, // 綁定第一筆資料的共用欄位
+            delivery_date: row.delivery_date,
             designer: row.designer,
             customer: row.customer,
             handler: row.handler,
@@ -106,13 +101,22 @@ export default function MasterSchedulePage() {
 
       setGroupedData(groups)
       setTotalCount(count || 0)
-
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      alert('讀取失敗: ' + err.message)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('讀取失敗: ' + message)
     } finally {
       setLoading(false)
     }
+  }, [page, searchTerm])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(e.target.value)
+    setPage(0) 
   }
 
   // --- 2. 刪除與回溯邏輯 ---
@@ -136,15 +140,16 @@ export default function MasterSchedulePage() {
 
       if (deleteError) throw deleteError
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      alert('操作失敗: ' + err.message)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert('操作失敗: ' + message)
       fetchData() 
     }
   }
 
   // --- 3. 編輯邏輯 ---
-  const handleUpdate = async (id: number, field: keyof ScheduleItem, value: any) => {
+  const handleUpdate = async (id: number, field: keyof ScheduleItem, value: ScheduleItem[keyof ScheduleItem]) => {
     setGroupedData(prev => prev.map(group => ({
       ...group,
       items: group.items.map(item => item.id === id ? { ...item, [field]: value } : item)
@@ -158,7 +163,7 @@ export default function MasterSchedulePage() {
     if (error) console.error('Update Failed', error)
   }
 
-  const EditableCell = ({ value, onChange, type = "text", className = "" }: any) => (
+  const EditableCell = ({ value, onChange, type = "text", className = "" }: EditableCellProps) => (
     <input 
       type={type}
       value={value === null || value === undefined ? '' : value}
