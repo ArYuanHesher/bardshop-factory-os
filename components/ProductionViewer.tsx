@@ -11,6 +11,9 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
   const [isLoadingStages, setIsLoadingStages] = useState(true)
   const [partialInput, setPartialInput] = useState<string>('')
   const [currentCompleted, setCurrentCompleted] = useState<number>(task?.completed_quantity || 0)
+  const [isSubmittingAnomaly, setIsSubmittingAnomaly] = useState(false)
+  const [showOtherAnomalyForm, setShowOtherAnomalyForm] = useState(false)
+  const [otherAnomalyReason, setOtherAnomalyReason] = useState('')
 
   const fetchStages = useCallback(async () => {
     if (!task?.order_number) return
@@ -71,6 +74,54 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
 
   // ❌ 現場看板不包含「重置」功能
 
+  const submitAnomalyReport = async (reportType: 'upv' | 'other', reason: string | null) => {
+    if (!task) return
+
+    setIsSubmittingAnomaly(true)
+    try {
+      const payload = {
+        report_type: reportType,
+        reason,
+        status: 'pending',
+        source_order_id: task.source_order_id || null,
+        task_id: task.id,
+        order_number: task.order_number,
+        item_code: task.item_code,
+        quantity: task.quantity,
+        op_name: task.op_name,
+        station: task.station,
+        section_id: task.assigned_section || null
+      }
+
+      const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
+      if (error) throw error
+
+      alert(reportType === 'upv' ? '✅ 已送出「此為上V」回報' : '✅ 已送出「其他異常回報」')
+      setShowOtherAnomalyForm(false)
+      setOtherAnomalyReason('')
+    } catch (err: unknown) {
+      console.error(err)
+      const message = err instanceof Error ? err.message : '未知錯誤'
+      alert(`送出失敗：${message}`)
+    } finally {
+      setIsSubmittingAnomaly(false)
+    }
+  }
+
+  const handleUpvReport = () => {
+    if (!confirm('確定送出「此為上V」回報？\n(後台確認後印刷工時將雙倍)')) return
+    void submitAnomalyReport('upv', '此為上V')
+  }
+
+  const handleSubmitOtherAnomaly = () => {
+    const reason = otherAnomalyReason.trim()
+    if (!reason) {
+      alert('請填寫異常原因')
+      return
+    }
+    void submitAnomalyReport('other', reason)
+  }
+
   if (!task) return null
   const remaining = task.quantity - currentCompleted
 
@@ -94,8 +145,55 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
                     <span className="text-xs text-slate-400 ml-2 font-mono">(剩餘: <span className="text-yellow-400 font-bold">{remaining > 0 ? remaining : 0}</span>)</span>
                 </div>
             </div>
-            <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 rounded-full w-8 h-8 flex items-center justify-center">✕</button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleUpvReport}
+                disabled={isSubmittingAnomaly}
+                className="w-20 h-12 rounded-lg bg-red-700 hover:bg-red-600 text-white text-sm font-black border-2 border-red-400 shadow-[0_0_20px_rgba(239,68,68,0.35)] disabled:bg-slate-700 disabled:border-slate-600 disabled:text-slate-400"
+                title="此為上V"
+              >
+                此為上V
+              </button>
+              <button
+                onClick={() => setShowOtherAnomalyForm(prev => !prev)}
+                disabled={isSubmittingAnomaly}
+                className="w-24 h-12 rounded-lg bg-red-800 hover:bg-red-700 text-white text-sm font-black border-2 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.35)] disabled:bg-slate-700 disabled:border-slate-600 disabled:text-slate-400"
+                title="其他異常回報"
+              >
+                其他異常
+              </button>
+              <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 rounded-full w-8 h-8 flex items-center justify-center">✕</button>
+            </div>
         </div>
+
+        {showOtherAnomalyForm && (
+          <div className="px-6 py-4 border-b border-slate-800 bg-red-950/20">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-bold text-red-300">其他異常原因</label>
+              <textarea
+                value={otherAnomalyReason}
+                onChange={(e) => setOtherAnomalyReason(e.target.value)}
+                placeholder="請輸入異常原因..."
+                className="w-full min-h-[90px] bg-slate-900 border border-red-500/40 rounded-lg p-3 text-sm text-white outline-none focus:border-red-400"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => { setShowOtherAnomalyForm(false); setOtherAnomalyReason('') }}
+                  className="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSubmitOtherAnomaly}
+                  disabled={isSubmittingAnomaly}
+                  className="px-4 py-2 rounded bg-red-600 hover:bg-red-500 text-white text-xs font-bold disabled:bg-slate-700 disabled:text-slate-400"
+                >
+                  {isSubmittingAnomaly ? '送出中...' : '送出回報'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">

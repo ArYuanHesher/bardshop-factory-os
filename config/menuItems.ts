@@ -63,6 +63,7 @@ export const NAV_GROUPS = [
       { name: '包裝排程', path: '/admin/production/packaging', icon: '...' },
       { name: '委外排程', path: '/admin/production/outsourced', icon: '...' },
       { name: '常平排程', path: '/admin/production/changping', icon: '...' },
+      { name: '排程異常回報', path: '/admin/production/anomaly', icon: '...' },
    ]
   },
   {

@@ -10,6 +10,7 @@ export interface ProductionMachine {
 
 export interface ProductionTask {
   id: number
+  source_order_id?: number | null
   order_number?: string | null
   item_code?: string | null
   quantity: number
@@ -18,6 +19,7 @@ export interface ProductionTask {
   scheduled_date?: string | null
   production_machine_id?: number | null
   op_name?: string | null
+  station?: string | null
   assigned_section?: string | null
   customer?: string | null
   item_name?: string | null

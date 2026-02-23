@@ -245,13 +245,27 @@ export default function ConversionPage() {
         const stdTime = opInfo.std_time || 0
         const qty = Number(order.quantity) || 0
         const plates = parseFloat(order.plate_count) || 0
+        const isQcInspection = cleanOpName.includes('QC檢驗')
+        const docType = order.doc_type || ''
+        const isOutsourcedOrChangpingOrder =
+          docType.includes('委外') ||
+          docType.includes('常平') ||
+          station.includes('委外') ||
+          station.includes('常平') ||
+          station.includes('轉運')
         
         let multiplier = 0
         let basisText = ''
         const isPrintOrLaser = station.includes('印刷') || station.includes('雷切')
         const isPacking = station.includes('包裝')
 
-        if (isPacking) {
+        if (isQcInspection) {
+          multiplier = 1
+          basisText = '固定倍率 (1)'
+        } else if (isOutsourcedOrChangpingOrder) {
+          multiplier = 1
+          basisText = '固定倍率 (1)'
+        } else if (isPacking) {
           multiplier = qty
           basisText = `數量 (${qty})`
         } else if (isPrintOrLaser) {
@@ -296,7 +310,29 @@ export default function ConversionPage() {
           reason: `缺標準工時: ${missingOps.join('、')}`
         })
       } else {
-        newResults.push(...tempResults)
+        const mergedResults: ConvertedRow[] = []
+        for (let i = 0; i < tempResults.length; i++) {
+          const current = tempResults[i]
+          const next = tempResults[i + 1]
+          const isCurrentPrinting = current.station.includes('印刷')
+          const isNextPrinting = next ? next.station.includes('印刷') : false
+
+          if (next && isCurrentPrinting && isNextPrinting) {
+            mergedResults.push({
+              ...current,
+              op_name: `${current.op_name}(雙面)`,
+              basis_text: '雙面合併',
+              std_time: Math.round((current.std_time + next.std_time) * 100) / 100,
+              total_time_min: Math.round((current.total_time_min + next.total_time_min) * 100) / 100
+            })
+            i += 1
+            continue
+          }
+
+          mergedResults.push(current)
+        }
+
+        newResults.push(...mergedResults)
       }
     })
 

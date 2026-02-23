@@ -233,6 +233,37 @@ export default function SchedulePendingPage() {
   const handleBatchConfirm = async () => {
     const selectedIds = Object.keys(selections).map(Number)
     if (selectedIds.length === 0) return
+
+    const selectedSet = new Set(selectedIds)
+    const incompleteGroups = groupedData
+      .map(group => {
+        const selectedInGroup = group.items.filter(item => selectedSet.has(item.id))
+        if (selectedInGroup.length === 0) return null
+        if (selectedInGroup.length === group.items.length) return null
+
+        const missingOps = group.items
+          .filter(item => !selectedSet.has(item.id))
+          .map(item => item.op_name)
+
+        return {
+          orderNumber: group.order_number,
+          itemCode: group.item_code,
+          missingOps
+        }
+      })
+      .filter((group): group is { orderNumber: string; itemCode: string; missingOps: string[] } => group !== null)
+
+    if (incompleteGroups.length > 0) {
+      const preview = incompleteGroups
+        .slice(0, 5)
+        .map(group => `- ${group.orderNumber} / ${group.itemCode} 未指定工序：${group.missingOps.join('、')}`)
+        .join('\n')
+
+      const more = incompleteGroups.length > 5 ? `\n...另有 ${incompleteGroups.length - 5} 筆` : ''
+      alert(`同一品項必須所有工序都指定後才能確認排程。\n\n請先補齊以下工單：\n${preview}${more}`)
+      return
+    }
+
     if (!confirm(`確定要將這 ${selectedIds.length} 筆工序移入排程總表嗎？`)) return
 
     setSaving(true)
