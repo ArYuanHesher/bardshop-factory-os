@@ -19,7 +19,7 @@ export default function LoginPage() {
       // 1. 去資料庫找這個人 (直接查 members 表)
       const { data: member, error } = await supabase
         .from('members')
-        .select('email, password, real_name')
+        .select('email, password, real_name, is_admin')
         .eq('email', formData.email)
         .single()
 
@@ -40,6 +40,7 @@ export default function LoginPage() {
 
       // 4. 設定 Cookie (給 Middleware 過路檢察用)
       document.cookie = `bardshop-token=authorized; path=/; max-age=86400; SameSite=Lax;`
+      document.cookie = `bardshop-role=${member.is_admin ? 'admin' : 'ops'}; path=/; max-age=86400; SameSite=Lax;`
 
       // 5. 轉址進首頁
       // 使用 router.push 比 window.location.href 更平滑
