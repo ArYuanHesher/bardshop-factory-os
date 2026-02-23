@@ -31,6 +31,7 @@ interface OptionState {
 interface CreateFormState {
   createdDate: string
   orderNumber: string
+  status: 'pending' | 'confirmed'
   reason: string
   reporter: string
   category: string
@@ -56,6 +57,7 @@ const getTodayDateInput = () => new Date().toISOString().slice(0, 10)
 const DEFAULT_CREATE_FORM: CreateFormState = {
   createdDate: getTodayDateInput(),
   orderNumber: '',
+  status: 'pending',
   reason: '',
   reporter: '',
   category: '',
@@ -71,6 +73,13 @@ export default function QaRecordsPage() {
   const [editForm, setEditForm] = useState<CreateFormState>(DEFAULT_CREATE_FORM)
   const [savingEdit, setSavingEdit] = useState(false)
   const [options, setOptions] = useState<OptionState>(DEFAULT_OPTIONS)
+  const [selectedReason, setSelectedReason] = useState('')
+  const [selectedReporter, setSelectedReporter] = useState('')
+  const [selectedHandler, setSelectedHandler] = useState('')
+  const [selectedResponsible, setSelectedResponsible] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('')
+  const [statusFilter, setStatusFilter] = useState({ pending: true, confirmed: true })
+  const [orderKeyword, setOrderKeyword] = useState('')
 
   const fetchOptions = useCallback(async () => {
     const { data, error } = await supabase
@@ -195,6 +204,7 @@ export default function QaRecordsPage() {
     setEditForm({
       createdDate: report.created_at ? new Date(report.created_at).toISOString().slice(0, 10) : getTodayDateInput(),
       orderNumber: report.order_number || '',
+      status: report.status === 'confirmed' ? 'confirmed' : 'pending',
       reason: report.reason || '',
       reporter: report.qa_reporter || '',
       category: report.qa_category || '',
@@ -228,6 +238,7 @@ export default function QaRecordsPage() {
         .update({
           created_at: editForm.createdDate ? `${editForm.createdDate}T00:00:00.000Z` : undefined,
           order_number: editForm.orderNumber.trim(),
+          status: editForm.status,
           reason: editForm.reason.trim(),
           qa_reporter: editForm.reporter || null,
           qa_handlers: editForm.handlers,
@@ -251,6 +262,81 @@ export default function QaRecordsPage() {
 
   const reportRows = useMemo(() => [...pendingReports, ...completedReports], [pendingReports, completedReports])
 
+  const reasonFilterOptions = useMemo(
+    () => [...new Set(reports.map((report) => report.reason?.trim()).filter((value): value is string => !!value))],
+    [reports],
+  )
+
+  const reporterFilterOptions = useMemo(
+    () => [...new Set(reports.map((report) => report.qa_reporter?.trim()).filter((value): value is string => !!value))],
+    [reports],
+  )
+
+  const handlerFilterOptions = useMemo(() => {
+    const handlerSet = new Set<string>()
+    reports.forEach((report) => {
+      normalizeTextArray(report.qa_handlers).forEach((name) => name?.trim() && handlerSet.add(name.trim()))
+    })
+    return [...handlerSet]
+  }, [reports])
+
+  const responsibleFilterOptions = useMemo(() => {
+    const responsibleSet = new Set<string>()
+    reports.forEach((report) => {
+      normalizeTextArray(report.qa_responsible).forEach((name) => name?.trim() && responsibleSet.add(name.trim()))
+    })
+    return [...responsibleSet]
+  }, [reports])
+
+  const categoryFilterOptions = useMemo(
+    () => [...new Set(reports.map((report) => report.qa_category?.trim()).filter((value): value is string => !!value))],
+    [reports],
+  )
+
+  const baseRowsWithoutStatusFilter = useMemo(() => {
+    const keyword = orderKeyword.trim().toLowerCase()
+
+    return reportRows.filter((report) => {
+      const reasonMatch = !selectedReason || (report.reason || '').trim() === selectedReason
+      const categoryMatch = !selectedCategory || (report.qa_category || '').trim() === selectedCategory
+      const reporterMatch = !selectedReporter || (report.qa_reporter || '').trim() === selectedReporter
+      const handlerMatch = !selectedHandler || normalizeTextArray(report.qa_handlers).map((name) => name.trim()).includes(selectedHandler)
+      const responsibleMatch = !selectedResponsible || normalizeTextArray(report.qa_responsible).map((name) => name.trim()).includes(selectedResponsible)
+      const orderMatch = !keyword || (report.order_number || '').toLowerCase().includes(keyword)
+
+      return reasonMatch && categoryMatch && reporterMatch && handlerMatch && responsibleMatch && orderMatch
+    })
+  }, [
+    orderKeyword,
+    reportRows,
+    selectedCategory,
+    selectedHandler,
+    selectedReason,
+    selectedReporter,
+    selectedResponsible,
+  ])
+
+  const statusCounts = useMemo(() => {
+    return baseRowsWithoutStatusFilter.reduce(
+      (acc, row) => {
+        if (row.status === 'pending') acc.pending += 1
+        if (row.status === 'confirmed') acc.confirmed += 1
+        return acc
+      },
+      { pending: 0, confirmed: 0 },
+    )
+  }, [baseRowsWithoutStatusFilter])
+
+  const filteredReportRows = useMemo(() => {
+    return baseRowsWithoutStatusFilter.filter((report) => {
+      const statusValue = (report.status || '').trim()
+      const statusMatch =
+        (statusFilter.pending && statusValue === 'pending') ||
+        (statusFilter.confirmed && statusValue === 'confirmed')
+      return statusMatch
+    })
+  }, [baseRowsWithoutStatusFilter, statusFilter.confirmed, statusFilter.pending])
+
   return (
     <div className="p-6 md:p-8 max-w-[1900px] mx-auto min-h-screen space-y-8">
       <div className="flex items-center justify-between">
@@ -271,12 +357,133 @@ export default function QaRecordsPage() {
         </div>
       </div>
 
+      <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="text-xs text-slate-400">篩選異常原因</label>
+            <select
+              value={selectedReason}
+              onChange={(e) => setSelectedReason(e.target.value)}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            >
+              <option value="">全部原因</option>
+              {reasonFilterOptions.map((reason) => (
+                <option key={reason} value={reason}>{reason}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">篩選回報人</label>
+            <select
+              value={selectedReporter}
+              onChange={(e) => setSelectedReporter(e.target.value)}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            >
+              <option value="">全部回報人</option>
+              {reporterFilterOptions.map((person) => (
+                <option key={person} value={person}>{person}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">篩選處理人</label>
+            <select
+              value={selectedHandler}
+              onChange={(e) => setSelectedHandler(e.target.value)}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            >
+              <option value="">全部處理人</option>
+              {handlerFilterOptions.map((person) => (
+                <option key={person} value={person}>{person}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">篩選缺失人員</label>
+            <select
+              value={selectedResponsible}
+              onChange={(e) => setSelectedResponsible(e.target.value)}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            >
+              <option value="">全部缺失人員</option>
+              {responsibleFilterOptions.map((person) => (
+                <option key={person} value={person}>{person}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">篩選分類</label>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            >
+              <option value="">全部分類</option>
+              {categoryFilterOptions.map((category) => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">單號搜尋</label>
+            <input
+              value={orderKeyword}
+              onChange={(e) => setOrderKeyword(e.target.value)}
+              placeholder="輸入單號關鍵字"
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white placeholder:text-slate-500"
+            />
+          </div>
+
+          <div className="lg:col-span-2">
+            <label className="text-xs text-slate-400">篩選狀態</label>
+            <div className="mt-1 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setStatusFilter((prev) => ({ ...prev, pending: !prev.pending }))}
+                className={`px-3 py-2 rounded border text-sm font-bold transition-colors ${statusFilter.pending ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
+              >
+                待處理（{statusCounts.pending}）
+              </button>
+              <button
+                onClick={() => setStatusFilter((prev) => ({ ...prev, confirmed: !prev.confirmed }))}
+                className={`px-3 py-2 rounded border text-sm font-bold transition-colors ${statusFilter.confirmed ? 'bg-emerald-900/30 border-emerald-600 text-emerald-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
+              >
+                已確認（{statusCounts.confirmed}）
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between">
+          <span className="text-xs text-slate-500">共 {filteredReportRows.length} 筆符合篩選</span>
+          <button
+            onClick={() => {
+              setSelectedReason('')
+              setSelectedReporter('')
+              setSelectedHandler('')
+              setSelectedResponsible('')
+              setSelectedCategory('')
+              setStatusFilter({ pending: true, confirmed: true })
+              setOrderKeyword('')
+            }}
+            className="px-3 py-1.5 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-xs"
+          >
+            清除篩選
+          </button>
+        </div>
+      </div>
+
       <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden">
         <table className="w-full text-left text-sm text-slate-300">
           <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono">
             <tr>
               <th className="p-3">日期</th>
               <th className="p-3">相關單號</th>
+              <th className="p-3">狀態</th>
               <th className="p-3">異常回報人</th>
               <th className="p-3">異常處理人</th>
               <th className="p-3">異常分類</th>
@@ -287,20 +494,27 @@ export default function QaRecordsPage() {
           </thead>
           <tbody className="divide-y divide-slate-800">
             {loading ? (
-              <tr><td colSpan={8} className="p-8 text-center text-slate-500">載入中...</td></tr>
-            ) : reportRows.length === 0 ? (
-              <tr><td colSpan={8} className="p-8 text-center text-slate-500">目前無異常紀錄</td></tr>
+              <tr><td colSpan={9} className="p-8 text-center text-slate-500">載入中...</td></tr>
+            ) : filteredReportRows.length === 0 ? (
+              <tr><td colSpan={9} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
             ) : (
-              reportRows.map((report) => {
+              filteredReportRows.map((report) => {
                 const reporter = report.qa_reporter || ''
                 const handlers = normalizeTextArray(report.qa_handlers)
                 const category = report.qa_category || ''
                 const responsible = normalizeTextArray(report.qa_responsible)
+                const statusLabel = report.status === 'pending' ? '待處理' : report.status === 'confirmed' ? '已確認' : report.status
 
                 return (
                   <tr key={report.id} className="hover:bg-slate-800/30 align-top">
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{new Date(report.created_at).toLocaleDateString()}</td>
                     <td className="p-3 font-mono text-cyan-300 whitespace-nowrap">{report.order_number}</td>
+
+                    <td className="p-3 min-w-[120px]">
+                      <span className={`px-2 py-1 rounded border text-xs whitespace-nowrap ${report.status === 'pending' ? 'bg-amber-900/30 border-amber-700 text-amber-300' : 'bg-emerald-900/30 border-emerald-700 text-emerald-300'}`}>
+                        {statusLabel || '-'}
+                      </span>
+                    </td>
 
                     <td className="p-3 min-w-[170px]">
                       <span className="text-slate-100 text-xs">{reporter || '-'}</span>
@@ -373,6 +587,24 @@ export default function QaRecordsPage() {
                   onChange={(e) => setEditForm((prev) => ({ ...prev, orderNumber: e.target.value }))}
                   className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                 />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">狀態</label>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setEditForm((prev) => ({ ...prev, status: 'pending' }))}
+                    className={`px-3 py-2 rounded border text-sm font-bold transition-colors ${editForm.status === 'pending' ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
+                  >
+                    待處理
+                  </button>
+                  <button
+                    onClick={() => setEditForm((prev) => ({ ...prev, status: 'confirmed' }))}
+                    className={`px-3 py-2 rounded border text-sm font-bold transition-colors ${editForm.status === 'confirmed' ? 'bg-emerald-900/30 border-emerald-600 text-emerald-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
+                  >
+                    已確認
+                  </button>
+                </div>
               </div>
 
               <div>

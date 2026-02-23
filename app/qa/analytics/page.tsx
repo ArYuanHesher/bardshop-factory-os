@@ -6,6 +6,7 @@ import { supabase } from '../../../lib/supabaseClient'
 
 interface AnomalyReportRow {
   created_at: string
+  status: string | null
   reason: string | null
   qa_reporter: string | null
   qa_handlers: string[] | null
@@ -35,6 +36,13 @@ export default function QaAnalyticsPage() {
   const [endDate, setEndDate] = useState(() => toDateInputValue(new Date()))
   const [loading, setLoading] = useState(false)
   const [rows, setRows] = useState<AnomalyReportRow[]>([])
+
+  const statusSummary = useMemo(() => {
+    const total = rows.length
+    const confirmed = rows.filter((row) => row.status === 'confirmed').length
+    const pending = rows.filter((row) => row.status === 'pending').length
+    return { total, confirmed, pending }
+  }, [rows])
 
   const reasonRatios = useMemo<RatioItem[]>(() => {
     const map = new Map<string, number>()
@@ -80,7 +88,7 @@ export default function QaAnalyticsPage() {
     try {
       const { data, error } = await supabase
         .from('schedule_anomaly_reports')
-        .select('created_at, reason, qa_reporter, qa_handlers, qa_responsible')
+        .select('created_at, status, reason, qa_reporter, qa_handlers, qa_responsible')
         .gte('created_at', `${startDate}T00:00:00.000Z`)
         .lte('created_at', `${endDate}T23:59:59.999Z`)
 
@@ -122,6 +130,21 @@ export default function QaAnalyticsPage() {
             {loading ? '分析中...' : '開始分析'}
           </button>
           <span className="text-xs text-slate-500">共 {rows.length} 筆資料</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4">
+          <p className="text-xs text-slate-400">總件數</p>
+          <p className="mt-2 text-3xl font-black text-white font-mono">{statusSummary.total}</p>
+        </div>
+        <div className="bg-slate-900/50 border border-emerald-700/60 rounded-xl p-4">
+          <p className="text-xs text-emerald-300">已處理件數</p>
+          <p className="mt-2 text-3xl font-black text-emerald-300 font-mono">{statusSummary.confirmed}</p>
+        </div>
+        <div className="bg-slate-900/50 border border-amber-700/60 rounded-xl p-4">
+          <p className="text-xs text-amber-300">待處理件數</p>
+          <p className="mt-2 text-3xl font-black text-amber-300 font-mono">{statusSummary.pending}</p>
         </div>
       </div>
 
