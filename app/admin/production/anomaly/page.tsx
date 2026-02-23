@@ -1,199 +1,89 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '../../../../lib/supabaseClient'
+import Link from 'next/link'
 
-interface AnomalyReport {
-  id: number
-  report_type: 'upv' | 'other' | string
-  reason: string | null
-  status: 'pending' | 'confirmed' | string
-  source_order_id: number | null
-  order_number: string
-  item_code: string
-  quantity: number
-  op_name: string | null
-  station: string | null
-  created_at: string
-  processed_at: string | null
-}
-
-export default function ScheduleAnomalyPage() {
-  const [reports, setReports] = useState<AnomalyReport[]>([])
-  const [loading, setLoading] = useState(true)
-  const [processingId, setProcessingId] = useState<number | null>(null)
-
-  const fetchReports = useCallback(async () => {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('schedule_anomaly_reports')
-      .select('*')
-      .order('status', { ascending: true })
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error(error)
-      alert(`載入失敗：${error.message}`)
-    } else {
-      setReports((data as AnomalyReport[]) || [])
-    }
-    setLoading(false)
-  }, [])
-
-  useEffect(() => {
-    void fetchReports()
-  }, [fetchReports])
-
-  const applyUpvDoubleForOrder = async (report: AnomalyReport) => {
-    let query = supabase
-      .from('station_time_summary')
-      .select('id, total_time_min')
-      .ilike('station', '%印刷%')
-
-    if (report.source_order_id) {
-      query = query.eq('source_order_id', report.source_order_id)
-    } else {
-      query = query
-        .eq('order_number', report.order_number)
-        .eq('item_code', report.item_code)
-        .eq('quantity', report.quantity)
-    }
-
-    const { data: printRows, error: fetchError } = await query
-    if (fetchError) throw fetchError
-
-    const rows = (printRows || []) as Array<{ id: number; total_time_min: number | null }>
-    if (rows.length === 0) return
-
-    const updateJobs = rows.map((row) => {
-      const currentMinutes = Number(row.total_time_min) || 0
-      return supabase
-        .from('station_time_summary')
-        .update({ total_time_min: Math.round(currentMinutes * 2 * 100) / 100 })
-        .eq('id', row.id)
-    })
-
-    const results = await Promise.all(updateJobs)
-    const failed = results.find((result) => result.error)
-    if (failed?.error) throw failed.error
-  }
-
-  const handleConfirm = async (report: AnomalyReport) => {
-    if (!confirm(`確認處理此筆異常回報？\n\n工單：${report.order_number}\n類型：${report.report_type === 'upv' ? '此為上V' : '其他異常'}`)) return
-
-    setProcessingId(report.id)
-    try {
-      if (report.report_type === 'upv') {
-        await applyUpvDoubleForOrder(report)
-      }
-
-      const { error: updateError } = await supabase
-        .from('schedule_anomaly_reports')
-        .update({ status: 'confirmed', processed_at: new Date().toISOString() })
-        .eq('id', report.id)
-
-      if (updateError) throw updateError
-
-      alert(report.report_type === 'upv' ? '✅ 已確認，印刷時間已雙倍。' : '✅ 已確認並結案。')
-      fetchReports()
-    } catch (err: unknown) {
-      console.error(err)
-      const message = err instanceof Error ? err.message : '未知錯誤'
-      alert(`處理失敗：${message}`)
-    } finally {
-      setProcessingId(null)
-    }
-  }
-
-  const pendingReports = reports.filter((report) => report.status === 'pending')
-  const completedReports = reports.filter((report) => report.status !== 'pending')
-
+export default function QaZonePage() {
   return (
-    <div className="p-6 md:p-8 max-w-[1800px] mx-auto min-h-screen space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-white tracking-tight">排程異常回報</h1>
-        <p className="text-red-400 mt-1 font-mono text-sm uppercase">SCHEDULE ANOMALY REPORTS // 現場回報與後台確認</p>
+    <div className="p-6 md:p-8 max-w-[1400px] mx-auto min-h-screen space-y-8">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">品保專區</h1>
+          <p className="text-teal-400 mt-1 font-mono text-sm uppercase">QUALITY ASSURANCE // 異常提報與紀錄追蹤</p>
+        </div>
+        <Link href="/" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm whitespace-nowrap">回到首頁</Link>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-xl font-bold text-white">待處理 ({pendingReports.length})</h2>
-        <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden">
-          <table className="w-full text-left text-sm text-slate-300">
-            <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono">
-              <tr>
-                <th className="p-3">建立時間</th>
-                <th className="p-3">工單</th>
-                <th className="p-3">品號</th>
-                <th className="p-3">類型</th>
-                <th className="p-3">異常原因</th>
-                <th className="p-3 text-center">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {loading ? (
-                <tr><td colSpan={6} className="p-8 text-center text-slate-500">載入中...</td></tr>
-              ) : pendingReports.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-slate-500">目前無待處理回報</td></tr>
-              ) : (
-                pendingReports.map((report) => (
-                  <tr key={report.id} className="hover:bg-slate-800/40">
-                    <td className="p-3 font-mono text-xs">{new Date(report.created_at).toLocaleString()}</td>
-                    <td className="p-3 font-mono text-cyan-300">{report.order_number}</td>
-                    <td className="p-3 font-mono text-purple-300">{report.item_code}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-1 rounded text-xs font-bold border ${report.report_type === 'upv' ? 'bg-red-900/30 text-red-300 border-red-700' : 'bg-orange-900/20 text-orange-300 border-orange-700'}`}>
-                        {report.report_type === 'upv' ? '此為上V' : '其他異常'}
-                      </span>
-                    </td>
-                    <td className="p-3 text-slate-300">{report.reason || '-'}</td>
-                    <td className="p-3 text-center">
-                      <button
-                        onClick={() => handleConfirm(report)}
-                        disabled={processingId === report.id}
-                        className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-bold disabled:bg-slate-700 disabled:text-slate-400"
-                      >
-                        {processingId === report.id ? '處理中...' : '確認'}
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        <Link
+          href="/qa/report"
+          className="group rounded-2xl border border-slate-700 bg-slate-900/50 p-6 hover:border-teal-500 hover:bg-slate-800/60 transition-all"
+        >
+          <div className="mb-4 inline-flex p-3 rounded-full bg-slate-800 group-hover:bg-teal-900/40 text-slate-300 group-hover:text-teal-300 transition-colors">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2 group-hover:text-teal-300">異常回報單</h2>
+          <p className="text-slate-400 text-sm">手動填寫品質異常，建立待處理回報。</p>
+          <p className="text-xs text-teal-400 font-mono mt-4">OPEN FORM →</p>
+        </Link>
 
-      <section className="space-y-3">
-        <h2 className="text-xl font-bold text-white">已處理 ({completedReports.length})</h2>
-        <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden">
-          <table className="w-full text-left text-sm text-slate-300">
-            <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono">
-              <tr>
-                <th className="p-3">建立時間</th>
-                <th className="p-3">工單</th>
-                <th className="p-3">類型</th>
-                <th className="p-3">異常原因</th>
-                <th className="p-3">處理時間</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {completedReports.length === 0 ? (
-                <tr><td colSpan={5} className="p-8 text-center text-slate-500">目前無已處理資料</td></tr>
-              ) : (
-                completedReports.map((report) => (
-                  <tr key={report.id} className="hover:bg-slate-800/30">
-                    <td className="p-3 font-mono text-xs">{new Date(report.created_at).toLocaleString()}</td>
-                    <td className="p-3 font-mono text-cyan-300">{report.order_number}</td>
-                    <td className="p-3">{report.report_type === 'upv' ? '此為上V' : '其他異常'}</td>
-                    <td className="p-3">{report.reason || '-'}</td>
-                    <td className="p-3 font-mono text-xs">{report.processed_at ? new Date(report.processed_at).toLocaleString() : '-'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+        <Link
+          href="/qa/records"
+          className="group rounded-2xl border border-slate-700 bg-slate-900/50 p-6 hover:border-cyan-500 hover:bg-slate-800/60 transition-all"
+        >
+          <div className="mb-4 inline-flex p-3 rounded-full bg-slate-800 group-hover:bg-cyan-900/40 text-slate-300 group-hover:text-cyan-300 transition-colors">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2 group-hover:text-cyan-300">異常紀錄表</h2>
+          <p className="text-slate-400 text-sm">查看待處理/已處理回報，並執行確認結案。</p>
+          <p className="text-xs text-cyan-400 font-mono mt-4">VIEW RECORDS →</p>
+        </Link>
+
+        <Link
+          href="/qa/options"
+          className="group rounded-2xl border border-slate-700 bg-slate-900/50 p-6 hover:border-fuchsia-500 hover:bg-slate-800/60 transition-all"
+        >
+          <div className="mb-4 inline-flex p-3 rounded-full bg-slate-800 group-hover:bg-fuchsia-900/40 text-slate-300 group-hover:text-fuchsia-300 transition-colors">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M7 12h10m-7 6h4" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2 group-hover:text-fuchsia-300">下拉選項管理</h2>
+          <p className="text-slate-400 text-sm">統一管理回報人、處理人、分類與缺失人員選項。</p>
+          <p className="text-xs text-fuchsia-400 font-mono mt-4">MANAGE OPTIONS →</p>
+        </Link>
+
+        <Link
+          href="/qa/upload"
+          className="group rounded-2xl border border-slate-700 bg-slate-900/50 p-6 hover:border-amber-500 hover:bg-slate-800/60 transition-all"
+        >
+          <div className="mb-4 inline-flex p-3 rounded-full bg-slate-800 group-hover:bg-amber-900/40 text-slate-300 group-hover:text-amber-300 transition-colors">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 16V4m0 12l-3-3m3 3l3-3M4 20h16" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2 group-hover:text-amber-300">批量上傳異常單</h2>
+          <p className="text-slate-400 text-sm">匯入 CSV 並預覽內容，批次建立異常回報資料。</p>
+          <p className="text-xs text-amber-400 font-mono mt-4">BATCH IMPORT →</p>
+        </Link>
+
+        <Link
+          href="/qa/analytics"
+          className="group rounded-2xl border border-slate-700 bg-slate-900/50 p-6 hover:border-emerald-500 hover:bg-slate-800/60 transition-all"
+        >
+          <div className="mb-4 inline-flex p-3 rounded-full bg-slate-800 group-hover:bg-emerald-900/40 text-slate-300 group-hover:text-emerald-300 transition-colors">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 3v18h18M8 14l3-3 3 2 4-5" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2 group-hover:text-emerald-300">異常統計分析</h2>
+          <p className="text-slate-400 text-sm">以日期區間分析異常原因與相關人員的比例分布。</p>
+          <p className="text-xs text-emerald-400 font-mono mt-4">OPEN ANALYTICS →</p>
+        </Link>
+      </div>
     </div>
   )
 }

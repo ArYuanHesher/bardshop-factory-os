@@ -17,7 +17,7 @@ export default function LandingPage() {
   const router = useRouter()
   const [time, setTime] = useState('')
   // 🔥 新增 'tasks' 狀態
-  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin' | 'estimation' | 'tasks'>('none')
+  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin' | 'estimation' | 'tasks' | 'qa'>('none')
   
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [currentAnnoIndex, setCurrentAnnoIndex] = useState(0)
@@ -149,7 +149,7 @@ export default function LandingPage() {
         </div>
 
         {/* 🔥 四入口選擇器 (Grid 調整為 2x2 或 4欄) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 w-full">
           
           {/* 1. 產線看板 (Cyan) */}
           <Link href="/dashboard" 
@@ -252,6 +252,35 @@ export default function LandingPage() {
             </p>
             <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-purple-600 group-hover:border-purple-600 group-hover:text-white transition-all">
               ACCESS &rarr;
+            </span>
+          </Link>
+
+          {/* 5. 品保專區 (Teal) */}
+          <Link href="/qa"
+            onMouseEnter={() => setIsHovered('qa')}
+            onMouseLeave={() => setIsHovered('none')}
+            className={`
+              group relative h-64 md:h-80 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              hover:border-teal-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(20,184,166,0.15)]
+              ${isHovered !== 'none' && isHovered !== 'qa' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+            `}
+          >
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-teal-500/10 rounded border border-teal-500/20">
+              <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wider">QA</span>
+            </div>
+
+            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-teal-900/50 text-slate-400 group-hover:text-teal-400 transition-colors">
+              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-teal-400 transition-colors">品保專區</h2>
+            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+              異常回報與品質追蹤。<br/>(Quality Assurance)
+            </p>
+            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-teal-600 group-hover:border-teal-600 group-hover:text-white transition-all">
+              OPEN QA &rarr;
             </span>
           </Link>
 
