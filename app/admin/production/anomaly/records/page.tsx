@@ -73,7 +73,12 @@ const DEFAULT_CREATE_FORM: CreateFormState = {
 const RECORDS_LOCK_PASSWORD = '680401'
 
 export default function QaRecordsPage() {
-  const [isLocked, setIsLocked] = useState(true)
+  const [isLocked, setIsLocked] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('qaRecordsUnlocked') !== 'true';
+    }
+    return true;
+  })
   const [unlockPasswordInput, setUnlockPasswordInput] = useState('')
   const [unlockError, setUnlockError] = useState('')
   const [reports, setReports] = useState<AnomalyReport[]>([])
@@ -333,11 +338,20 @@ export default function QaRecordsPage() {
       setIsLocked(false)
       setUnlockError('')
       setUnlockPasswordInput('')
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('qaRecordsUnlocked', 'true');
+      }
       return
     }
-
     setUnlockError('密碼錯誤，請重新輸入')
   }
+  // 若使用者手動登出或想重新鎖定，可加一個「上鎖」按鈕（選用）
+  // const handleLock = () => {
+  //   setIsLocked(true)
+  //   if (typeof window !== 'undefined') {
+  //     sessionStorage.removeItem('qaRecordsUnlocked');
+  //   }
+  // }
 
   const reporterFilterOptions = useMemo(
     () => [...new Set(reports.map((report) => report.qa_reporter?.trim()).filter((value): value is string => !!value))],
