@@ -8,6 +8,7 @@ interface ParsedCsvRow {
   rowNo: number
   createdDate: string
   orderNumber: string
+  department: string
   reporter: string
   handlers: string[]
   category: string
@@ -19,6 +20,7 @@ interface ParsedCsvRow {
 const HEADER_ALIASES: Record<string, string[]> = {
   createdDate: ['日期', 'created_date', 'date', 'createdAt'],
   orderNumber: ['相關單號', '單號', 'order_number', 'orderNo'],
+  department: ['部門', 'qa_department', 'department'],
   reporter: ['異常回報人', 'qa_reporter', 'reporter'],
   handlers: ['異常處理人', 'qa_handlers', 'handlers'],
   category: ['異常分類', 'qa_category', 'category'],
@@ -79,6 +81,7 @@ function mapHeaderIndex(headerCells: string[]) {
   return {
     createdDate: getIndex(HEADER_ALIASES.createdDate),
     orderNumber: getIndex(HEADER_ALIASES.orderNumber),
+    department: getIndex(HEADER_ALIASES.department),
     reporter: getIndex(HEADER_ALIASES.reporter),
     handlers: getIndex(HEADER_ALIASES.handlers),
     category: getIndex(HEADER_ALIASES.category),
@@ -142,6 +145,7 @@ export default function QaBatchUploadPage() {
         rowNo: rowIndex + 2,
         createdDate,
         orderNumber,
+        department: map.department >= 0 ? (cells[map.department] || '').trim() : '',
         reporter: map.reporter >= 0 ? (cells[map.reporter] || '').trim() : '',
         handlers: map.handlers >= 0 ? normalizePeopleCell(cells[map.handlers] || '') : [],
         category: map.category >= 0 ? (cells[map.category] || '').trim() : '',
@@ -205,6 +209,7 @@ export default function QaBatchUploadPage() {
         station: null,
         section_id: null,
         created_at: normalizeDateToIso(row.createdDate) || new Date().toISOString(),
+        qa_department: row.department || null,
         qa_reporter: row.reporter || null,
         qa_handlers: row.handlers,
         qa_category: row.category || null,
@@ -229,7 +234,7 @@ export default function QaBatchUploadPage() {
   }
 
   const downloadTemplateCsv = () => {
-    const headers = ['日期', '相關單號', '異常回報人', '異常處理人', '異常分類', '異常原因', '缺失人員']
+    const headers = ['日期', '相關單號', '部門', '異常回報人', '異常處理人', '異常分類', '異常原因', '缺失人員']
     const csv = `${headers.join(',')}\n`
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -271,7 +276,7 @@ export default function QaBatchUploadPage() {
           {fileName && <span className="text-xs text-slate-400">目前檔案：{fileName}</span>}
         </div>
 
-        <p className="text-xs text-slate-500">CSV 建議欄位：日期、相關單號、異常回報人、異常處理人、異常分類、異常原因、缺失人員。</p>
+        <p className="text-xs text-slate-500">CSV 建議欄位：日期、相關單號、部門、異常回報人、異常處理人、異常分類、異常原因、缺失人員。</p>
       </div>
 
       <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-auto">
@@ -281,6 +286,7 @@ export default function QaBatchUploadPage() {
               <th className="p-3">列</th>
               <th className="p-3">日期</th>
               <th className="p-3">相關單號</th>
+              <th className="p-3">部門</th>
               <th className="p-3">異常回報人</th>
               <th className="p-3">異常處理人</th>
               <th className="p-3">異常分類</th>
@@ -291,13 +297,14 @@ export default function QaBatchUploadPage() {
           </thead>
           <tbody className="divide-y divide-slate-800">
             {rows.length === 0 ? (
-              <tr><td colSpan={9} className="p-8 text-center text-slate-500">請先上傳 CSV 以預覽資料</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-slate-500">請先上傳 CSV 以預覽資料</td></tr>
             ) : (
               rows.map((row) => (
                 <tr key={row.rowNo} className="hover:bg-slate-800/30 align-top">
                   <td className="p-3 font-mono text-xs text-slate-500">{row.rowNo}</td>
                   <td className="p-3 text-xs">{row.createdDate || '-'}</td>
                   <td className="p-3 text-cyan-300 font-mono">{row.orderNumber || '-'}</td>
+                  <td className="p-3 text-xs">{row.department || '-'}</td>
                   <td className="p-3 text-xs">{row.reporter || '-'}</td>
                   <td className="p-3 text-xs">{row.handlers.length ? row.handlers.join('、') : '-'}</td>
                   <td className="p-3 text-xs">{row.category || '-'}</td>

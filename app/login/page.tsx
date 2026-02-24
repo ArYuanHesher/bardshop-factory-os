@@ -1,14 +1,43 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '../../../lib/supabaseClient' // 引入 Supabase
+import Link from 'next/link'
+import { supabase } from '../../lib/supabaseClient' // 引入 Supabase
+
+const REMEMBER_EMAIL_KEY = 'bardshop_remember_email'
+
+const isMissingAuthUserIdColumnError = (error: { message?: string } | null | undefined) =>
+  Boolean(error?.message?.includes('auth_user_id'))
+
+const normalizeLegacyPermissions = (rawPermissions: string[] = []) => {
+  const normalized = new Set<string>()
+
+  rawPermissions.forEach((permission) => {
+    if (permission === 'production') normalized.add('dashboard')
+    else if (permission === 'admin') {
+      normalized.add('production_admin')
+      normalized.add('system_settings')
+    } else normalized.add(permission)
+  })
+
+  return Array.from(normalized)
+}
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [formData, setFormData] = useState({ email: '', password: '' })
+  const [rememberMe, setRememberMe] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const router = useRouter()
+
+  useEffect(() => {
+    const rememberedEmail = localStorage.getItem(REMEMBER_EMAIL_KEY)
+    if (rememberedEmail) {
+      setFormData(prev => ({ ...prev, email: rememberedEmail }))
+      setRememberMe(true)
+    }
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -19,7 +48,7 @@ export default function LoginPage() {
       // 1. 去資料庫找這個人 (直接查 members 表)
       const { data: member, error } = await supabase
         .from('members')
-        .select('email, password, real_name, is_admin')
+        .select('id, auth_user_id, email, password, real_name, is_admin, permissions')
         .eq('email', formData.email)
         .single()
 
@@ -38,9 +67,44 @@ export default function LoginPage() {
       localStorage.setItem('bardshop_user_email', member.email)
       localStorage.setItem('bardshop_user_name', member.real_name)
 
+      if (rememberMe) {
+        localStorage.setItem(REMEMBER_EMAIL_KEY, member.email)
+      } else {
+        localStorage.removeItem(REMEMBER_EMAIL_KEY)
+      }
+
       // 4. 設定 Cookie (給 Middleware 過路檢察用)
       document.cookie = `bardshop-token=authorized; path=/; max-age=86400; SameSite=Lax;`
-      document.cookie = `bardshop-role=${member.is_admin ? 'admin' : 'ops'}; path=/; max-age=86400; SameSite=Lax;`
+      const finalPermissions = Boolean(member.is_admin)
+        ? ['dashboard', 'notice', 'estimation', 'tasks', 'qa', 'production_admin', 'system_settings']
+        : normalizeLegacyPermissions(Array.isArray(member.permissions) ? member.permissions : [])
+
+      const isAdminRole =
+        Boolean(member.is_admin) ||
+        finalPermissions.includes('production_admin')
+
+      const role = isAdminRole ? 'admin' : 'ops'
+      document.cookie = `bardshop-role=${role}; path=/; max-age=86400; SameSite=Lax;`
+      document.cookie = `bardshop-permissions=${encodeURIComponent(finalPermissions.join(','))}; path=/; max-age=86400; SameSite=Lax;`
+
+      // 4-1. 盡力將 members 綁定 auth_user_id（有 Supabase Auth session 時才會生效）
+      try {
+        const { data: authData } = await supabase.auth.getUser()
+        const authUserId = authData.user?.id
+
+        if (authUserId && member.id && member.auth_user_id !== authUserId) {
+          const { error: syncError } = await supabase
+            .from('members')
+            .update({ auth_user_id: authUserId })
+            .eq('id', member.id)
+
+          if (syncError && !isMissingAuthUserIdColumnError(syncError)) {
+            console.warn('回寫 auth_user_id 失敗:', syncError.message)
+          }
+        }
+      } catch {
+        // ignore sync errors to avoid affecting login flow
+      }
 
       // 5. 轉址進首頁
       // 使用 router.push 比 window.location.href 更平滑
@@ -105,6 +169,16 @@ export default function LoginPage() {
               />
             </div>
 
+            <label className="flex items-center gap-2 text-sm text-slate-400 select-none cursor-pointer">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={e => setRememberMe(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-cyan-500 focus:ring-cyan-500"
+              />
+              記住我
+            </label>
+
             {errorMsg && (
               <div className="p-3 bg-red-900/20 border border-red-500/50 rounded text-red-400 text-xs text-center font-bold animate-pulse">
                 {errorMsg}
@@ -128,6 +202,15 @@ export default function LoginPage() {
                 <span className="relative z-10">Login System</span>
               )}
             </button>
+
+            <div className="text-center">
+              <Link
+                href="/apply-account"
+                className="text-xs font-mono text-cyan-400 hover:text-cyan-300 underline underline-offset-4"
+              >
+                沒有帳號？申請帳號
+              </Link>
+            </div>
           </form>
         </div>
       </div>

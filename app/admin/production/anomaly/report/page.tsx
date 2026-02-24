@@ -6,6 +6,7 @@ import { supabase } from '../../../../../lib/supabaseClient'
 
 const DEFAULT_PERSONNEL_OPTIONS = ['王小明', '李小華', '陳建宏', '課長A', '主管B', '品保C', '作業員A', '作業員B', '技術員C']
 const DEFAULT_CATEGORY_OPTIONS = ['品質異常', '製程異常', '資料異常']
+const DEFAULT_DEPARTMENT_OPTIONS = ['品保部', '生產部', '工程部']
 
 const getTodayDateInput = () => new Date().toISOString().slice(0, 10)
 
@@ -17,9 +18,13 @@ export default function QaReportFormPage() {
   const [reporter, setReporter] = useState('')
   const [personnelOptions, setPersonnelOptions] = useState<string[]>(DEFAULT_PERSONNEL_OPTIONS)
   const [categoryOptions, setCategoryOptions] = useState<string[]>(DEFAULT_CATEGORY_OPTIONS)
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>(DEFAULT_DEPARTMENT_OPTIONS)
+  const [department, setDepartment] = useState('')
   const [category, setCategory] = useState('')
   const [handlers, setHandlers] = useState<string[]>([])
   const [responsible, setResponsible] = useState<string[]>([])
+  const [handlerInput, setHandlerInput] = useState('')
+  const [responsibleInput, setResponsibleInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -45,8 +50,14 @@ export default function QaReportFormPage() {
         .map((item) => item.option_value)
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
 
+      const departments = rows
+        .filter((item) => item.option_type === 'department')
+        .map((item) => item.option_value)
+        .filter((value) => typeof value === 'string' && value.trim().length > 0)
+
       setPersonnelOptions(personnel.length ? personnel : DEFAULT_PERSONNEL_OPTIONS)
       setCategoryOptions(categories.length ? categories : DEFAULT_CATEGORY_OPTIONS)
+      setDepartmentOptions(departments.length ? departments : DEFAULT_DEPARTMENT_OPTIONS)
     }
 
     void fetchOptions()
@@ -78,6 +89,7 @@ export default function QaReportFormPage() {
         station: null,
         section_id: null,
         created_at: createdDate ? `${createdDate}T00:00:00.000Z` : new Date().toISOString(),
+        qa_department: department.trim() || null,
         qa_reporter: reporter.trim() || null,
         qa_handlers: handlers,
         qa_category: category || null,
@@ -91,10 +103,13 @@ export default function QaReportFormPage() {
       setCreatedDate(getTodayDateInput())
       setOrderNumber('')
       setReason('')
+      setDepartment('')
       setReporter('')
       setHandlers([])
       setCategory('')
       setResponsible([])
+      setHandlerInput('')
+      setResponsibleInput('')
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '未知錯誤'
       alert(`送出失敗：${message}`)
@@ -144,17 +159,25 @@ export default function QaReportFormPage() {
           </div>
 
           <div>
+            <label className="text-xs text-slate-400">部門</label>
+            <input
+              list="qa-department-options"
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              placeholder="輸入或選擇部門"
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            />
+          </div>
+
+          <div>
             <label className="text-xs text-slate-400">異常回報人</label>
-            <select
+            <input
+              list="qa-personnel-options"
               value={reporter}
               onChange={(e) => setReporter(e.target.value)}
+              placeholder="輸入或選擇回報人"
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            >
-              <option value="">請選擇</option>
-              {personnelOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+            />
           </div>
 
           <div>
@@ -168,36 +191,47 @@ export default function QaReportFormPage() {
                   </span>
                 ))}
               </div>
-              <select
-                defaultValue=""
-                onChange={(e) => {
-                  const value = e.target.value
-                  if (!value) return
-                  setHandlers((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                  e.currentTarget.value = ''
-                }}
-                className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-              >
-                <option value="">+ 新增處理人</option>
-                {personnelOptions.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <input
+                  list="qa-personnel-options"
+                  value={handlerInput}
+                  onChange={(e) => setHandlerInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return
+                    e.preventDefault()
+                    const value = handlerInput.trim()
+                    if (!value) return
+                    setHandlers((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                    setHandlerInput('')
+                  }}
+                  placeholder="輸入或選擇處理人"
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const value = handlerInput.trim()
+                    if (!value) return
+                    setHandlers((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                    setHandlerInput('')
+                  }}
+                  className="px-3 py-2 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-900/30 text-sm"
+                >
+                  新增
+                </button>
+              </div>
             </div>
           </div>
 
           <div>
             <label className="text-xs text-slate-400">異常分類</label>
-            <select
+            <input
+              list="qa-category-options"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
+              placeholder="輸入或選擇異常分類"
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            >
-              <option value="">請選擇</option>
-              {categoryOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+            />
           </div>
         </div>
 
@@ -223,23 +257,53 @@ export default function QaReportFormPage() {
                 </span>
               ))}
             </div>
-            <select
-              defaultValue=""
-              onChange={(e) => {
-                const value = e.target.value
-                if (!value) return
-                setResponsible((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                e.currentTarget.value = ''
-              }}
-              className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            >
-              <option value="">+ 新增缺失人員</option>
-              {personnelOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+            <div className="flex gap-2">
+              <input
+                list="qa-personnel-options"
+                value={responsibleInput}
+                onChange={(e) => setResponsibleInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  const value = responsibleInput.trim()
+                  if (!value) return
+                  setResponsible((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                  setResponsibleInput('')
+                }}
+                placeholder="輸入或選擇缺失人員"
+                className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const value = responsibleInput.trim()
+                  if (!value) return
+                  setResponsible((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                  setResponsibleInput('')
+                }}
+                className="px-3 py-2 rounded border border-amber-700 text-amber-300 hover:bg-amber-900/30 text-sm"
+              >
+                新增
+              </button>
+            </div>
           </div>
         </div>
+
+        <datalist id="qa-personnel-options">
+          {personnelOptions.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
+        <datalist id="qa-category-options">
+          {categoryOptions.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
+        <datalist id="qa-department-options">
+          {departmentOptions.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
 
         <div className="flex justify-end">
           <button

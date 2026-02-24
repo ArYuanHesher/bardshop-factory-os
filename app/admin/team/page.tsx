@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
+import { logSystemAction } from '../../../lib/logger'
 
 // 定義成員資料介面
 interface Member {
   id?: number
+  auth_user_id?: string | null
   real_name: string
   nickname: string
   department: string
@@ -14,6 +16,7 @@ interface Member {
   permissions: string[]
   status: string
   is_admin: boolean
+  is_pending_approval?: boolean
   last_login?: string
 }
 
@@ -23,11 +26,30 @@ interface Department {
   name: string
 }
 
+const normalizeLegacyPermissions = (rawPermissions: string[] = []) => {
+  const normalized = new Set<string>()
+
+  rawPermissions.forEach((permission) => {
+    if (permission === 'production') normalized.add('dashboard')
+    else if (permission === 'admin') {
+      normalized.add('production_admin')
+      normalized.add('system_settings')
+    } else normalized.add(permission)
+  })
+
+  return Array.from(normalized)
+}
+
+const isMissingPendingColumnError = (error: { message?: string } | null | undefined) =>
+  Boolean(error?.message?.includes("is_pending_approval"))
+
 export default function TeamPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [loading, setLoading] = useState(false)
+  const [syncingAuthUsers, setSyncingAuthUsers] = useState(false)
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
+  const [pendingOnly, setPendingOnly] = useState(false)
   
   // 抽屜與模態框控制
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
@@ -37,12 +59,27 @@ export default function TeamPage() {
   const [newDeptName, setNewDeptName] = useState('')
 
   // 權限模組定義
-  const permissionOptions = [
-    { key: 'production', label: '產線看板 (Production Dashboard)' },
-    { key: 'estimation', label: '時間試算 (Estimation Tool)' },
-    { key: 'tasks', label: '任務看板 (Task Board)' },
-    { key: 'admin', label: '管理核心 (Admin Core)' }
+  const permissionSections = [
+    {
+      title: '基本權限',
+      options: [
+        { key: 'dashboard', label: '產線看板 (Dashboard)' },
+        { key: 'notice', label: '產線告示 (Production Notice)' },
+        { key: 'estimation', label: '時間試算 (Estimator)' },
+        { key: 'tasks', label: '任務看板 (Task Flow)' },
+      ]
+    },
+    {
+      title: '管理權限',
+      options: [
+        { key: 'qa', label: '品保專區 (QA)' },
+        { key: 'production_admin', label: '生產管理 (Production Admin)' },
+        { key: 'system_settings', label: '系統設定 (System Settings)' },
+      ]
+    }
   ]
+
+  const allPermissionKeys = permissionSections.flatMap(section => section.options.map(option => option.key))
 
   function getEmptyForm(): Member {
     return {
@@ -51,9 +88,10 @@ export default function TeamPage() {
       department: '',
       email: '',
       password: '',
-      permissions: ['production', 'tasks'], // 預設給予基本權限
+      permissions: ['dashboard', 'notice', 'tasks', 'estimation'], // 預設給予基本權限
       status: 'Active',
-      is_admin: false
+      is_admin: false,
+      is_pending_approval: false,
     }
   }
 
@@ -65,12 +103,26 @@ export default function TeamPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     const [membersRes, deptsRes] = await Promise.all([
-      supabase.from('members').select('*').order('is_admin', { ascending: false }).order('id', { ascending: true }),
+      supabase
+        .from('members')
+        .select('id, auth_user_id, real_name, nickname, department, email, password, permissions, status, is_admin, is_pending_approval, last_login')
+        .order('is_admin', { ascending: false })
+        .order('id', { ascending: true }),
       supabase.from('departments').select('*').order('id', { ascending: true })
     ])
 
     if (membersRes.error) console.error(membersRes.error)
-    else setMembers((membersRes.data as Member[]) || [])
+    else {
+      const normalizedMembers = ((membersRes.data as Member[]) || []).map(member => ({
+        ...member,
+        permissions: normalizeLegacyPermissions(Array.isArray(member.permissions) ? member.permissions : []),
+        is_pending_approval:
+          Boolean(member.is_pending_approval) ||
+          member.status === 'PendingApproval' ||
+          (!Boolean(member.is_admin) && normalizeLegacyPermissions(Array.isArray(member.permissions) ? member.permissions : []).length === 0),
+      }))
+      setMembers(normalizedMembers)
+    }
 
     if (deptsRes.error) console.error(deptsRes.error)
     else setDepartments((deptsRes.data as Department[]) || [])
@@ -106,25 +158,65 @@ export default function TeamPage() {
     // 若勾選管理員，強制給予所有權限
     let finalPermissions = formData.permissions
     if (formData.is_admin) {
-        finalPermissions = permissionOptions.map(p => p.key)
+      finalPermissions = allPermissionKeys
     }
 
-    const payload = { ...formData, permissions: finalPermissions }
-    if (formData.id && !formData.password) delete payload.password
+    const isPendingApproval = !formData.is_admin && finalPermissions.length === 0
+
+    const payloadBase = {
+      ...formData,
+      permissions: finalPermissions,
+      status: isPendingApproval ? 'PendingApproval' : (formData.status === 'PendingApproval' ? 'Active' : formData.status),
+    }
+    const payloadWithPending = {
+      ...payloadBase,
+      is_pending_approval: isPendingApproval,
+    }
+
+    if (formData.id && !formData.password) {
+      delete payloadBase.password
+      delete payloadWithPending.password
+    }
 
     let error
     if (formData.id) {
-      const { error: updateError } = await supabase.from('members').update(payload).eq('id', formData.id)
-      error = updateError
+      const { error: updateError } = await supabase.from('members').update(payloadWithPending).eq('id', formData.id)
+      if (isMissingPendingColumnError(updateError)) {
+        const { error: retryError } = await supabase.from('members').update(payloadBase).eq('id', formData.id)
+        error = retryError
+      } else {
+        error = updateError
+      }
     } else {
       if (!formData.password) return alert('新增成員請設定密碼 (供備註與登入使用)')
-      const { error: insertError } = await supabase.from('members').insert([payload])
-      error = insertError
+      const response = await fetch('/api/admin/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...payloadWithPending,
+          password: formData.password,
+        }),
+      })
+
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string }
+        error = { message: result.error || `HTTP ${response.status}` }
+      }
     }
 
     if (error) {
       alert(`儲存失敗: ${error.message}`)
     } else {
+      await logSystemAction({
+        actionType: formData.id ? '修改成員' : '新增成員',
+        target: `member:${formData.email}`,
+        details: `${formData.real_name} / ${formData.department}`,
+        metadata: {
+          memberId: formData.id ?? null,
+          permissions: finalPermissions,
+          isAdmin: formData.is_admin,
+        }
+      })
       alert('成員儲存成功！資料已同步至任務系統。')
       setIsDrawerOpen(false)
       void fetchData()
@@ -137,7 +229,15 @@ export default function TeamPage() {
     
     const { error } = await supabase.from('members').delete().eq('id', member.id)
     if (error) alert(error.message)
-    else void fetchData()
+    else {
+      await logSystemAction({
+        actionType: '刪除成員',
+        target: `member:${member.email}`,
+        details: `${member.real_name} / ${member.department}`,
+        metadata: { memberId: member.id ?? null }
+      })
+      void fetchData()
+    }
   }
 
   // --- 部門管理邏輯 ---
@@ -147,6 +247,11 @@ export default function TeamPage() {
     if (error) {
       alert('新增失敗 (名稱可能重複)')
     } else {
+      await logSystemAction({
+        actionType: '新增部門',
+        target: `department:${newDeptName.trim()}`,
+        details: '組織成員管理 > 部門維護',
+      })
       setNewDeptName('')
       void fetchData()
     }
@@ -162,12 +267,20 @@ export default function TeamPage() {
     if (!confirm(`確定要刪除部門「${deptName}」嗎？`)) return
     const { error } = await supabase.from('departments').delete().eq('id', id)
     if (error) alert(error.message)
-    else void fetchData()
+    else {
+      await logSystemAction({
+        actionType: '刪除部門',
+        target: `department:${deptName}`,
+        details: '組織成員管理 > 部門維護',
+        metadata: { departmentId: id }
+      })
+      void fetchData()
+    }
   }
 
   // --- UI 控制 ---
   const openEdit = (member: Member) => {
-    setFormData({ ...member, password: '' })
+    setFormData({ ...member, permissions: normalizeLegacyPermissions(member.permissions || []), password: '' })
     setIsDrawerOpen(true)
   }
 
@@ -188,6 +301,68 @@ export default function TeamPage() {
     })
   }
 
+  const pendingCount = members.filter(member => member.is_pending_approval).length
+  const unsyncedCount = members.filter(member => !member.auth_user_id).length
+  const visibleMembers = pendingOnly
+    ? members.filter(member => member.is_pending_approval)
+    : members
+
+  const handleSyncAuthUsers = async () => {
+    if (syncingAuthUsers) return
+    if (!confirm(`將嘗試補齊 ${unsyncedCount} 筆尚未綁定 auth_user_id 的成員，是否繼續？`)) return
+
+    setSyncingAuthUsers(true)
+    try {
+      const response = await fetch('/api/admin/members/sync', { method: 'POST' })
+      const result = await response.json().catch(() => ({})) as {
+        error?: string
+        totalCandidates?: number
+        updated?: number
+        createdAuthUsers?: number
+        skipped?: number
+        failed?: Array<{ memberId: number; email: string; reason: string }>
+      }
+
+      if (!response.ok) {
+        alert(result.error || `同步失敗 (HTTP ${response.status})`)
+        return
+      }
+
+      const failedCount = result.failed?.length || 0
+      const failPreview = (result.failed || [])
+        .slice(0, 5)
+        .map(item => `#${item.memberId} ${item.email}：${item.reason}`)
+        .join('\n')
+
+      alert(
+        `同步完成\n` +
+        `候選筆數：${result.totalCandidates || 0}\n` +
+        `成功綁定：${result.updated || 0}\n` +
+        `新建 Auth User：${result.createdAuthUsers || 0}\n` +
+        `略過：${result.skipped || 0}\n` +
+        `失敗：${failedCount}` +
+        (failPreview ? `\n\n失敗前 5 筆：\n${failPreview}` : '')
+      )
+
+      await logSystemAction({
+        actionType: '批次同步帳號',
+        target: 'members:auth_user_id_sync',
+        details: `成功 ${result.updated || 0} / 失敗 ${failedCount}`,
+        metadata: {
+          totalCandidates: result.totalCandidates || 0,
+          updated: result.updated || 0,
+          createdAuthUsers: result.createdAuthUsers || 0,
+          skipped: result.skipped || 0,
+          failed: failedCount,
+        }
+      })
+
+      void fetchData()
+    } finally {
+      setSyncingAuthUsers(false)
+    }
+  }
+
   return (
     <div className="p-6 md:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen relative font-sans">
       
@@ -201,6 +376,21 @@ export default function TeamPage() {
         </div>
         
         <div className="flex gap-3">
+          <button
+            onClick={handleSyncAuthUsers}
+            disabled={syncingAuthUsers || unsyncedCount === 0}
+            className={`px-4 py-2 rounded border transition-all font-bold text-sm ${syncingAuthUsers || unsyncedCount === 0 ? 'bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed' : 'bg-cyan-900/30 hover:bg-cyan-800/40 border-cyan-600 text-cyan-300'}`}
+          >
+            {syncingAuthUsers ? '同步中...' : `同步帳號 (${unsyncedCount})`}
+          </button>
+
+          <button
+            onClick={() => setPendingOnly(prev => !prev)}
+            className={`px-4 py-2 rounded border transition-all font-bold text-sm ${pendingOnly ? 'bg-yellow-500/20 border-yellow-400 text-yellow-300' : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-300'}`}
+          >
+            {pendingOnly ? `僅看待審核 (${pendingCount})` : `全部成員 (${members.length})`}
+          </button>
+
           <button 
             onClick={() => setIsDeptModalOpen(true)}
             className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded border border-slate-600 flex items-center gap-2 transition-all font-bold text-sm"
@@ -224,11 +414,11 @@ export default function TeamPage() {
         <div className="text-center py-20 text-slate-500 animate-pulse">載入成員資料中...</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {members.map((member) => (
-            <div key={member.id} className={`bg-slate-900/50 rounded-xl border p-6 relative overflow-hidden group hover:border-orange-500/50 transition-all ${member.is_admin ? 'border-orange-500/30 bg-orange-950/10' : 'border-slate-700'}`}>
+          {visibleMembers.map((member) => (
+            <div key={member.id} className={`bg-slate-900/50 rounded-xl border p-6 relative overflow-hidden group hover:border-orange-500/50 transition-all ${member.is_pending_approval ? 'border-yellow-400/90 pending-member-card' : member.is_admin ? 'border-orange-500/30 bg-orange-950/10' : 'border-slate-700'}`}>
               
               {/* 頂部裝飾條 */}
-              <div className={`absolute top-0 left-0 w-full h-1 ${member.status === 'Active' ? 'bg-orange-500' : 'bg-slate-600'}`}></div>
+              <div className={`absolute top-0 left-0 w-full h-1 ${member.is_pending_approval ? 'bg-yellow-400' : member.status === 'Active' ? 'bg-orange-500' : 'bg-slate-600'}`}></div>
 
               {member.is_admin && (
                 <div className="absolute top-2 right-2 text-orange-400 opacity-80" title="系統管理員">
@@ -275,14 +465,24 @@ export default function TeamPage() {
                    </span>
                 ) : (
                   <>
+                    {member.is_pending_approval && <span className="px-2 py-1 rounded bg-yellow-900/30 text-yellow-300 text-[10px] border border-yellow-600 font-bold">待管理員指派權限</span>}
                     {member.permissions?.includes('tasks') && <span className="px-2 py-1 rounded bg-blue-900/30 text-blue-400 text-[10px] border border-blue-800">任務看板</span>}
-                    {member.permissions?.includes('production') && <span className="px-2 py-1 rounded bg-cyan-900/30 text-cyan-400 text-[10px] border border-cyan-800">產線看板</span>}
-                    {member.permissions?.includes('admin') && <span className="px-2 py-1 rounded bg-purple-900/30 text-purple-400 text-[10px] border border-purple-800">管理核心</span>}
+                    {member.permissions?.includes('dashboard') && <span className="px-2 py-1 rounded bg-cyan-900/30 text-cyan-400 text-[10px] border border-cyan-800">產線看板</span>}
+                    {member.permissions?.includes('notice') && <span className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] border border-slate-600">產線告示</span>}
+                    {member.permissions?.includes('estimation') && <span className="px-2 py-1 rounded bg-emerald-900/30 text-emerald-400 text-[10px] border border-emerald-800">時間試算</span>}
+                    {member.permissions?.includes('qa') && <span className="px-2 py-1 rounded bg-teal-900/30 text-teal-400 text-[10px] border border-teal-800">品保專區</span>}
+                    {member.permissions?.includes('production_admin') && <span className="px-2 py-1 rounded bg-purple-900/30 text-purple-400 text-[10px] border border-purple-800">生產管理</span>}
+                    {member.permissions?.includes('system_settings') && <span className="px-2 py-1 rounded bg-orange-900/30 text-orange-400 text-[10px] border border-orange-800">系統設定</span>}
                   </>
                 )}
               </div>
             </div>
           ))}
+          {visibleMembers.length === 0 && (
+            <div className="col-span-full text-center text-slate-500 py-16 border border-dashed border-slate-700 rounded-xl">
+              {pendingOnly ? '目前沒有待審核帳號' : '目前沒有成員資料'}
+            </div>
+          )}
         </div>
       )}
 
@@ -341,6 +541,7 @@ export default function TeamPage() {
                 <select className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-white focus:border-orange-500 focus:outline-none" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                   <option value="Active">啟用 (Active)</option>
                   <option value="Suspended">停權 (Suspended)</option>
+                  <option value="PendingApproval">待審核 (PendingApproval)</option>
                 </select>
               </div>
             </div>
@@ -360,13 +561,18 @@ export default function TeamPage() {
                 </div>
               </label>
 
-              <div className={`grid gap-3 transition-opacity ${formData.is_admin ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-                <p className="text-xs text-slate-500 mb-2">一般權限 (若勾選管理員則自動包含)</p>
-                {permissionOptions.map(option => (
-                  <label key={option.key} className={`flex items-center p-3 rounded border cursor-pointer ${formData.permissions.includes(option.key) ? 'bg-orange-900/20 border-orange-500/50' : 'bg-slate-800 border-slate-700'}`}>
-                    <input type="checkbox" className="w-5 h-5 rounded border-slate-600 text-orange-600 bg-slate-900" checked={formData.permissions.includes(option.key) || formData.is_admin} onChange={() => togglePermission(option.key)} disabled={formData.is_admin} />
-                    <span className={`ml-3 text-sm font-bold ${formData.permissions.includes(option.key) ? 'text-white' : 'text-slate-400'}`}>{option.label}</span>
-                  </label>
+              <div className={`grid gap-4 transition-opacity ${formData.is_admin ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+                <p className="text-xs text-slate-500 mb-1">一般權限 (若勾選核心管理員則自動包含全部)</p>
+                {permissionSections.map(section => (
+                  <div key={section.title} className="space-y-2">
+                    <p className="text-xs text-slate-400 font-bold">{section.title}</p>
+                    {section.options.map(option => (
+                      <label key={option.key} className={`flex items-center p-3 rounded border cursor-pointer ${formData.permissions.includes(option.key) ? 'bg-orange-900/20 border-orange-500/50' : 'bg-slate-800 border-slate-700'}`}>
+                        <input type="checkbox" className="w-5 h-5 rounded border-slate-600 text-orange-600 bg-slate-900" checked={formData.permissions.includes(option.key) || formData.is_admin} onChange={() => togglePermission(option.key)} disabled={formData.is_admin} />
+                        <span className={`ml-3 text-sm font-bold ${formData.permissions.includes(option.key) ? 'text-white' : 'text-slate-400'}`}>{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
                 ))}
               </div>
             </div>

@@ -17,6 +17,7 @@ interface AnomalyReport {
   station: string | null
   created_at: string
   processed_at: string | null
+  qa_department: string | null
   qa_reporter: string | null
   qa_handlers: string[] | null
   qa_category: string | null
@@ -26,6 +27,7 @@ interface AnomalyReport {
 interface OptionState {
   personnel: string[]
   categories: string[]
+  departments: string[]
 }
 
 interface CreateFormState {
@@ -33,13 +35,14 @@ interface CreateFormState {
   orderNumber: string
   status: 'pending' | 'confirmed'
   reason: string
+  department: string
   reporter: string
   category: string
   handlers: string[]
   responsible: string[]
 }
 
-type OptionType = 'personnel' | 'category'
+type OptionType = 'personnel' | 'category' | 'department'
 
 interface OptionItem {
   id: number
@@ -50,6 +53,7 @@ interface OptionItem {
 const DEFAULT_OPTIONS: OptionState = {
   personnel: ['王小明', '李小華', '陳建宏', '課長A', '主管B', '品保C', '作業員A', '作業員B', '技術員C'],
   categories: ['品質異常', '製程異常', '資料異常'],
+  departments: ['品保部', '生產部', '工程部'],
 }
 
 const getTodayDateInput = () => new Date().toISOString().slice(0, 10)
@@ -59,6 +63,7 @@ const DEFAULT_CREATE_FORM: CreateFormState = {
   orderNumber: '',
   status: 'pending',
   reason: '',
+  department: '',
   reporter: '',
   category: '',
   handlers: [],
@@ -73,6 +78,7 @@ export default function QaRecordsPage() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [options, setOptions] = useState<OptionState>(DEFAULT_OPTIONS)
   const [selectedReason, setSelectedReason] = useState('')
+  const [selectedDepartment, setSelectedDepartment] = useState('')
   const [selectedReporter, setSelectedReporter] = useState('')
   const [selectedHandler, setSelectedHandler] = useState('')
   const [selectedResponsible, setSelectedResponsible] = useState('')
@@ -95,15 +101,18 @@ export default function QaRecordsPage() {
     const rows = (data as OptionItem[]) || []
     const personnelRows = rows.filter((row) => row.option_type === 'personnel').map((row) => row.option_value)
     const categoriesRows = rows.filter((row) => row.option_type === 'category').map((row) => row.option_value)
+    const departmentsRows = rows.filter((row) => row.option_type === 'department').map((row) => row.option_value)
 
     const next: OptionState = {
       personnel: personnelRows,
       categories: categoriesRows,
+      departments: departmentsRows,
     }
 
     setOptions({
       personnel: next.personnel.length ? next.personnel : DEFAULT_OPTIONS.personnel,
       categories: next.categories.length ? next.categories : DEFAULT_OPTIONS.categories,
+      departments: next.departments.length ? next.departments : DEFAULT_OPTIONS.departments,
     })
   }, [])
 
@@ -145,6 +154,7 @@ export default function QaRecordsPage() {
       orderNumber: report.order_number || '',
       status: report.status === 'confirmed' ? 'confirmed' : 'pending',
       reason: report.reason || '',
+      department: report.qa_department || '',
       reporter: report.qa_reporter || '',
       category: report.qa_category || '',
       handlers: normalizeTextArray(report.qa_handlers),
@@ -179,6 +189,7 @@ export default function QaRecordsPage() {
           order_number: editForm.orderNumber.trim(),
           status: editForm.status,
           reason: editForm.reason.trim(),
+          qa_department: editForm.department || null,
           qa_reporter: editForm.reporter || null,
           qa_handlers: editForm.handlers,
           qa_category: editForm.category || null,
@@ -211,6 +222,11 @@ export default function QaRecordsPage() {
     [reports],
   )
 
+  const departmentFilterOptions = useMemo(
+    () => [...new Set(reports.map((report) => report.qa_department?.trim()).filter((value): value is string => !!value))],
+    [reports],
+  )
+
   const handlerFilterOptions = useMemo(() => {
     const handlerSet = new Set<string>()
     reports.forEach((report) => {
@@ -238,17 +254,19 @@ export default function QaRecordsPage() {
     return reportRows.filter((report) => {
       const reasonMatch = !selectedReason || (report.reason || '').trim() === selectedReason
       const categoryMatch = !selectedCategory || (report.qa_category || '').trim() === selectedCategory
+      const departmentMatch = !selectedDepartment || (report.qa_department || '').trim() === selectedDepartment
       const reporterMatch = !selectedReporter || (report.qa_reporter || '').trim() === selectedReporter
       const handlerMatch = !selectedHandler || normalizeTextArray(report.qa_handlers).map((name) => name.trim()).includes(selectedHandler)
       const responsibleMatch = !selectedResponsible || normalizeTextArray(report.qa_responsible).map((name) => name.trim()).includes(selectedResponsible)
       const orderMatch = !keyword || (report.order_number || '').toLowerCase().includes(keyword)
 
-      return reasonMatch && categoryMatch && reporterMatch && handlerMatch && responsibleMatch && orderMatch
+      return reasonMatch && categoryMatch && departmentMatch && reporterMatch && handlerMatch && responsibleMatch && orderMatch
     })
   }, [
     orderKeyword,
     reportRows,
     selectedCategory,
+    selectedDepartment,
     selectedHandler,
     selectedReason,
     selectedReporter,
@@ -308,6 +326,20 @@ export default function QaRecordsPage() {
               <option value="">全部原因</option>
               {reasonFilterOptions.map((reason) => (
                 <option key={reason} value={reason}>{reason}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">篩選部門</label>
+            <select
+              value={selectedDepartment}
+              onChange={(e) => setSelectedDepartment(e.target.value)}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            >
+              <option value="">全部部門</option>
+              {departmentFilterOptions.map((department) => (
+                <option key={department} value={department}>{department}</option>
               ))}
             </select>
           </div>
@@ -402,6 +434,7 @@ export default function QaRecordsPage() {
           <button
             onClick={() => {
               setSelectedReason('')
+              setSelectedDepartment('')
               setSelectedReporter('')
               setSelectedHandler('')
               setSelectedResponsible('')
@@ -423,6 +456,7 @@ export default function QaRecordsPage() {
               <th className="p-3">日期</th>
               <th className="p-3">相關單號</th>
               <th className="p-3">狀態</th>
+              <th className="p-3">部門</th>
               <th className="p-3">異常回報人</th>
               <th className="p-3">異常處理人</th>
               <th className="p-3">異常分類</th>
@@ -433,11 +467,12 @@ export default function QaRecordsPage() {
           </thead>
           <tbody className="divide-y divide-slate-800">
             {loading ? (
-              <tr><td colSpan={9} className="p-8 text-center text-slate-500">載入中...</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-slate-500">載入中...</td></tr>
             ) : filteredReportRows.length === 0 ? (
-              <tr><td colSpan={9} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
             ) : (
               filteredReportRows.map((report) => {
+                const department = report.qa_department || ''
                 const reporter = report.qa_reporter || ''
                 const handlers = normalizeTextArray(report.qa_handlers)
                 const category = report.qa_category || ''
@@ -453,6 +488,10 @@ export default function QaRecordsPage() {
                       <span className={`px-2 py-1 rounded border text-xs whitespace-nowrap ${report.status === 'pending' ? 'bg-amber-900/30 border-amber-700 text-amber-300' : 'bg-emerald-900/30 border-emerald-700 text-emerald-300'}`}>
                         {statusLabel || '-'}
                       </span>
+                    </td>
+
+                    <td className="p-3 min-w-[140px]">
+                      <span className="text-slate-100 text-xs">{department || '-'}</span>
                     </td>
 
                     <td className="p-3 min-w-[170px]">
@@ -533,6 +572,20 @@ export default function QaRecordsPage() {
                     已確認
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">部門</label>
+                <select
+                  value={editForm.department}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, department: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                >
+                  <option value="">請選擇</option>
+                  {options.departments.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
               </div>
 
               <div>

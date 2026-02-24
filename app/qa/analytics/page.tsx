@@ -8,6 +8,7 @@ interface AnomalyReportRow {
   created_at: string
   status: string | null
   reason: string | null
+  qa_department: string | null
   qa_reporter: string | null
   qa_handlers: string[] | null
   qa_responsible: string[] | null
@@ -78,6 +79,20 @@ export default function QaAnalyticsPage() {
       .sort((a, b) => b.count - a.count)
   }, [rows])
 
+  const departmentRatios = useMemo<RatioItem[]>(() => {
+    const map = new Map<string, number>()
+
+    for (const row of rows) {
+      const key = (row.qa_department || '未指定').trim() || '未指定'
+      map.set(key, (map.get(key) || 0) + 1)
+    }
+
+    const total = rows.length || 1
+    return [...map.entries()]
+      .map(([name, count]) => ({ name, count, percentage: (count / total) * 100 }))
+      .sort((a, b) => b.count - a.count)
+  }, [rows])
+
   const runAnalysis = async () => {
     if (!startDate || !endDate) {
       alert('請選擇日期區間')
@@ -88,7 +103,7 @@ export default function QaAnalyticsPage() {
     try {
       const { data, error } = await supabase
         .from('schedule_anomaly_reports')
-        .select('created_at, status, reason, qa_reporter, qa_handlers, qa_responsible')
+        .select('created_at, status, reason, qa_department, qa_reporter, qa_handlers, qa_responsible')
         .eq('report_type', 'qa')
         .gte('created_at', `${startDate}T00:00:00.000Z`)
         .lte('created_at', `${endDate}T23:59:59.999Z`)
@@ -149,7 +164,7 @@ export default function QaAnalyticsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 space-y-3">
           <h2 className="text-lg text-white font-bold">異常原因佔比</h2>
           {reasonRatios.length === 0 ? (
@@ -182,6 +197,25 @@ export default function QaAnalyticsPage() {
                 </div>
                 <div className="h-2 bg-slate-800 rounded">
                   <div className="h-2 bg-emerald-500 rounded" style={{ width: `${Math.max(3, item.percentage)}%` }} />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 space-y-3">
+          <h2 className="text-lg text-white font-bold">異常部門佔比</h2>
+          {departmentRatios.length === 0 ? (
+            <p className="text-sm text-slate-500">尚無資料</p>
+          ) : (
+            departmentRatios.map((item) => (
+              <div key={item.name} className="space-y-1">
+                <div className="flex justify-between text-xs text-slate-300">
+                  <span>{item.name}</span>
+                  <span>{item.count} 筆 / {item.percentage.toFixed(1)}%</span>
+                </div>
+                <div className="h-2 bg-slate-800 rounded">
+                  <div className="h-2 bg-indigo-500 rounded" style={{ width: `${Math.max(3, item.percentage)}%` }} />
                 </div>
               </div>
             ))

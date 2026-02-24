@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../../../lib/supabaseClient'
 
-type OptionType = 'personnel' | 'category'
+type OptionType = 'personnel' | 'category' | 'department'
 
 interface OptionItem {
   id: number
@@ -16,9 +16,10 @@ interface OptionItem {
 const TYPE_CONFIG: Record<OptionType, { title: string; color: string }> = {
   personnel: { title: '人員名單', color: 'teal' },
   category: { title: '異常分類', color: 'fuchsia' },
+  department: { title: '部門選單', color: 'cyan' },
 }
 
-const ALL_TYPES: OptionType[] = ['personnel', 'category']
+const ALL_TYPES: OptionType[] = ['personnel', 'category', 'department']
 
 const DEFAULT_OPTION_SEED: Array<{ option_type: OptionType; option_value: string }> = [
   { option_type: 'personnel', option_value: '王小明' },
@@ -33,6 +34,9 @@ const DEFAULT_OPTION_SEED: Array<{ option_type: OptionType; option_value: string
   { option_type: 'category', option_value: '品質異常' },
   { option_type: 'category', option_value: '製程異常' },
   { option_type: 'category', option_value: '資料異常' },
+  { option_type: 'department', option_value: '品保部' },
+  { option_type: 'department', option_value: '生產部' },
+  { option_type: 'department', option_value: '工程部' },
 ]
 
 export default function QaOptionManagerPage() {
@@ -41,6 +45,7 @@ export default function QaOptionManagerPage() {
   const [newValueByType, setNewValueByType] = useState<Record<OptionType, string>>({
     personnel: '',
     category: '',
+    department: '',
   })
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editingValue, setEditingValue] = useState('')
@@ -86,6 +91,7 @@ export default function QaOptionManagerPage() {
     return {
       personnel: items.filter((item) => item.option_type === 'personnel'),
       category: items.filter((item) => item.option_type === 'category'),
+      department: items.filter((item) => item.option_type === 'department'),
     }
   }, [items])
 
@@ -167,7 +173,7 @@ export default function QaOptionManagerPage() {
       {loading ? (
         <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-8 text-center text-slate-400">載入中...</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {ALL_TYPES.map((type) => {
             const config = TYPE_CONFIG[type]
             const list = grouped[type]

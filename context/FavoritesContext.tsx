@@ -18,24 +18,43 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const fetchUser = async () => {
+      const { data: authData } = await supabase.auth.getUser()
+      const authUserId = authData.user?.id || ''
+
       // 1. 🔥 從瀏覽器取出登入者的 Email
       // (這個值是在 Login 頁面登入成功時存進去的)
       const currentUserEmail = localStorage.getItem('bardshop_user_email')
 
-      if (!currentUserEmail) {
+      if (!currentUserEmail && !authUserId) {
         console.warn('尚未登入，無法讀取個人設定')
         setLoading(false)
         return
       }
 
-      console.log('正在讀取使用者設定:', currentUserEmail)
-      
-      // 2. 用 Email 去資料庫查 ID 和 最愛列表
-      const { data, error } = await supabase
-        .from('members')
-        .select('id, favorites')
-        .eq('email', currentUserEmail) // 使用動態 Email
-        .single()
+      console.log('正在讀取使用者設定:', authUserId || currentUserEmail)
+
+      let data: { id: number; favorites: string[] | null } | null = null
+      let error: { message?: string } | null = null
+
+      if (authUserId) {
+        const result = await supabase
+          .from('members')
+          .select('id, favorites')
+          .eq('auth_user_id', authUserId)
+          .maybeSingle()
+        data = result.data
+        error = result.error
+      }
+
+      if (!data && currentUserEmail) {
+        const result = await supabase
+          .from('members')
+          .select('id, favorites')
+          .eq('email', currentUserEmail)
+          .maybeSingle()
+        data = result.data
+        error = result.error
+      }
       
       if (error) {
         console.error('讀取失敗:', error.message)

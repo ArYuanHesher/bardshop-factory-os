@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useEffect, useRef } from 'react'
-import { supabase } from '../../../lib/supabaseClient'
+import { supabase } from '../../lib/supabaseClient'
 
 // --- 資料介面 ---
 interface ItemRoute {
@@ -175,9 +175,9 @@ export default function EstimationPage() {
       // 3. 讀取工時
       addLog(`Retrieving standard time definitions from [operation_times]...`)
       const opNames = routeOps.map(r => r.op_name)
-      const { data: opTimes } = await supabase
+         const { data: opTimes } = await supabase
         .from('operation_times')
-        .select('*')
+            .select('op_name, station, std_time_min')
         .in('op_name', opNames)
       await wait(700)
       
@@ -206,36 +206,88 @@ export default function EstimationPage() {
       addLog(`Computing time matrix...`)
       await wait(800) // 假裝算很久
 
-      const calculatedData: CalculationResult[] = routeOps.map(route => {
-        const timeData = opTimes?.find(t => t.op_name === route.op_name)
-        const setup = timeData?.setup_min || 0 
-        const cycle = timeData?.std_time_min || 0 
-        const station = timeData?.station || 'Unknown'
-        
-        const isPrintOrLaser = station.includes('印刷') || station.includes('雷切')
-        const usePlateCalc = (isSheetMode === true) && isPrintOrLaser
-        let total = 0
-        let formula = ''
+         const calculatedDataRaw: CalculationResult[] = routeOps.map(route => {
+            const cleanOpName = (route.op_name || '').trim()
+            const timeData = opTimes?.find((t: { op_name?: string }) => (t.op_name || '').trim() === cleanOpName)
+            const station = (timeData?.station || 'Unknown').trim()
+            const stdTime = Number(timeData?.std_time_min) || 0
+            const docType = ''
 
-        if (usePlateCalc) {
-          total = setup + (cycle * plateNum)
-          formula = `${setup} + (${cycle}×${plateNum}盤)`
-        } else {
-          total = setup + (cycle * qtyNum)
-          formula = `${setup} + (${cycle}×${qtyNum})`
-        }
+            const isQcInspection = cleanOpName.includes('QC檢驗')
+            const isOutsourcedOrChangpingOrder =
+               docType.includes('委外') ||
+               docType.includes('常平') ||
+               station.includes('委外') ||
+               station.includes('常平') ||
+               station.includes('轉運')
+            const isPacking = station.includes('包裝')
+            const isPrintOrLaser = station.includes('印刷') || station.includes('雷切')
 
-        return {
-          sequence: route.sequence,
-          op_name: route.op_name,
-          station: station,
-          setup_min: setup,
-          cycle_min: cycle,
-          total_min: Math.ceil(total),
-          formula: formula,
-          is_plate_calc: usePlateCalc
-        }
-      })
+            let multiplier = 0
+            let basisText = ''
+
+            if (isQcInspection || isOutsourcedOrChangpingOrder) {
+               multiplier = 1
+               basisText = '固定倍率 (1)'
+            } else if (isPacking) {
+               multiplier = qtyNum
+               basisText = `數量 (${qtyNum})`
+            } else if (isPrintOrLaser) {
+               if (isSheetMode === true && plateNum > 0) {
+                  multiplier = plateNum
+                  basisText = `盤數 (${plateNum})`
+               } else {
+                  multiplier = qtyNum
+                  basisText = `數量 (${qtyNum})`
+               }
+            } else {
+               if (isSheetMode === true && plateNum > 0) {
+                  multiplier = plateNum
+                  basisText = `盤數 (${plateNum})`
+               } else {
+                  multiplier = qtyNum
+                  basisText = `數量 (${qtyNum})`
+               }
+            }
+
+            let rawTime = stdTime * multiplier
+            if (rawTime < 20) rawTime = 20
+            const totalMin = Math.round(rawTime * 100) / 100
+
+            return {
+               sequence: route.sequence,
+               op_name: route.op_name,
+               station,
+               setup_min: 0,
+               cycle_min: stdTime,
+               total_min: totalMin,
+               formula: `${stdTime} × ${basisText}`,
+               is_plate_calc: basisText.includes('盤數')
+            }
+         })
+
+         const calculatedData: CalculationResult[] = []
+         for (let i = 0; i < calculatedDataRaw.length; i += 1) {
+            const current = calculatedDataRaw[i]
+            const next = calculatedDataRaw[i + 1]
+            const isCurrentPrinting = current.station.includes('印刷')
+            const isNextPrinting = next ? next.station.includes('印刷') : false
+
+            if (next && isCurrentPrinting && isNextPrinting) {
+               calculatedData.push({
+                  ...current,
+                  op_name: `${current.op_name}(雙面)`,
+                  cycle_min: Math.round((current.cycle_min + next.cycle_min) * 100) / 100,
+                  total_min: Math.round((current.total_min + next.total_min) * 100) / 100,
+                  formula: '雙面合併',
+                  is_plate_calc: current.is_plate_calc || next.is_plate_calc,
+               })
+               i += 1
+               continue
+            }
+
+            calculatedData.push(current)
+         }
 
       // 6. 收尾
       addLog(`Optimizing schedule timeline...`)

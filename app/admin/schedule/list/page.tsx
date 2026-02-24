@@ -53,6 +53,9 @@ export default function ScheduleListPage() {
   const [loading, setLoading] = useState(true)
   const [filterSection, setFilterSection] = useState<string>('all')
   const [searchTerm, setSearchTerm] = useState('')
+    const [quantityFilter, setQuantityFilter] = useState<'all' | '500' | '1000' | 'custom'>('all')
+    const [customQuantityInput, setCustomQuantityInput] = useState('')
+    const [customQuantityApplied, setCustomQuantityApplied] = useState<number | null>(null)
   
   // 編輯視窗狀態
   const [editingOrder, setEditingOrder] = useState<string | null>(null)
@@ -121,7 +124,20 @@ export default function ScheduleListPage() {
     }, [fetchScheduledData])
 
   // 搜尋過濾邏輯
-  const filteredGroups = orderGroups.filter(g => {
+    const filteredGroups = orderGroups.filter(g => {
+        const threshold =
+            quantityFilter === 'all'
+                ? null
+                : quantityFilter === '500'
+                    ? 500
+                    : quantityFilter === '1000'
+                        ? 1000
+                        : customQuantityApplied
+
+        const quantityPass = threshold === null ? true : (Number(g.quantity) || 0) >= threshold
+
+        if (!quantityPass) return false
+
     if (!searchTerm) return true
     const q = searchTerm.toLowerCase()
     return (
@@ -163,6 +179,65 @@ export default function ScheduleListPage() {
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-10 pr-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none w-full md:w-80 shadow-inner"
                 />
+            </div>
+
+            <div className="flex gap-1.5 flex-wrap justify-end items-center">
+                <button
+                    onClick={() => {
+                      setQuantityFilter('all')
+                      setCustomQuantityApplied(null)
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${quantityFilter === 'all' ? 'bg-cyan-700 text-white border-cyan-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500 hover:bg-slate-700'}`}
+                >
+                    數量：全部
+                </button>
+                <button
+                    onClick={() => {
+                      setQuantityFilter('500')
+                      setCustomQuantityApplied(null)
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${quantityFilter === '500' ? 'bg-cyan-700 text-white border-cyan-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500 hover:bg-slate-700'}`}
+                >
+                    數量 ≥ 500
+                </button>
+                <button
+                    onClick={() => {
+                      setQuantityFilter('1000')
+                      setCustomQuantityApplied(null)
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${quantityFilter === '1000' ? 'bg-cyan-700 text-white border-cyan-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500 hover:bg-slate-700'}`}
+                >
+                    數量 ≥ 1000
+                </button>
+
+                <div className="flex items-center gap-1.5">
+                    <input
+                        type="number"
+                        min={1}
+                        value={customQuantityInput}
+                        onChange={(e) => setCustomQuantityInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter') return
+                          const value = Number(customQuantityInput)
+                          if (!Number.isFinite(value) || value <= 0) return
+                          setCustomQuantityApplied(value)
+                          setQuantityFilter('custom')
+                        }}
+                        placeholder="自訂"
+                        className="w-24 px-2 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:border-cyan-500 outline-none"
+                    />
+                    <button
+                        onClick={() => {
+                          const value = Number(customQuantityInput)
+                          if (!Number.isFinite(value) || value <= 0) return
+                          setCustomQuantityApplied(value)
+                          setQuantityFilter('custom')
+                        }}
+                        className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${quantityFilter === 'custom' ? 'bg-cyan-700 text-white border-cyan-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-500 hover:bg-slate-700'}`}
+                    >
+                        套用自訂
+                    </button>
+                </div>
             </div>
 
             <div className="flex gap-1.5 flex-wrap justify-end">

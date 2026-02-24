@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
+import { logSystemAction } from '../../../../lib/logger'
 
 // --- 型別定義 ---
 interface Machine {
@@ -112,6 +113,12 @@ function MachinesManager() {
     })
     if (error) alert(error.message)
     else {
+      await logSystemAction({
+        actionType: '新增機台',
+        target: `machine:${newName}`,
+        details: `${newCategory} / ${newStation}`,
+        metadata: { dailyMinutes: newMins }
+      })
       setNewName('')
       void fetchMachines()
     }
@@ -119,7 +126,18 @@ function MachinesManager() {
 
   const handleDelete = async (id: number) => {
     if (!confirm('確定要刪除此機台嗎？')) return
-    await supabase.from('production_machines').delete().eq('id', id)
+    const target = machines.find(machine => machine.id === id)
+    const { error } = await supabase.from('production_machines').delete().eq('id', id)
+    if (error) {
+      alert(error.message)
+      return
+    }
+    await logSystemAction({
+      actionType: '刪除機台',
+      target: `machine:${target?.name || id}`,
+      details: `${target?.category || '-'} / ${target?.station_type || '-'}`,
+      metadata: { machineId: id }
+    })
     void fetchMachines()
   }
 
@@ -144,7 +162,14 @@ function MachinesManager() {
   // 🔥 儲存名稱變更
   const saveNameEdit = async () => {
       if (editingId && tempName.trim()) {
+          const target = machines.find(machine => machine.id === editingId)
           await handleUpdate(editingId, 'name', tempName.trim())
+          await logSystemAction({
+            actionType: '修改機台名稱',
+            target: `machine:${target?.name || editingId}`,
+            details: `更新為 ${tempName.trim()}`,
+            metadata: { machineId: editingId }
+          })
       }
       setEditingId(null)
       setTempName('')
@@ -347,15 +372,35 @@ function FactoryCalendar() {
     const isBackToDefault = (isWeekend && newIsHoliday) || (!isWeekend && !newIsHoliday)
 
     if (isBackToDefault) {
-      await supabase.from('factory_calendar').delete().eq('date', dateStr)
+      const { error } = await supabase.from('factory_calendar').delete().eq('date', dateStr)
+      if (error) {
+        alert(`更新失敗: ${error.message}`)
+        return
+      }
       const newMap = new Map(overrides)
       newMap.delete(dateStr)
       setOverrides(newMap)
+      await logSystemAction({
+        actionType: '更新行事曆',
+        target: `calendar:${dateStr}`,
+        details: '還原為預設作息',
+        metadata: { isHoliday: newIsHoliday, isDefault: true }
+      })
     } else {
-      await supabase.from('factory_calendar').upsert({ date: dateStr, is_holiday: newIsHoliday, note })
+      const { error } = await supabase.from('factory_calendar').upsert({ date: dateStr, is_holiday: newIsHoliday, note })
+      if (error) {
+        alert(`更新失敗: ${error.message}`)
+        return
+      }
       const newMap = new Map(overrides)
       newMap.set(dateStr, { date: dateStr, is_holiday: newIsHoliday, note })
       setOverrides(newMap)
+      await logSystemAction({
+        actionType: '更新行事曆',
+        target: `calendar:${dateStr}`,
+        details: newIsHoliday ? '設定為休假日' : '設定為上班日',
+        metadata: { isHoliday: newIsHoliday, note }
+      })
     }
   }
 

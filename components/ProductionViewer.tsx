@@ -426,6 +426,7 @@ export default function ProductionViewer({ sectionId, sectionName }: { sectionId
   const [tasks, setTasks] = useState<ProductionTask[]>([])
   const [machines, setMachines] = useState<ProductionMachine[]>([])
   const [selectedMachineId, setSelectedMachineId] = useState<number | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
   
   // 互動狀態
   const [selectedTaskDetail, setSelectedTaskDetail] = useState<ProductionTask | null>(null)
@@ -526,7 +527,16 @@ export default function ProductionViewer({ sectionId, sectionName }: { sectionId
 
   const getTasksForDate = (date: string) => {
     if (!selectedMachineId) return []
-    const dailyTasks = tasks.filter(t => t.scheduled_date === date && t.production_machine_id === selectedMachineId)
+    const keyword = searchTerm.trim().toLowerCase()
+    let dailyTasks = tasks.filter(t => t.scheduled_date === date && t.production_machine_id === selectedMachineId)
+
+    if (keyword) {
+      dailyTasks = dailyTasks.filter((task) =>
+        (task.order_number || '').toLowerCase().includes(keyword) ||
+        (task.customer || '').toLowerCase().includes(keyword)
+      )
+    }
+
     // 排序：未完成 > 急件 > 一般 > 已完成
     return dailyTasks.sort((a, b) => {
         const aCompleted = a.status === 'completed' ? 1 : 0
@@ -613,6 +623,16 @@ export default function ProductionViewer({ sectionId, sectionName }: { sectionId
                         </button>
                     ))
                 )}
+
+                <div className="relative min-w-[240px] flex-1 md:flex-none md:w-[320px] ml-auto">
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="搜尋單號 / 客戶"
+                    className="w-full bg-black/40 border border-slate-700 rounded text-xs text-slate-200 px-3 py-2 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
             </div>
         </div>
 

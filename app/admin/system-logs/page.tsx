@@ -6,9 +6,11 @@ import { supabase } from '../../../lib/supabaseClient'
 interface Log {
   id: number
   user_name: string
+  user_email: string | null
+  user_department: string | null
   action_type: string
   target_resource: string
-  details: string
+  details: string | null
   created_at: string
 }
 
@@ -16,8 +18,9 @@ export default function SystemLogsPage() {
   const [logs, setLogs] = useState<Log[]>([])
   const [loading, setLoading] = useState(true)
   const [filterUser, setFilterUser] = useState('')
+  const [filterAction, setFilterAction] = useState('')
 
-  const fetchLogs = useCallback(async (userFilter: string = '') => {
+  const fetchLogs = useCallback(async (userFilter: string = '', actionFilter: string = '') => {
     setLoading(true)
     let query = supabase
       .from('system_logs')
@@ -26,7 +29,11 @@ export default function SystemLogsPage() {
       .limit(100) // 只抓最近 100 筆，避免太慢
 
     if (userFilter) {
-      query = query.ilike('user_name', `%${userFilter}%`)
+      query = query.or(`user_name.ilike.%${userFilter}%,user_email.ilike.%${userFilter}%`)
+    }
+
+    if (actionFilter) {
+      query = query.ilike('action_type', `%${actionFilter}%`)
     }
 
     const { data } = await query
@@ -58,13 +65,21 @@ export default function SystemLogsPage() {
         <div className="flex gap-2">
             <input 
                 type="text" 
-                placeholder="搜尋使用者..." 
+                placeholder="搜尋操作者 / Email..." 
                 className="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-cyan-500 outline-none"
                 value={filterUser}
                 onChange={e => setFilterUser(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && fetchLogs(filterUser)}
+                onKeyDown={e => e.key === 'Enter' && fetchLogs(filterUser, filterAction)}
             />
-              <button onClick={() => fetchLogs(filterUser)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded transition-colors">重新整理</button>
+            <input 
+                type="text" 
+                placeholder="搜尋動作..." 
+                className="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-cyan-500 outline-none"
+                value={filterAction}
+                onChange={e => setFilterAction(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && fetchLogs(filterUser, filterAction)}
+            />
+              <button onClick={() => fetchLogs(filterUser, filterAction)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded transition-colors">重新整理</button>
         </div>
       </div>
 
@@ -73,7 +88,7 @@ export default function SystemLogsPage() {
           <thead className="bg-slate-950 text-slate-200 uppercase font-mono text-xs">
             <tr>
               <th className="p-4 border-b border-slate-800 w-40">時間</th>
-              <th className="p-4 border-b border-slate-800 w-32">操作者</th>
+              <th className="p-4 border-b border-slate-800 w-56">操作者</th>
               <th className="p-4 border-b border-slate-800 w-32">動作</th>
               <th className="p-4 border-b border-slate-800 w-48">目標對象</th>
               <th className="p-4 border-b border-slate-800">詳細內容</th>
@@ -87,10 +102,14 @@ export default function SystemLogsPage() {
                 <td className="p-4 font-mono text-xs text-slate-500">
                   {new Date(log.created_at).toLocaleString('zh-TW')}
                 </td>
-                <td className="p-4 font-bold text-white">{log.user_name}</td>
+                <td className="p-4">
+                  <div className="font-bold text-white">{log.user_name || '-'}</div>
+                  <div className="text-xs text-slate-500">{log.user_email || '-'}</div>
+                  <div className="text-xs text-slate-600">{log.user_department || '-'}</div>
+                </td>
                 <td className={`p-4 font-bold ${getActionColor(log.action_type)}`}>{log.action_type}</td>
                 <td className="p-4 font-mono text-slate-300">{log.target_resource}</td>
-                <td className="p-4 text-slate-400">{log.details}</td>
+                <td className="p-4 text-slate-400">{log.details || '-'}</td>
               </tr>
             ))}
           </tbody>

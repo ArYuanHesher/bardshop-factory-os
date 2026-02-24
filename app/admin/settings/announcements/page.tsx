@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 // 🔥 修正路徑：往上四層即可 (../../../../)
 import { supabase } from '../../../../lib/supabaseClient'
+import { logSystemAction } from '../../../../lib/logger'
 
 interface Announcement {
   id: number
@@ -50,6 +51,11 @@ export default function AnnouncementsPage() {
     if (error) {
       alert('新增失敗: ' + error.message)
     } else {
+      await logSystemAction({
+        actionType: '新增公告',
+        target: `announcement:${title.trim()}`,
+        details: '系統公告設定 > 發布新公告',
+      })
       setTitle('')
       setContent('')
       void fetchData()
@@ -59,11 +65,21 @@ export default function AnnouncementsPage() {
 
   const handleDelete = async (id: number) => {
     if (!confirm('確定要刪除此公告嗎？')) return
+    const target = list.find(item => item.id === id)
     const { error } = await supabase.from('system_announcements').delete().eq('id', id)
-    if (!error) setList(prev => prev.filter(item => item.id !== id))
+    if (!error) {
+      await logSystemAction({
+        actionType: '刪除公告',
+        target: `announcement:${target?.title || id}`,
+        details: '系統公告設定 > 刪除公告',
+        metadata: { announcementId: id }
+      })
+      setList(prev => prev.filter(item => item.id !== id))
+    }
   }
 
   const handleToggle = async (id: number, currentStatus: boolean) => {
+    const target = list.find(item => item.id === id)
     // 樂觀更新 UI
     setList(prev => prev.map(item => item.id === id ? { ...item, is_active: !currentStatus } : item))
     
@@ -75,6 +91,13 @@ export default function AnnouncementsPage() {
     if (error) {
       alert('更新狀態失敗')
       void fetchData() // 失敗則重抓
+    } else {
+      await logSystemAction({
+        actionType: !currentStatus ? '啟用公告' : '停用公告',
+        target: `announcement:${target?.title || id}`,
+        details: '系統公告設定 > 切換顯示狀態',
+        metadata: { announcementId: id, isActive: !currentStatus }
+      })
     }
   }
 

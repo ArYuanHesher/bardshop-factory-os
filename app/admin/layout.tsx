@@ -111,8 +111,55 @@ function AdminNavbar() {
   )
 }
 
+function SystemSettingsNavbar() {
+  const pathname = usePathname()
+
+  const getButtonClass = (isActive: boolean) =>
+    `px-3 py-1.5 rounded border text-sm transition-colors ${
+      isActive
+        ? 'bg-orange-950/60 border-orange-500/70 text-orange-300'
+        : 'bg-slate-900/80 border-slate-700 text-slate-300 hover:bg-slate-800'
+    }`
+
+  return (
+    <div className="sticky top-0 z-50 bg-[#050b14]/90 backdrop-blur-md border-b border-slate-800 shadow-lg shadow-black/80">
+      <div className="w-full px-4 md:px-6 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center justify-center w-10 h-10 rounded-lg bg-slate-900/80 border border-slate-700 text-cyan-500 hover:bg-cyan-950 hover:border-cyan-500 hover:text-cyan-400 transition-all" title="回到首頁">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+          </Link>
+          <div>
+            <div className="text-white font-bold text-sm tracking-wide">系統設定</div>
+            <div className="text-[10px] text-orange-500/70 font-mono uppercase">System Settings</div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Link href="/admin/settings" className={getButtonClass(pathname === '/admin/settings')}>
+            設定首頁
+          </Link>
+          <Link href="/admin/system-logs" className={getButtonClass(pathname === '/admin/system-logs')}>
+            系統 LOG
+          </Link>
+          <Link href="/" className={getButtonClass(false)}>
+            返回首頁
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const SYSTEM_SETTINGS_PATH_PREFIXES = ['/admin/settings', '/admin/team', '/admin/system-logs']
+
+const isSystemSettingsRoute = (pathname: string) =>
+  SYSTEM_SETTINGS_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'))
+
 // 主 Layout 組件
 export default function AdminLayout({ children }: { children: ReactNode }) {
+  const pathname = usePathname()
+  const useSystemSettingsNavbar = isSystemSettingsRoute(pathname)
+
   return (
     <FavoritesProvider>
       <div className="min-h-screen bg-[#050b14] text-slate-300 font-sans selection:bg-cyan-500 selection:text-white relative">
@@ -123,7 +170,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <div className="absolute inset-0 opacity-[0.15]" style={{ backgroundImage: 'linear-gradient(rgba(6, 182, 212, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(6, 182, 212, 0.1) 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
         </div>
 
-        <AdminNavbar />
+        {useSystemSettingsNavbar ? <SystemSettingsNavbar /> : <AdminNavbar />}
 
         <main className="relative z-10 min-h-[calc(100vh-70px)] p-4 md:p-6">
           {children}
