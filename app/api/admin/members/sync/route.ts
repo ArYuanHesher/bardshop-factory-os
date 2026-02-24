@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { getSupabaseAdminClient } from '../../../../../lib/supabaseAdmin'
+import { formatSupabaseAdminError, getSupabaseAdminClient } from '../../../../../lib/supabaseAdmin'
 
 type MemberRow = {
   id: number
@@ -45,7 +45,10 @@ export async function POST() {
       .order('id', { ascending: true })
 
     if (membersError) {
-      return NextResponse.json({ error: `讀取 members 失敗: ${membersError.message}` }, { status: 400 })
+      return NextResponse.json(
+        { error: `讀取 members 失敗: ${formatSupabaseAdminError(membersError.message)}` },
+        { status: 400 }
+      )
     }
 
     const rows = (members || []) as MemberRow[]
@@ -77,7 +80,11 @@ export async function POST() {
           })
 
           if (createError || !createdUserData.user?.id) {
-            failed.push({ memberId: member.id, email, reason: createError?.message || '建立 auth user 失敗' })
+            failed.push({
+              memberId: member.id,
+              email,
+              reason: formatSupabaseAdminError(createError?.message || '建立 auth user 失敗'),
+            })
             continue
           }
 
@@ -98,7 +105,7 @@ export async function POST() {
         updated += 1
       } catch (error) {
         const message = error instanceof Error ? error.message : '未知錯誤'
-        failed.push({ memberId: member.id, email, reason: message })
+        failed.push({ memberId: member.id, email, reason: formatSupabaseAdminError(message) })
       }
     }
 
@@ -112,6 +119,6 @@ export async function POST() {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知錯誤'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: formatSupabaseAdminError(message) }, { status: 500 })
   }
 }

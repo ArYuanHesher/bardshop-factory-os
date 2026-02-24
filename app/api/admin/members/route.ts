@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { getSupabaseAdminClient } from '../../../../lib/supabaseAdmin'
+import { formatSupabaseAdminError, getSupabaseAdminClient } from '../../../../lib/supabaseAdmin'
 
 type CreateMemberBody = {
   real_name?: string
@@ -115,12 +115,15 @@ export async function POST(request: Request) {
     }
 
     if (insertError) {
-      return NextResponse.json({ error: `新增 members 失敗: ${insertError.message}` }, { status: 400 })
+      return NextResponse.json(
+        { error: `新增 members 失敗: ${formatSupabaseAdminError(insertError.message)}` },
+        { status: 400 }
+      )
     }
 
     return NextResponse.json({ ok: true, auth_user_id: authUserId })
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知錯誤'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: formatSupabaseAdminError(message) }, { status: 500 })
   }
 }
