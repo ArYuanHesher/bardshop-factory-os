@@ -70,12 +70,21 @@ const DEFAULT_CREATE_FORM: CreateFormState = {
   responsible: [],
 }
 
+const RECORDS_LOCK_PASSWORD = '680401'
+
 export default function QaRecordsPage() {
+  const [isLocked, setIsLocked] = useState(true)
+  const [unlockPasswordInput, setUnlockPasswordInput] = useState('')
+  const [unlockError, setUnlockError] = useState('')
   const [reports, setReports] = useState<AnomalyReport[]>([])
   const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [createForm, setCreateForm] = useState<CreateFormState>(DEFAULT_CREATE_FORM)
+  const [savingCreate, setSavingCreate] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<CreateFormState>(DEFAULT_CREATE_FORM)
   const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
   const [options, setOptions] = useState<OptionState>(DEFAULT_OPTIONS)
   const [selectedReason, setSelectedReason] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('')
@@ -167,6 +176,86 @@ export default function QaRecordsPage() {
     setEditForm(DEFAULT_CREATE_FORM)
   }
 
+  const openCreateModal = () => {
+    setCreateForm({ ...DEFAULT_CREATE_FORM, createdDate: getTodayDateInput() })
+    setCreating(true)
+  }
+
+  const closeCreateModal = () => {
+    setCreating(false)
+    setCreateForm(DEFAULT_CREATE_FORM)
+  }
+
+  const getReadableErrorMessage = (err: unknown) => {
+    if (err instanceof Error && err.message) return err.message
+
+    if (typeof err === 'object' && err !== null) {
+      const maybeError = err as {
+        message?: unknown
+        details?: unknown
+        hint?: unknown
+        code?: unknown
+      }
+
+      const parts = [
+        typeof maybeError.message === 'string' ? maybeError.message : '',
+        typeof maybeError.details === 'string' ? maybeError.details : '',
+        typeof maybeError.hint === 'string' ? maybeError.hint : '',
+        typeof maybeError.code === 'string' ? `code: ${maybeError.code}` : '',
+      ].filter(Boolean)
+
+      if (parts.length > 0) return parts.join(' | ')
+    }
+
+    return '未知錯誤'
+  }
+
+  const handleCreate = async () => {
+    if (!createForm.orderNumber.trim()) {
+      alert('請填寫相關單號')
+      return
+    }
+
+    if (!createForm.reason.trim()) {
+      alert('請填寫異常原因（手填）')
+      return
+    }
+
+    setSavingCreate(true)
+    try {
+      const payload = {
+        report_type: 'qa',
+        reason: createForm.reason.trim(),
+        status: createForm.status,
+        source_order_id: null,
+        task_id: null,
+        order_number: createForm.orderNumber.trim(),
+        item_code: '',
+        quantity: 0,
+        op_name: null,
+        station: null,
+        section_id: null,
+        created_at: createForm.createdDate ? `${createForm.createdDate}T00:00:00.000Z` : new Date().toISOString(),
+        qa_department: createForm.department || null,
+        qa_reporter: createForm.reporter || null,
+        qa_handlers: createForm.handlers,
+        qa_category: createForm.category || null,
+        qa_responsible: createForm.responsible,
+      }
+
+      const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
+      if (error) throw error
+
+      alert('✅ 已新增異常單')
+      closeCreateModal()
+      await fetchReports()
+    } catch (err: unknown) {
+      alert(`新增失敗：${getReadableErrorMessage(err)}`)
+    } finally {
+      setSavingCreate(false)
+    }
+  }
+
   const handleSaveEdit = async () => {
     if (!editingId) return
 
@@ -203,10 +292,31 @@ export default function QaRecordsPage() {
       closeEditModal()
       await fetchReports()
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '未知錯誤'
+      const message = getReadableErrorMessage(err)
       alert(`更新失敗：${message}`)
     } finally {
       setSavingEdit(false)
+    }
+  }
+
+  const handleDelete = async (report: AnomalyReport) => {
+    if (!confirm(`確定刪除異常單 #${report.id}（單號：${report.order_number}）嗎？`)) return
+
+    setDeletingId(report.id)
+    try {
+      const { error } = await supabase
+        .from('schedule_anomaly_reports')
+        .delete()
+        .eq('id', report.id)
+
+      if (error) throw error
+
+      alert('🗑️ 已刪除異常單')
+      await fetchReports()
+    } catch (err: unknown) {
+      alert(`刪除失敗：${getReadableErrorMessage(err)}`)
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -216,6 +326,18 @@ export default function QaRecordsPage() {
     () => [...new Set(reports.map((report) => report.reason?.trim()).filter((value): value is string => !!value))],
     [reports],
   )
+
+
+  const handleUnlock = () => {
+    if (unlockPasswordInput === RECORDS_LOCK_PASSWORD) {
+      setIsLocked(false)
+      setUnlockError('')
+      setUnlockPasswordInput('')
+      return
+    }
+
+    setUnlockError('密碼錯誤，請重新輸入')
+  }
 
   const reporterFilterOptions = useMemo(
     () => [...new Set(reports.map((report) => report.qa_reporter?.trim()).filter((value): value is string => !!value))],
@@ -295,13 +417,50 @@ export default function QaRecordsPage() {
   }, [baseRowsWithoutStatusFilter, statusFilter.confirmed, statusFilter.pending])
 
   return (
-    <div className="p-6 md:p-8 max-w-[1900px] mx-auto min-h-screen space-y-8">
+    <div className="relative p-6 md:p-8 max-w-[1900px] mx-auto min-h-screen space-y-8">
+      {isLocked && (
+        <div className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4">
+            <h2 className="text-xl font-bold text-white">異常紀錄表已上鎖</h2>
+            <p className="text-sm text-slate-400">請輸入密碼以繼續。</p>
+            <input
+              type="password"
+              value={unlockPasswordInput}
+              onChange={(e) => {
+                setUnlockPasswordInput(e.target.value)
+                if (unlockError) setUnlockError('')
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleUnlock()
+              }}
+              placeholder="請輸入密碼"
+              className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            />
+            {unlockError && <p className="text-sm text-rose-400">{unlockError}</p>}
+            <div className="flex justify-end">
+              <button
+                onClick={handleUnlock}
+                className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+              >
+                解鎖
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">異常紀錄表</h1>
           <p className="text-cyan-400 mt-1 font-mono text-sm uppercase">QA ANOMALY RECORDS</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={openCreateModal}
+            className="px-3 py-2 rounded border border-emerald-600 text-emerald-300 hover:bg-emerald-900/30 text-sm"
+          >
+            新增異常單
+          </button>
           <Link href="/qa/report" className="px-3 py-2 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-900/30 text-sm">
             前往異常回報單
           </Link>
@@ -513,12 +672,21 @@ export default function QaRecordsPage() {
                     </td>
 
                     <td className="p-3 text-center min-w-[130px]">
-                      <button
-                        onClick={() => openEditModal(report)}
-                        className="px-3 py-1.5 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-900/30 text-xs"
-                      >
-                        編輯
-                      </button>
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => openEditModal(report)}
+                          className="px-3 py-1.5 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-900/30 text-xs"
+                        >
+                          編輯
+                        </button>
+                        <button
+                          onClick={() => void handleDelete(report)}
+                          disabled={deletingId === report.id}
+                          className="px-3 py-1.5 rounded border border-rose-700 text-rose-300 hover:bg-rose-900/30 text-xs disabled:opacity-60"
+                        >
+                          {deletingId === report.id ? '刪除中...' : '刪除'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -527,6 +695,177 @@ export default function QaRecordsPage() {
           </tbody>
         </table>
       </div>
+
+      {creating && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-[900px] bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">新增異常單</h2>
+              <button onClick={closeCreateModal} className="px-2 py-1 text-slate-300 hover:text-white">✕</button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-slate-400">日期</label>
+                <input
+                  type="date"
+                  value={createForm.createdDate}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, createdDate: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">相關單號</label>
+                <input
+                  value={createForm.orderNumber}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, orderNumber: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">狀態</label>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setCreateForm((prev) => ({ ...prev, status: 'pending' }))}
+                    className={`px-3 py-2 rounded border text-sm font-bold transition-colors ${createForm.status === 'pending' ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
+                  >
+                    待處理
+                  </button>
+                  <button
+                    onClick={() => setCreateForm((prev) => ({ ...prev, status: 'confirmed' }))}
+                    className={`px-3 py-2 rounded border text-sm font-bold transition-colors ${createForm.status === 'confirmed' ? 'bg-emerald-900/30 border-emerald-600 text-emerald-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
+                  >
+                    已確認
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">部門</label>
+                <select
+                  value={createForm.department}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, department: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                >
+                  <option value="">請選擇</option>
+                  {options.departments.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">異常回報人</label>
+                <select
+                  value={createForm.reporter}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, reporter: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                >
+                  <option value="">請選擇</option>
+                  {options.personnel.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">異常處理人</label>
+                <div className="mt-1 space-y-2">
+                  <div className="flex flex-wrap gap-1">
+                    {createForm.handlers.map((name) => (
+                      <span key={name} className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700 text-cyan-200 text-xs flex items-center gap-1">
+                        {name}
+                        <button onClick={() => setCreateForm((prev) => ({ ...prev, handlers: prev.handlers.filter((item) => item !== name) }))}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (!value) return
+                      setCreateForm((prev) => prev.handlers.includes(value) ? prev : { ...prev, handlers: [...prev.handlers, value] })
+                      e.currentTarget.value = ''
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                  >
+                    <option value="">+ 新增處理人</option>
+                    {options.personnel.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">異常分類</label>
+                <select
+                  value={createForm.category}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, category: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                >
+                  <option value="">請選擇</option>
+                  {options.categories.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400">異常原因（手填）</label>
+              <textarea
+                rows={3}
+                value={createForm.reason}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, reason: e.target.value }))}
+                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400">缺失人員</label>
+              <div className="mt-1 space-y-2">
+                <div className="flex flex-wrap gap-1">
+                  {createForm.responsible.map((name) => (
+                    <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
+                      {name}
+                      <button onClick={() => setCreateForm((prev) => ({ ...prev, responsible: prev.responsible.filter((item) => item !== name) }))}>×</button>
+                    </span>
+                  ))}
+                </div>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const value = e.target.value
+                    if (!value) return
+                    setCreateForm((prev) => prev.responsible.includes(value) ? prev : { ...prev, responsible: [...prev.responsible, value] })
+                    e.currentTarget.value = ''
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                >
+                  <option value="">+ 新增缺失人員</option>
+                  {options.personnel.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={closeCreateModal} className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800">取消</button>
+              <button
+                onClick={() => void handleCreate()}
+                disabled={savingCreate}
+                className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold disabled:bg-slate-700 disabled:text-slate-400"
+              >
+                {savingCreate ? '新增中...' : '新增異常單'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingId && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">

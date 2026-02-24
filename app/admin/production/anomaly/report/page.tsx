@@ -10,6 +10,38 @@ const DEFAULT_DEPARTMENT_OPTIONS = ['品保部', '生產部', '工程部']
 
 const getTodayDateInput = () => new Date().toISOString().slice(0, 10)
 
+const getReadableErrorMessage = (err: unknown) => {
+  if (err instanceof Error && err.message) return err.message
+
+  if (typeof err === 'object' && err !== null) {
+    const maybeError = err as {
+      message?: unknown
+      details?: unknown
+      hint?: unknown
+      code?: unknown
+    }
+
+    const parts = [
+      typeof maybeError.message === 'string' ? maybeError.message : '',
+      typeof maybeError.details === 'string' ? maybeError.details : '',
+      typeof maybeError.hint === 'string' ? maybeError.hint : '',
+      typeof maybeError.code === 'string' ? `code: ${maybeError.code}` : '',
+    ].filter(Boolean)
+
+    if (parts.length > 0) return parts.join(' | ')
+  }
+
+  return '未知錯誤'
+}
+
+const isQaReportTypeConstraintError = (err: unknown) => {
+  if (typeof err !== 'object' || err === null) return false
+  const maybeError = err as { message?: unknown; code?: unknown }
+  const message = typeof maybeError.message === 'string' ? maybeError.message : ''
+  const code = typeof maybeError.code === 'string' ? maybeError.code : ''
+  return code === '23514' && message.includes('schedule_anomaly_reports_report_type_check')
+}
+
 export default function QaReportFormPage() {
   const [createdDate, setCreatedDate] = useState(getTodayDateInput())
   const [orderNumber, setOrderNumber] = useState('')
@@ -22,9 +54,7 @@ export default function QaReportFormPage() {
   const [department, setDepartment] = useState('')
   const [category, setCategory] = useState('')
   const [handlers, setHandlers] = useState<string[]>([])
-  const [responsible, setResponsible] = useState<string[]>([])
   const [handlerInput, setHandlerInput] = useState('')
-  const [responsibleInput, setResponsibleInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -93,7 +123,7 @@ export default function QaReportFormPage() {
         qa_reporter: reporter.trim() || null,
         qa_handlers: handlers,
         qa_category: category || null,
-        qa_responsible: responsible,
+        qa_responsible: [],
       }
 
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
@@ -107,11 +137,13 @@ export default function QaReportFormPage() {
       setReporter('')
       setHandlers([])
       setCategory('')
-      setResponsible([])
       setHandlerInput('')
-      setResponsibleInput('')
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '未知錯誤'
+      if (isQaReportTypeConstraintError(err)) {
+        alert('送出失敗：資料庫尚未允許 report_type=qa。請先執行 sql/20260224_allow_qa_report_type.sql migration。')
+        return
+      }
+      const message = getReadableErrorMessage(err)
       alert(`送出失敗：${message}`)
     } finally {
       setSubmitting(false)
@@ -246,47 +278,8 @@ export default function QaReportFormPage() {
           />
         </div>
 
-        <div>
-          <label className="text-xs text-slate-400">缺失人員</label>
-          <div className="mt-1 space-y-2">
-            <div className="flex flex-wrap gap-1">
-              {responsible.map((name) => (
-                <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
-                  {name}
-                  <button type="button" onClick={() => setResponsible((prev) => prev.filter((item) => item !== name))}>×</button>
-                </span>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                list="qa-personnel-options"
-                value={responsibleInput}
-                onChange={(e) => setResponsibleInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return
-                  e.preventDefault()
-                  const value = responsibleInput.trim()
-                  if (!value) return
-                  setResponsible((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                  setResponsibleInput('')
-                }}
-                placeholder="輸入或選擇缺失人員"
-                className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const value = responsibleInput.trim()
-                  if (!value) return
-                  setResponsible((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                  setResponsibleInput('')
-                }}
-                className="px-3 py-2 rounded border border-amber-700 text-amber-300 hover:bg-amber-900/30 text-sm"
-              >
-                新增
-              </button>
-            </div>
-          </div>
+        <div className="rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-400">
+          缺失人員請於「異常紀錄表」編輯時填寫。
         </div>
 
         <datalist id="qa-personnel-options">

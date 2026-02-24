@@ -15,6 +15,30 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
   const [showOtherAnomalyForm, setShowOtherAnomalyForm] = useState(false)
   const [otherAnomalyReason, setOtherAnomalyReason] = useState('')
 
+  const getReadableErrorMessage = (err: unknown) => {
+    if (err instanceof Error && err.message) return err.message
+
+    if (typeof err === 'object' && err !== null) {
+      const maybeError = err as {
+        message?: unknown
+        details?: unknown
+        hint?: unknown
+        code?: unknown
+      }
+
+      const parts = [
+        typeof maybeError.message === 'string' ? maybeError.message : '',
+        typeof maybeError.details === 'string' ? maybeError.details : '',
+        typeof maybeError.hint === 'string' ? maybeError.hint : '',
+        typeof maybeError.code === 'string' ? `code: ${maybeError.code}` : '',
+      ].filter(Boolean)
+
+      if (parts.length > 0) return parts.join(' | ')
+    }
+
+    return '未知錯誤'
+  }
+
   const fetchStages = useCallback(async () => {
     if (!task?.order_number) return
     const { data, error } = await supabase
@@ -101,7 +125,7 @@ function TaskDetailModal({ task, onClose, onTaskUpdate }: { task: ProductionTask
       setOtherAnomalyReason('')
     } catch (err: unknown) {
       console.error(err)
-      const message = err instanceof Error ? err.message : '未知錯誤'
+      const message = getReadableErrorMessage(err)
       alert(`送出失敗：${message}`)
     } finally {
       setIsSubmittingAnomaly(false)

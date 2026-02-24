@@ -98,6 +98,38 @@ function normalizeDateToIso(dateValue: string): string | null {
   return parsed.toISOString()
 }
 
+const getReadableErrorMessage = (err: unknown) => {
+  if (err instanceof Error && err.message) return err.message
+
+  if (typeof err === 'object' && err !== null) {
+    const maybeError = err as {
+      message?: unknown
+      details?: unknown
+      hint?: unknown
+      code?: unknown
+    }
+
+    const parts = [
+      typeof maybeError.message === 'string' ? maybeError.message : '',
+      typeof maybeError.details === 'string' ? maybeError.details : '',
+      typeof maybeError.hint === 'string' ? maybeError.hint : '',
+      typeof maybeError.code === 'string' ? `code: ${maybeError.code}` : '',
+    ].filter(Boolean)
+
+    if (parts.length > 0) return parts.join(' | ')
+  }
+
+  return '未知錯誤'
+}
+
+const isQaReportTypeConstraintError = (err: unknown) => {
+  if (typeof err !== 'object' || err === null) return false
+  const maybeError = err as { message?: unknown; code?: unknown }
+  const message = typeof maybeError.message === 'string' ? maybeError.message : ''
+  const code = typeof maybeError.code === 'string' ? maybeError.code : ''
+  return code === '23514' && message.includes('schedule_anomaly_reports_report_type_check')
+}
+
 export default function QaBatchUploadPage() {
   const [rows, setRows] = useState<ParsedCsvRow[]>([])
   const [fileName, setFileName] = useState('')
@@ -226,7 +258,11 @@ export default function QaBatchUploadPage() {
       setRows([])
       setFileName('')
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '未知錯誤'
+      if (isQaReportTypeConstraintError(err)) {
+        alert('匯入失敗：資料庫尚未允許 report_type=qa。請先執行 sql/20260224_allow_qa_report_type.sql migration。')
+        return
+      }
+      const message = getReadableErrorMessage(err)
       alert(`匯入失敗：${message}`)
     } finally {
       setUploading(false)
