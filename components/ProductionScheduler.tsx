@@ -730,12 +730,19 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
   
     const generateDates = (startDate: Date, weeks: number) => {
       const arr: string[] = []
-      const start = new Date(startDate)
+      // 強制起點為週一
+      let start = new Date(startDate)
+      const startDay = start.getDay()
+      if (startDay !== 1) {
+        const diff = start.getDate() - (startDay === 0 ? 6 : startDay - 1)
+        start.setDate(diff)
+      }
+      start.setHours(0, 0, 0, 0)
       for (let i = 0; i < weeks * 7; i++) {
         const d = new Date(start)
         d.setDate(start.getDate() + i)
-        const dayOfWeek = d.getDay()
-        if (!showWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) continue
+        // 隱藏第一欄(週日)和最後一欄(週六)
+        if (!showWeekends && (i === 0 || i === 6)) continue
         arr.push(d.toISOString().split('T')[0])
       }
       return arr
@@ -810,7 +817,22 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
 
   const handleDragStart = (event: DragStartEvent) => { setActiveDragItem(event.active.data.current?.task as ProductionTask) }
   const changeWeek = (offset: number) => { const newStart = new Date(currentStart); newStart.setDate(newStart.getDate() + (offset * 7)); setCurrentStart(newStart); setShowNextWeek(false) }
-  const handleDatePick = (e: ChangeEvent<HTMLInputElement>) => { const date = new Date(e.target.value); if (!isNaN(date.getTime())) { const day = date.getDay(); const diff = date.getDate() - (day === 0 ? 6 : day - 1); date.setDate(diff); setCurrentStart(new Date(date)); setShowNextWeek(false) } }
+  // 讓日期選擇器選到的日期自動對齊到該週的週一
+  const handleDatePick = (e: ChangeEvent<HTMLInputElement>) => {
+    let date = new Date(e.target.value);
+    if (!isNaN(date.getTime())) {
+      const day = date.getDay();
+      // day: 0=Sunday, 1=Monday, ..., 6=Saturday
+      // 週一為主，週日(day=0)往回推6天到本週一
+      if (day !== 1) {
+        const diff = date.getDate() - (day === 0 ? 6 : day - 1);
+        date.setDate(diff);
+      }
+      date.setHours(0, 0, 0, 0);
+      setCurrentStart(new Date(date));
+      setShowNextWeek(false);
+    }
+  }
   
   return (
     <DndContext onDragEnd={handleDragEnd} onDragStart={handleDragStart} sensors={sensors} collisionDetection={pointerWithin}>
@@ -823,6 +845,7 @@ export default function ProductionScheduler({ sectionId, sectionName }: { sectio
                     <h2 className="text-xl font-bold text-white whitespace-nowrap mr-2">{sectionName}</h2>
                     <div className="flex items-center gap-2 bg-black/30 rounded-lg p-1 border border-slate-700">
                         <button onClick={() => changeWeek(-1)} className="p-1 hover:text-cyan-400 text-slate-400">←</button>
+                        {/* 日期選擇器永遠以本週一為主 */}
                         <input type="date" value={currentStart.toISOString().split('T')[0]} onChange={handleDatePick} className="bg-transparent text-white text-sm font-bold border-none outline-none focus:ring-0 w-32 text-center"/>
                         <button onClick={() => changeWeek(1)} className="p-1 hover:text-cyan-400 text-slate-400">→</button>
                     </div>

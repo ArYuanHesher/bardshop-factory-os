@@ -51,6 +51,7 @@ export const PRODUCTION_CATEGORY_MAP: Record<string, string> = {
 export const getCurrentWeekStart = () => {
   const d = new Date()
   const day = d.getDay()
+  // 週一為主，週日(day=0)往回推6天到本週一
   const diff = d.getDate() - (day === 0 ? 6 : day - 1)
   d.setDate(diff)
   d.setHours(0, 0, 0, 0)

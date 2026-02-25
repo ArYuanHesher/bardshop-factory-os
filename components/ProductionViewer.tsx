@@ -532,8 +532,8 @@ export default function ProductionViewer({ sectionId, sectionName }: { sectionId
     for (let i = 0; i < weeks * 7; i++) {
       const d = new Date(start)
       d.setDate(start.getDate() + i)
-      const dayOfWeek = d.getDay()
-      if (!showWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) continue
+      // 隱藏第一欄(週日)和最後一欄(週六)
+      if (!showWeekends && (i === 0 || i === 6)) continue
       arr.push(d.toISOString().split('T')[0])
     }
     return arr
