@@ -187,8 +187,8 @@ export default function MaterialsBomPage() {
       }
 
       // 過濾掉 product_code 為空的資料，並記錄問題行
-      const bomRows = []
-      const errorRows = []
+      const bomRows: any[] = []
+      const errorRows: any[] = []
       rows.forEach((row, idx) => {
         const product_code = row[col.product_code]?.trim()
         const material_code = row[col.material_code]?.trim()
