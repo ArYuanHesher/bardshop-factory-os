@@ -18,7 +18,6 @@ function parseCSV(text: string) {
   const result = Papa.parse<Record<string, string>>(text, {
     header: true,
     skipEmptyLines: true,
-    encoding: 'utf-8',
     transformHeader: h => h.trim(),
     dynamicTyping: false
   })
