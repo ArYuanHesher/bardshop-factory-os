@@ -387,7 +387,7 @@ export default function MaterialsBomPage() {
                         return <tr><td colSpan={3} className="text-center py-4 text-slate-500">尚無資料</td></tr>;
                       }
                       // 合併相同生產品項編碼
-                      const grouped = {};
+                      const grouped: Record<string, any> = {};
                       bomData.forEach(row => {
                         if (!grouped[row.product_code]) {
                           grouped[row.product_code] = {
