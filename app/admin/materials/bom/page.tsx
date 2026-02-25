@@ -405,7 +405,7 @@ export default function MaterialsBomPage() {
                       // 展開為每個原料一行，品項名稱與編碼僅在第一行顯示
                       return Object.entries(grouped).flatMap(([product_code, info]: any) => {
                         const rowSpan = info.materials.length;
-                        return info.materials.map((mat, idx) => {
+                        return info.materials.map((mat: any, idx: number) => {
                           const stock = materialMap[mat.material_code] ?? '-';
                           return (
                             <tr key={product_code + '-' + idx} className="odd:bg-slate-900 even:bg-slate-800 align-top">
