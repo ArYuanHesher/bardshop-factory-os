@@ -123,21 +123,13 @@ function SystemSettingsNavbar() {
 
   return (
     <div className="sticky top-0 z-50 bg-[#050b14]/90 backdrop-blur-md border-b border-slate-800 shadow-lg shadow-black/80">
-      <div className="w-full px-4 md:px-6 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="flex items-center justify-center w-10 h-10 rounded-lg bg-slate-900/80 border border-slate-700 text-cyan-500 hover:bg-cyan-950 hover:border-cyan-500 hover:text-cyan-400 transition-all" title="回到首頁">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-          </Link>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Link href="/admin/system-logs" className={getButtonClass(pathname === '/admin/system-logs')}>
-            系統 LOG
-          </Link>
-          <Link href="/" className={getButtonClass(false)}>
-            返回首頁
-          </Link>
-        </div>
+      <div className="w-full px-4 md:px-6 py-3 flex flex-row items-center justify-end gap-3">
+        <Link href="/admin/system-logs" className={getButtonClass(pathname === '/admin/system-logs')}>
+          系統 LOG
+        </Link>
+        <Link href="/" className={getButtonClass(false)}>
+          返回首頁
+        </Link>
       </div>
     </div>
   )

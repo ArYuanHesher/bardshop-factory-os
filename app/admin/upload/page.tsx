@@ -8,6 +8,7 @@ type CSVRow = Record<string, string>
 interface ItemRouteInsert {
   item_code: string
   route_id: string
+  item_name?: string
 }
 
 interface RouteOperationInsert {
@@ -112,7 +113,8 @@ export default function UploadPage() {
           .forEach((row) => {
             dataItemRoutes.push({
               item_code: row['品項編碼'].toUpperCase(),
-              route_id: row['途程名稱']
+              route_id: row['途程名稱'],
+              item_name: row['品項名稱'] ? row['品項名稱'].trim() : undefined
             })
           })
       }

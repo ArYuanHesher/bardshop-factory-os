@@ -3,31 +3,26 @@ export const NAV_GROUPS = [
     title: '訂單資料管理',
     theme: 'purple',
     items: [
-      // 1. 原「每日訂單作業」
       { 
         name: '訂單更新表', 
         path: '/admin/daily', 
         icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' 
       },
-      // 2. 原「歷史訂單查詢」
       { 
         name: '發單紀錄總表(上傳成功)', 
         path: '/admin/history', 
         icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' 
       },
-      // 3. 原「各站工時轉換」
       { 
         name: '各站工時轉換表', 
         path: '/admin/history/conversion', 
         icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' 
       },
-      // 4. 原「各站工時總表」
       { 
         name: '各站工時查詢表(轉換成功)', 
         path: '/admin/orders/master', 
         icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' 
       },
-      // 5. 🔥 新增：待處理資料表
       { 
         name: '待處理資料表', 
         path: '/admin/pending', 
@@ -36,7 +31,7 @@ export const NAV_GROUPS = [
     ]
   },
   {
-   title: '生產管理入口',
+    title: '生產管理入口',
     theme: 'blue',
     items: [
       { 
@@ -52,6 +47,23 @@ export const NAV_GROUPS = [
     ]
   },
   {
+    title: '產期告示',
+    theme: 'orange',
+    items: [
+      {
+        name: '告示設定',
+        path: '/admin/production/notice',
+        icon: 'M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z'
+      },
+      {
+        name: '群組設定',
+        path: '/admin/production/notice-group',
+        icon: 'M12 6v6l4 2'
+      }
+    ]
+  },
+  // 生產管理入口下拉式選單已移除
+  {
     title: '產線排程看板', // 新分類
     theme: 'purple',
     items: [
@@ -63,6 +75,7 @@ export const NAV_GROUPS = [
       { name: '常平排程', path: '/admin/production/changping', icon: '...' },
    ]
   },
+  // 產期公告設定已移至生產管理
   {
     title: '物料管理',
     theme: 'cyan',
