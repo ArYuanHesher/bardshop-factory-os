@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import TaskFloatingWidget from '../components/TaskFloatingWidget'; // 🔥 1. 引入元件
+// import TaskFloatingWidget from '../components/TaskFloatingWidget'; // 🔥 1. 引入元件
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,8 +30,7 @@ export default function RootLayout({
       >
         {children}
 
-        {/* 🔥 2. 將懸浮視窗放在這裡，它就會出現在所有頁面 */}
-        <TaskFloatingWidget />
+        {/* <TaskFloatingWidget /> */}
         
       </body>
     </html>

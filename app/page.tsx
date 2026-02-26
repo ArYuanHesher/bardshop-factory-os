@@ -180,6 +180,7 @@ export default function LandingPage() {
                backgroundSize: '50px 50px' 
              }}>
         </div>
+
       </div>
 
       {/* --- 左上角：公告顯示區 --- */}
@@ -315,36 +316,31 @@ export default function LandingPage() {
             </span>
           </Link>
 
-          {/* 🔥 3. 任務看板 (New - Blue) */}
-          <Link href="/tasks"
-            onClick={guardFeatureAccess('tasks', '任務看板')}
-            onMouseEnter={() => setIsHovered('tasks')}
-            onMouseLeave={() => setIsHovered('none')}
+          {/* 🔥 3. 任務看板 (COMING SOON) */}
+          <div
             className={`
               group relative order-3 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
-              hover:border-blue-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]
-              ${canTasks ? '' : 'opacity-50 grayscale'}
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 opacity-50 grayscale cursor-not-allowed select-none
               ${isHovered !== 'none' && isHovered !== 'tasks' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
             <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 rounded border border-blue-500/20">
-              <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">New</span>
+              <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">COMING SOON</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-blue-900/50 text-slate-400 group-hover:text-blue-400 transition-colors">
+            <div className="mb-6 p-4 rounded-full bg-slate-800 text-slate-400">
                <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-blue-400 transition-colors">任務看板</h2>
-            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+            <h2 className="text-xl font-bold text-white mb-2">任務看板</h2>
+            <p className="text-slate-500 text-xs mb-6 px-2">
               部門協作、指派與追蹤。<br/>(Task Flow)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-blue-600 group-hover:border-blue-600 group-hover:text-white transition-all">
-              OPEN BOARD &rarr;
+            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono bg-blue-600/20 border-blue-600/20 cursor-not-allowed">
+              COMING SOON
             </span>
-          </Link>
+          </div>
 
           {/* 4. 生產管理 (Purple) */}
           <Link href="/admin"
@@ -441,33 +437,36 @@ export default function LandingPage() {
             </span>
           </Link>
 
-          {/* 7. 產期告示 (Slate / Disabled) */}
-          <div
+
+          {/* 7. 產期告示 (可點擊連結) */}
+          <Link
+            href="/notice-board"
             onMouseEnter={() => setIsHovered('notice')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
               group relative order-2 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              hover:border-cyan-500 hover:bg-cyan-900/40 hover:shadow-[0_0_30px_rgba(34,211,238,0.15)]
               ${isHovered !== 'none' && isHovered !== 'notice' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
-            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-slate-500/10 rounded border border-slate-500/20">
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Soon</span>
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-cyan-500/10 rounded border border-cyan-500/20">
+              <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Go</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 text-slate-400">
+            <div className="mb-6 p-4 rounded-full bg-slate-800 text-slate-400 group-hover:bg-cyan-900/50 group-hover:text-cyan-400 transition-colors">
               <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10m-11 9h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2z" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2">產期告示</h2>
+            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-cyan-400 transition-colors">產期告示</h2>
             <p className="text-slate-500 text-xs mb-6 px-2">
               生產交期公告與提醒。<br/>(Schedule Notice)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-700 text-slate-500 text-xs font-mono">
-              COMING SOON
+            <span className="px-4 py-2 rounded border border-cyan-700 text-cyan-400 text-xs font-mono group-hover:bg-cyan-700/20 group-hover:text-white group-hover:border-cyan-600 group-hover:bg-cyan-600 transition-all">
+              NOTICE BOARD &rarr;
             </span>
-          </div>
+          </Link>
 
           {/* 8. 財會專區 (Slate / Disabled) */}
           <div
