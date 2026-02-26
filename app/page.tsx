@@ -376,36 +376,7 @@ export default function LandingPage() {
           </Link>
 
           {/* 5. 系統設定 (Orange) */}
-          <Link href="/admin/settings"
-            onClick={guardFeatureAccess('system_settings', '系統設定')}
-            onMouseEnter={() => setIsHovered('settings')}
-            onMouseLeave={() => setIsHovered('none')}
-            className={`
-              group relative order-8 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
-              hover:border-orange-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(249,115,22,0.15)]
-              ${canSystemSettings ? '' : 'opacity-50 grayscale'}
-              ${isHovered !== 'none' && isHovered !== 'settings' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
-            `}
-          >
-            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-orange-500/10 rounded border border-orange-500/20">
-              <span className="text-[10px] text-orange-400 font-bold uppercase tracking-wider">Settings</span>
-            </div>
-
-            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-orange-900/50 text-slate-400 group-hover:text-orange-400 transition-colors">
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-orange-400 transition-colors">系統設定</h2>
-            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
-              組織與公告管理。<br/>(System Settings)
-            </p>
-            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-orange-600 group-hover:border-orange-600 group-hover:text-white transition-all">
-              OPEN SETTINGS &rarr;
-            </span>
-          </Link>
+          {/* 系統設定入口已移除 */}
 
           {/* 6. 品保專區 (Teal) */}
           <Link href="/qa"

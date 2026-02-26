@@ -116,6 +116,21 @@ export default function PendingPage() {
     return { status: 'OK', reason: '' }
   }
 
+  // 刪除訂單錯誤資料
+  const handleDeleteOrder = async (id: number) => {
+    if (!window.confirm('確定要刪除這筆訂單錯誤資料？此動作無法復原！')) return;
+    try {
+      const { error } = await supabase.from('daily_orders').delete().eq('id', id);
+      if (error) throw error;
+      setOrderErrors(prev => prev.filter(r => r.id !== id));
+      alert('✅ 已刪除該筆訂單錯誤資料');
+    } catch (err: unknown) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : '未知錯誤';
+      alert('刪除失敗: ' + message);
+    }
+  }
+
   // 4. 🔥 關鍵修改：發送回訂單更新表 (Move back to temp_orders)
   const handleSubmitOrderFix = async (id: number) => {
     const row = orderErrors.find(r => r.id === id)
@@ -160,6 +175,21 @@ export default function PendingPage() {
       console.error(err)
       const message = err instanceof Error ? err.message : '未知錯誤'
       alert('操作失敗: ' + message)
+    }
+  }
+
+  // 刪除工時轉換錯誤資料
+  const handleDeleteConversion = async (id: number) => {
+    if (!window.confirm('確定要刪除這筆工時轉換錯誤資料？此動作無法復原！')) return;
+    try {
+      const { error } = await supabase.from('daily_orders').delete().eq('id', id);
+      if (error) throw error;
+      setConversionErrors(prev => prev.filter(r => r.id !== id));
+      alert('✅ 已刪除該筆工時轉換錯誤資料');
+    } catch (err: unknown) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : '未知錯誤';
+      alert('刪除失敗: ' + message);
     }
   }
 
@@ -235,13 +265,19 @@ export default function PendingPage() {
                   <td className="p-4"><EditableCell value={row.item_name} onChange={(v: string) => handleEdit('order', row.id, 'item_name', v)} /></td>
                   <td className="p-4"><EditableCell value={row.quantity} onChange={(v: string) => handleEdit('order', row.id, 'quantity', v)} className="text-right" /></td>
                   <td className="p-4 text-red-400 text-xs">{row.error_reason}</td>
-                  <td className="p-4 text-center">
+                  <td className="p-4 text-center flex flex-col gap-2">
                     <button 
                       onClick={() => handleSubmitOrderFix(row.id)}
                       disabled={row.status === 'Error'}
                       className={`px-3 py-1 rounded text-xs transition-all ${row.status === 'OK' ? 'bg-green-600 text-white hover:bg-green-500 shadow-lg shadow-green-500/20' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
                     >
                       退回訂單表
+                    </button>
+                    <button
+                      onClick={() => handleDeleteOrder(row.id)}
+                      className="px-3 py-1 rounded text-xs bg-rose-700 text-white hover:bg-rose-600 shadow-lg shadow-rose-500/20 transition-all"
+                    >
+                      刪除
                     </button>
                   </td>
                 </tr>
@@ -284,12 +320,18 @@ export default function PendingPage() {
                   <td className="p-4"><EditableCell value={row.quantity} onChange={(v: string) => handleEdit('conversion', row.id, 'quantity', v)} className="text-right" /></td>
                   <td className="p-4"><EditableCell value={row.plate_count} onChange={(v: string) => handleEdit('conversion', row.id, 'plate_count', v)} className="text-center" /></td>
                   <td className="p-4 text-yellow-400 text-xs">{row.conversion_note}</td>
-                  <td className="p-4 text-center">
+                  <td className="p-4 text-center flex flex-col gap-2">
                     <button 
                       onClick={() => handleSubmitConversionFix(row.id)}
                       className="px-4 py-2 rounded text-xs font-bold bg-cyan-600 text-white hover:bg-cyan-500 shadow-lg shadow-cyan-500/20 transition-all"
                     >
                       發送回轉換表
+                    </button>
+                    <button
+                      onClick={() => handleDeleteConversion(row.id)}
+                      className="px-3 py-1 rounded text-xs bg-rose-700 text-white hover:bg-rose-600 shadow-lg shadow-rose-500/20 transition-all"
+                    >
+                      刪除
                     </button>
                   </td>
                 </tr>

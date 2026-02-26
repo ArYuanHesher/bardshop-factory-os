@@ -19,33 +19,41 @@ export default function SystemLogsPage() {
   const [loading, setLoading] = useState(true)
   const [filterUser, setFilterUser] = useState('')
   const [filterAction, setFilterAction] = useState('')
+  const [filterBoard, setFilterBoard] = useState('')
+  const boardOptions = [
+    { value: '', label: '全部看板' },
+    { value: '訂單資料管理', label: '訂單資料管理' },
+    { value: '生產管理入口', label: '生產管理入口' },
+    { value: '產線排程看板', label: '產線排程看板' },
+    { value: '物料管理', label: '物料管理' },
+    { value: '工序資料庫', label: '工序資料庫' },
+    { value: '系統設定', label: '系統設定' },
+  ]
 
-  const fetchLogs = useCallback(async (userFilter: string = '', actionFilter: string = '') => {
+  const fetchLogs = useCallback(async (userFilter: string = '', actionFilter: string = '', boardFilter: string = '') => {
     setLoading(true)
     let query = supabase
       .from('system_logs')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(100) // 只抓最近 100 筆，避免太慢
+      .limit(100)
 
     if (userFilter) {
       query = query.or(`user_name.ilike.%${userFilter}%,user_email.ilike.%${userFilter}%`)
     }
-
     if (actionFilter) {
       query = query.ilike('action_type', `%${actionFilter}%`)
     }
-
+    if (boardFilter) {
+      query = query.ilike('target_resource', `%${boardFilter}%`)
+    }
     const { data } = await query
     if (data) setLogs(data as Log[])
     setLoading(false)
   }, [])
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      void fetchLogs('')
-    }, 0)
-    return () => clearTimeout(timer)
+    fetchLogs('', '', '')
   }, [fetchLogs])
 
   const getActionColor = (action: string) => {
@@ -63,23 +71,35 @@ export default function SystemLogsPage() {
           <p className="text-slate-500 mt-1 font-mono text-sm uppercase">SYSTEM AUDIT LOGS</p>
         </div>
         <div className="flex gap-2">
-            <input 
-                type="text" 
-                placeholder="搜尋操作者 / Email..." 
-                className="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-cyan-500 outline-none"
-                value={filterUser}
-                onChange={e => setFilterUser(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && fetchLogs(filterUser, filterAction)}
-            />
-            <input 
-                type="text" 
-                placeholder="搜尋動作..." 
-                className="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-cyan-500 outline-none"
-                value={filterAction}
-                onChange={e => setFilterAction(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && fetchLogs(filterUser, filterAction)}
-            />
-              <button onClick={() => fetchLogs(filterUser, filterAction)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded transition-colors">重新整理</button>
+          <select
+            className="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-cyan-500 outline-none"
+            value={filterBoard}
+            onChange={e => {
+              setFilterBoard(e.target.value)
+              fetchLogs(filterUser, filterAction, e.target.value)
+            }}
+          >
+            {boardOptions.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            placeholder="搜尋操作者 / Email..."
+            className="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-cyan-500 outline-none"
+            value={filterUser}
+            onChange={e => setFilterUser(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && fetchLogs(filterUser, filterAction, filterBoard)}
+          />
+          <input
+            type="text"
+            placeholder="搜尋動作..."
+            className="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-cyan-500 outline-none"
+            value={filterAction}
+            onChange={e => setFilterAction(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && fetchLogs(filterUser, filterAction, filterBoard)}
+          />
+          <button onClick={() => fetchLogs(filterUser, filterAction, filterBoard)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded transition-colors">重新整理</button>
         </div>
       </div>
 

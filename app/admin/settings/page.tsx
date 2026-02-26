@@ -75,12 +75,10 @@ export default function SystemSettingsHomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </div>
-
             <div>
               <h2 className="text-2xl font-bold text-white mb-2 group-hover:text-orange-300 transition-colors">系統 LOG</h2>
               <p className="text-sm text-slate-400 font-mono">System Audit Logs</p>
             </div>
-
             <div className="mt-auto pt-6 flex items-center justify-between border-t border-white/5 group-hover:border-white/10 transition-colors">
               <div className="h-1 w-12 rounded-full opacity-30 group-hover:w-full transition-all duration-500 bg-orange-400"></div>
               <span className="text-xs font-mono opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all text-white">
@@ -88,6 +86,7 @@ export default function SystemSettingsHomePage() {
               </span>
             </div>
           </Link>
+        {/* LOG監控大型入口看板連結已移除 */}
         </div>
       </div>
     </div>
