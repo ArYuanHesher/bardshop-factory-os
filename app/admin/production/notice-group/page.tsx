@@ -13,6 +13,13 @@ interface GroupConfig {
 }
 
 export default function ProductionNoticeGroupSettings() {
+          // 刪除群組
+          const deleteGroup = async (idx: number) => {
+            const groupId = groups[idx]?.id;
+            if (!groupId) return;
+            const { error } = await supabase.from("production_notice_groups").delete().eq("id", groupId);
+            if (!error) setGroups(gs => gs.filter((_, i) => i !== idx));
+          };
         // 儲存編輯
         const saveEdit = async (idx: number) => {
           if (!editGroup.name) return;
