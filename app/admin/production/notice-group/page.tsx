@@ -58,7 +58,7 @@ const moveGroup = async (idx: number, direction: "up" | "down") => {
       // 取消編輯模式
       const cancelEdit = () => {
         setEditIdx(null);
-        setEditGroup({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
+         setEditGroup({ id: 0, name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
       };
     // 進入編輯模式
     const startEdit = (idx: number) => {
