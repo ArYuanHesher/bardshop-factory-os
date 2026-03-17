@@ -38,7 +38,7 @@ export default function NoticeBoardHome() {
         supabase.from("production_notice_groups").select("*").order("order")
       ]);
       setGroups(groupData || []);
-      let allBomItems = [];
+      let allBomItems: any[] = [];
       let from = 0;
       const pageSize = 1000;
       let done = false;
