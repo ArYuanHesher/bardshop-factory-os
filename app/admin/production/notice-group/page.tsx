@@ -9,6 +9,7 @@ import { useEffect } from "react";
 import { supabase } from "../../../../lib/supabaseClient";
 
 interface GroupConfig {
+  id: number;
   name: string;
   sample_days: number;
   mass_days: number;
