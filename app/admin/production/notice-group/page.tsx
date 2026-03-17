@@ -53,7 +53,7 @@ const moveGroup = async (idx: number, direction: "up" | "down") => {
             setGroups(gs => gs.map((g, i) => (i === idx ? data[0] : g)));
           }
           setEditIdx(null);
-          setEditGroup({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
+          setEditGroup({ id: 0, name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
         };
       // 取消編輯模式
       const cancelEdit = () => {
