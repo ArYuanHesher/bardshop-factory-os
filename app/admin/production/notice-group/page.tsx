@@ -67,7 +67,7 @@ const moveGroup = async (idx: number, direction: "up" | "down") => {
     };
   const [groups, setGroups] = useState<GroupConfig[]>([]);
   const [newGroup, setNewGroup] = useState({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
-  const [editIdx, setEditIdx] = useState(null);
+  const [editIdx, setEditIdx] = useState<number | null>(null);
   const [editGroup, setEditGroup] = useState({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
 
   // (移除同步 addGroup，僅保留 async addGroup)
