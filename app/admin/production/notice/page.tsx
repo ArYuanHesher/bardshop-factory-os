@@ -19,6 +19,7 @@ interface GroupConfig {
 }
 
 export default function ProductionNoticeSettings() {
+      const [totalCount, setTotalCount] = useState(0);
     const PAGE_SIZE = 50;
     const [page, setPage] = useState(1);
   const [bomItems, setBomItems] = useState<BomItem[]>([]);
@@ -29,10 +30,23 @@ export default function ProductionNoticeSettings() {
   const [showUngrouped, setShowUngrouped] = useState(false); // 預設顯示全部
 
   useEffect(() => {
-    // 取得BOM表資料
+    // 分批取得所有 BOM 資料
     const fetchBom = async () => {
-      const { data } = await supabase.from("bom").select("id, product_code, product_name, group_name");
-      if (data) setBomItems(data);
+      let allData: BomItem[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      while (true) {
+        const to = from + batchSize - 1;
+        const { data } = await supabase.from("bom").select("id, product_code, product_name, group_name").range(from, to);
+        if (data && data.length > 0) {
+          allData = allData.concat(data);
+          if (data.length < batchSize) break;
+          from += batchSize;
+        } else {
+          break;
+        }
+      }
+      setBomItems(allData);
     };
     // 取得群組資料
     const fetchGroups = async () => {
@@ -53,8 +67,6 @@ export default function ProductionNoticeSettings() {
       supabase.removeChannel(groupSub);
     };
   }, []);
-
-  // 設定BOM品項的群組
   const setItemGroup = async (itemId: number, groupName: string) => {
     // 更新本地狀態
     setBomItems(items => items.map(item => item.id === itemId ? { ...item, group_name: groupName } : item));
@@ -85,21 +97,33 @@ export default function ProductionNoticeSettings() {
     setSelected([]);
     setBatchGroup("");
   };
-
-  let filtered = bomItems.filter(item =>
-    item.product_code.includes(search) ||
-    item.product_name.includes(search)
-  );
+  // 分頁顯示（只顯示當前頁資料）
+  // 本地搜尋與分頁
+  let filtered = bomItems;
+  if (search.trim()) {
+    filtered = filtered.filter(item =>
+      item.product_code.includes(search.trim()) ||
+      item.product_name.includes(search.trim())
+    );
+  }
   if (showUngrouped) {
     filtered = filtered.filter(item => !item.group_name);
   }
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const allIds = paged.map(item => item.id);
+  // 分頁顯示邏輯
+  const PAGE_BLOCK_SIZE = 10;
+  const currentBlock = Math.floor((page - 1) / PAGE_BLOCK_SIZE);
+  const blockStart = currentBlock * PAGE_BLOCK_SIZE + 1;
+  const blockEnd = Math.min(blockStart + PAGE_BLOCK_SIZE - 1, totalPages);
+  const hasPrevBlock = blockStart > 1;
+  const hasNextBlock = blockEnd < totalPages;
 
   return (
     <div className="p-8 max-w-full mx-auto">
       <h1 className="text-3xl font-bold text-white mb-6">產期告示設定</h1>
+      {/* ...existing code... */}
       <div className="flex items-center mb-4 gap-4">
         <input
           type="text"
@@ -127,26 +151,34 @@ export default function ProductionNoticeSettings() {
           onClick={() => setPage(p => Math.max(1, p - 1))}
           disabled={page === 1}
         >上一頁</button>
-        {(() => {
-          const pages = [];
-          const forcePages = Math.max(totalPages, 2);
-          for (let i = 1; i <= forcePages; i++) {
-            pages.push(i);
-          }
-          return pages.map((pn, idx) =>
-            <button
-              key={pn}
-              style={{margin:'0 2px', padding:'4px 8px', borderRadius:'4px', background: pn === page ? '#06b6d4' : '#1e293b', color: pn === page ? '#fff' : '#cbd5e1', fontWeight:'bold'}}
-              onClick={() => setPage(pn)}
-              disabled={pn === page}
-            >{pn}</button>
-          );
-        })()}
+        {hasPrevBlock && (
+          <button
+            style={{margin:'0 2px', padding:'4px 8px', borderRadius:'4px', background:'#1e293b', color:'#cbd5e1', fontWeight:'bold'}}
+            onClick={() => setPage(blockStart - PAGE_BLOCK_SIZE)}
+          >前10頁</button>
+        )}
+        {Array.from({ length: blockEnd - blockStart + 1 }, (_, i) => blockStart + i).map(pn => (
+          <button
+            key={pn}
+            style={{margin:'0 2px', padding:'4px 8px', borderRadius:'4px', background: pn === page ? '#06b6d4' : '#1e293b', color: pn === page ? '#fff' : '#cbd5e1', fontWeight:'bold'}}
+            onClick={() => setPage(pn)}
+            disabled={pn === page}
+          >{pn}</button>
+        ))}
+        {hasNextBlock && (
+          <button
+            style={{margin:'0 2px', padding:'4px 8px', borderRadius:'4px', background:'#1e293b', color:'#cbd5e1', fontWeight:'bold'}}
+            onClick={() => setPage(blockStart + PAGE_BLOCK_SIZE)}
+          >後10頁</button>
+        )}
         <button
           style={{margin:'0 4px', padding:'6px 12px', borderRadius:'4px', background:'#334155', color:'#fff', fontWeight:'bold'}}
           onClick={() => setPage(p => Math.min(totalPages, p + 1))}
           disabled={page === totalPages}
         >下一頁</button>
+          <div style={{marginTop:'8px', color:'#334155', fontSize:'14px'}}>
+            Debug: paged.length={paged.length}, totalPages={totalPages}, page={page}, blockStart={blockStart}, blockEnd={blockEnd}
+          </div>
       </div>
       <table className="w-full text-left text-sm text-slate-400">
         <thead className="bg-slate-950 text-slate-200 uppercase font-mono text-xs">
@@ -173,14 +205,14 @@ export default function ProductionNoticeSettings() {
                   <input type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelect(item.id)} />
                 </td>
                 <td className="p-3 w-80 whitespace-nowrap font-mono text-slate-300">{item.product_code}</td>
-                <td className="p-3 w-128 whitespace-nowrap text-white">{item.product_name}</td>
+                <td className="p-3 w-128 whitespace-nowrap text-white" style={{maxWidth:'16rem', overflow:'hidden', textOverflow:'ellipsis'}}>{item.product_name}</td>
                 <td className="p-3 w-128 whitespace-nowrap">
                   <select className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-full" value={item.group_name || ""} onChange={e => setItemGroup(item.id, e.target.value)}>
                     <option value="">未設定</option>
                     {groups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
                   </select>
                 </td>
-                <td className="p-3 w-96 whitespace-nowrap text-cyan-200">{item.group_name ?? '-'}</td>
+                <td className="p-3 w-96 whitespace-nowrap text-cyan-200">{item.group_name ?? '-'} </td>
                 <td className="p-3 w-192 whitespace-nowrap overflow-x-auto text-slate-300" style={{maxWidth:'64rem'}}>{group?.summary ?? "-"}</td>
                 <td className="p-3 w-56 whitespace-nowrap text-cyan-300">{group?.sample_days ?? "-"}</td>
                 <td className="p-3 w-56 whitespace-nowrap text-cyan-300">{group?.mass_days ?? "-"}</td>

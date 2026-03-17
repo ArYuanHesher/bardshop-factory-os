@@ -1,7 +1,11 @@
 "use client";
 
+// Disabled due to build error. See page.jsx for working code.
+
+"use client";
 import { useState } from "react";
 import { useEffect } from "react";
+// Removed GroupOrderDragList import
 import { supabase } from "../../../../lib/supabaseClient";
 
 interface GroupConfig {
@@ -13,6 +17,20 @@ interface GroupConfig {
 }
 
 export default function ProductionNoticeGroupSettings() {
+// 移動群組順序
+const moveGroup = async (idx: number, direction: "up" | "down") => {
+  const newGroups = [...groups];
+  const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (targetIdx < 0 || targetIdx >= newGroups.length) return;
+  [newGroups[idx], newGroups[targetIdx]] = [newGroups[targetIdx], newGroups[idx]];
+  setGroups(newGroups);
+  // 更新順序到資料表
+  await Promise.all(
+    newGroups.map((g, i) =>
+      supabase.from("production_notice_groups").update({ order: i }).eq("id", g.id)
+    )
+  );
+};
           // 刪除群組
           const deleteGroup = async (idx: number) => {
             const groupId = groups[idx]?.id;
@@ -46,17 +64,17 @@ export default function ProductionNoticeGroupSettings() {
       setEditIdx(idx);
       setEditGroup(groups[idx]);
     };
-  const [groups, setGroups] = useState<any[]>([]);
-  const [newGroup, setNewGroup] = useState<GroupConfig>({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
-  const [editIdx, setEditIdx] = useState<number | null>(null);
-  const [editGroup, setEditGroup] = useState<GroupConfig>({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
+  const [groups, setGroups] = useState([]);
+  const [newGroup, setNewGroup] = useState({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
+  const [editIdx, setEditIdx] = useState(null);
+  const [editGroup, setEditGroup] = useState({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
 
   // (移除同步 addGroup，僅保留 async addGroup)
 
   // 讀取群組
   useEffect(() => {
     const fetchGroups = async () => {
-      const { data } = await supabase.from("production_notice_groups").select("*").order("id");
+      const { data } = await supabase.from("production_notice_groups").select("*").order("order");
       if (data) setGroups(data);
     };
     fetchGroups();
@@ -121,48 +139,23 @@ export default function ProductionNoticeGroupSettings() {
                 {editIdx === idx ? (
                   <>
                     <td className="p-3 w-72 whitespace-nowrap">
-                      <input
-                        type="text"
-                        className="bg-slate-800 border border-slate-600 rounded px-4 py-2 text-white w-full"
-                        value={editGroup.name}
-                        onChange={e => setEditGroup(eg => ({ ...eg, name: e.target.value }))}
-                      />
+                      <input type="text" className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-full" value={editGroup.name} onChange={e => setEditGroup(eg => ({ ...eg, name: e.target.value }))} />
                     </td>
                     <td className="p-3 w-96 whitespace-nowrap">
-                      <input
-                        type="text"
-                        className="bg-slate-800 border border-slate-600 rounded px-4 py-2 text-white w-full"
-                        value={editGroup.summary}
-                        onChange={e => setEditGroup(eg => ({ ...eg, summary: e.target.value }))}
-                      />
+                      <input type="text" className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-full" value={editGroup.summary} onChange={e => setEditGroup(eg => ({ ...eg, summary: e.target.value }))} />
                     </td>
                     <td className="p-3 w-40 whitespace-nowrap">
-                      <input
-                        type="number"
-                        className="bg-slate-800 border border-slate-600 rounded px-4 py-2 text-white w-full"
-                        value={editGroup.sample_days}
-                        onChange={e => setEditGroup(eg => ({ ...eg, sample_days: Number(e.target.value) }))}
-                      />
+                      <input type="number" className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-full" value={editGroup.sample_days} onChange={e => setEditGroup(eg => ({ ...eg, sample_days: Number(e.target.value) }))} />
                     </td>
                     <td className="p-3 w-40 whitespace-nowrap">
-                      <input
-                        type="number"
-                        className="bg-slate-800 border border-slate-600 rounded px-4 py-2 text-white w-full"
-                        value={editGroup.mass_days}
-                        onChange={e => setEditGroup(eg => ({ ...eg, mass_days: Number(e.target.value) }))}
-                      />
+                      <input type="number" className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-full" value={editGroup.mass_days} onChange={e => setEditGroup(eg => ({ ...eg, mass_days: Number(e.target.value) }))} />
                     </td>
                     <td className="p-3 w-56 whitespace-nowrap">
-                      <input
-                        type="number"
-                        className="bg-slate-800 border border-slate-600 rounded px-4 py-2 text-white w-full"
-                        value={editGroup.mass_qty_standard}
-                        onChange={e => setEditGroup(eg => ({ ...eg, mass_qty_standard: Number(e.target.value) }))}
-                      />
+                      <input type="number" className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-full" value={editGroup.mass_qty_standard} onChange={e => setEditGroup(eg => ({ ...eg, mass_qty_standard: Number(e.target.value) }))} />
                     </td>
                     <td className="p-3 w-40 whitespace-nowrap flex gap-2">
                       <button className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700" onClick={() => saveEdit(idx)}>儲存</button>
-                      <button className="px-3 py-1 bg-slate-600 text-white rounded hover:bg-slate-700" onClick={cancelEdit}>取消</button>
+                      <button className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700" onClick={cancelEdit}>取消</button>
                     </td>
                   </>
                 ) : (
@@ -175,6 +168,8 @@ export default function ProductionNoticeGroupSettings() {
                     <td className="p-3 w-40 whitespace-nowrap flex gap-2">
                       <button className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700" onClick={() => startEdit(idx)}>編輯</button>
                       <button className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700" onClick={() => deleteGroup(idx)}>刪除</button>
+                      <button className="px-2 py-1 bg-slate-700 text-white rounded hover:bg-slate-800" onClick={() => moveGroup(idx, "up")}>↑</button>
+                      <button className="px-2 py-1 bg-slate-700 text-white rounded hover:bg-slate-800" onClick={() => moveGroup(idx, "down")}>↓</button>
                     </td>
                   </>
                 )}

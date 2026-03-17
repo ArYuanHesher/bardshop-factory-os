@@ -25,6 +25,7 @@ export default function NoticeBoardHome() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [search, setSearch] = useState("");
   const [searchResult, setSearchResult] = useState<any>(null);
+  const [searchSubmitted, setSearchSubmitted] = useState(false);
   const [bomItems, setBomItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -32,12 +33,29 @@ export default function NoticeBoardHome() {
   useEffect(() => {
     async function fetchGroupsAndBom() {
       setLoading(true);
-      const [{ data: groupData }, { data: bomData }] = await Promise.all([
-        supabase.from("production_notice_groups").select("*").order("id"),
-        supabase.from("bom").select("*")
+      // 分批載入 BOM 資料
+      const [{ data: groupData }] = await Promise.all([
+        supabase.from("production_notice_groups").select("*").order("order")
       ]);
       setGroups(groupData || []);
-      setBomItems(bomData || []);
+      let allBomItems = [];
+      let from = 0;
+      const pageSize = 1000;
+      let done = false;
+      while (!done) {
+        const { data: bomData } = await supabase.from("bom").select("*").range(from, from + pageSize - 1);
+        if (bomData && bomData.length > 0) {
+          allBomItems = allBomItems.concat(bomData);
+          if (bomData.length < pageSize) {
+            done = true;
+          } else {
+            from += pageSize;
+          }
+        } else {
+          done = true;
+        }
+      }
+      setBomItems(allBomItems);
       setLoading(false);
     }
     fetchGroupsAndBom();
@@ -48,7 +66,11 @@ export default function NoticeBoardHome() {
   // 搜尋BOM品項編碼
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!search.trim()) return;
+    setSearchSubmitted(true);
+    if (!search.trim()) {
+      setSearchResult(null);
+      return;
+    }
     const found = bomItems.find(item => item.product_code === search.trim());
     setSearchResult(found || null);
   };
@@ -98,6 +120,11 @@ export default function NoticeBoardHome() {
                   </>
                 ) : null;
               })()}
+            </div>
+          )}
+          {searchSubmitted && search && !searchResult && (
+            <div className="mt-6 p-4 bg-red-900 rounded border border-red-700 w-full max-w-xl mx-auto text-center text-white">
+              搜尋無結果<br />請檢查品項編碼輸入是否正確，或連繫物管及生管單位確認品項編碼已更新到最新版本
             </div>
           )}
         </div>
