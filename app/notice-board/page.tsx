@@ -16,6 +16,10 @@ export default function NoticeBoardHome() {
     id: number;
     name: string;
     description?: string;
+    summary?: string;
+    sample_days?: number;
+    mass_days?: number;
+    mass_qty_standard?: number;
     notices?: Notice[];
   };
   const [groups, setGroups] = useState<Group[]>([]);
