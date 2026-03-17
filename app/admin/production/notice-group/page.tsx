@@ -19,7 +19,7 @@ interface GroupConfig {
 export default function ProductionNoticeGroupSettings() {
 // 移動群組順序
 const moveGroup = async (idx: number, direction: "up" | "down") => {
-  const newGroups = [...groups];
+  const newGroups: GroupConfig[] = [...groups];
   const targetIdx = direction === "up" ? idx - 1 : idx + 1;
   if (targetIdx < 0 || targetIdx >= newGroups.length) return;
   [newGroups[idx], newGroups[targetIdx]] = [newGroups[targetIdx], newGroups[idx]];
@@ -64,7 +64,7 @@ const moveGroup = async (idx: number, direction: "up" | "down") => {
       setEditIdx(idx);
       setEditGroup(groups[idx]);
     };
-  const [groups, setGroups] = useState([]);
+  const [groups, setGroups] = useState<GroupConfig[]>([]);
   const [newGroup, setNewGroup] = useState({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
   const [editIdx, setEditIdx] = useState(null);
   const [editGroup, setEditGroup] = useState({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
