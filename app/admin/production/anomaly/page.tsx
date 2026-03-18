@@ -14,19 +14,6 @@ export default function QaZonePage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        <Link
-          href="/qa/report"
-          className="group rounded-2xl border border-slate-700 bg-slate-900/50 p-6 hover:border-teal-500 hover:bg-slate-800/60 transition-all"
-        >
-          <div className="mb-4 inline-flex p-3 rounded-full bg-slate-800 group-hover:bg-teal-900/40 text-slate-300 group-hover:text-teal-300 transition-colors">
-            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-bold text-white mb-2 group-hover:text-teal-300">異常回報單</h2>
-          <p className="text-slate-400 text-sm">手動填寫品質異常，建立待處理回報。</p>
-          <p className="text-xs text-teal-400 font-mono mt-4">OPEN FORM →</p>
-        </Link>
 
         <Link
           href="/qa/records"

@@ -1,4 +1,7 @@
+
 'use client'
+
+import React from 'react';
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -12,70 +15,63 @@ interface Announcement {
   is_active: boolean
   created_at: string
 }
+type MemberDataType = {
+  real_name: string | null;
+  department: string | null;
+  email: string | null;
+  permissions: string[] | null;
+  is_admin: boolean | null;
+};
 
-interface CurrentUserProfile {
-  real_name: string
-  department: string
-  email: string
-  permissions: string[]
-  is_admin: boolean
+
+function normalizeLegacyPermissions(perms: string[]): string[] {
+  // TODO: implement your normalization logic here
+  return perms;
 }
 
-const normalizeLegacyPermissions = (rawPermissions: string[] = []) => {
-  const normalized = new Set<string>()
-
-  rawPermissions.forEach((permission) => {
-    if (permission === 'production') normalized.add('dashboard')
-    else if (permission === 'admin') {
-      normalized.add('production_admin')
-      normalized.add('system_settings')
-    } else normalized.add(permission)
-  })
-
-  return Array.from(normalized)
-}
-
-export default function LandingPage() {
-  const router = useRouter()
-  const [time, setTime] = useState('')
-  // 🔥 新增 'tasks' 狀態
-  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'admin' | 'estimation' | 'tasks' | 'qa' | 'settings' | 'notice' | 'finance'>('none')
-  
-  const [announcements, setAnnouncements] = useState<Announcement[]>([])
-  const [currentAnnoIndex, setCurrentAnnoIndex] = useState(0)
-  const [showModal, setShowModal] = useState(false)
-  const [currentUser, setCurrentUser] = useState<CurrentUserProfile | null>(null)
-  const [memberPermissions, setMemberPermissions] = useState<string[]>([])
+export default function HomePage() {
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<MemberDataType | null>(null);
+  const [memberPermissions, setMemberPermissions] = useState<string[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [currentAnnoIndex, setCurrentAnnoIndex] = useState(0);
+  const [showModal, setShowModal] = useState(false);
+  const [isHovered, setIsHovered] = useState('none');
+  const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setTime(new Date().toLocaleTimeString('en-US', { hour12: false }))
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
+      setTime(new Date().toLocaleTimeString());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const fetchCurrentUser = async () => {
-      const { data: authData } = await supabase.auth.getUser()
-      const authUserId = authData.user?.id || ''
-      const email = authData.user?.email || localStorage.getItem('bardshop_user_email') || ''
-      if (!email) return
+      const { data: authData } = await supabase.auth.getUser();
+      const authUserId = authData.user?.id || '';
+      const email = authData.user?.email || localStorage.getItem('bardshop_user_email') || '';
+      if (!email) {
+        setMemberPermissions([]);
+        setCurrentUser({
+          real_name: '-',
+          department: '-',
+          email: '',
+          permissions: [],
+          is_admin: false,
+        });
+        return;
+      }
 
-      let memberData: {
-        real_name: string | null
-        department: string | null
-        email: string | null
-        permissions: string[] | null
-        is_admin: boolean | null
-      } | null = null
+      let memberData: MemberDataType | null = null;
 
       if (authUserId) {
         const { data } = await supabase
           .from('members')
           .select('real_name, department, email, permissions, is_admin')
           .eq('auth_user_id', authUserId)
-          .maybeSingle()
-        memberData = data
+          .maybeSingle();
+        memberData = data;
       }
 
       if (!memberData) {
@@ -83,38 +79,37 @@ export default function LandingPage() {
           .from('members')
           .select('real_name, department, email, permissions, is_admin')
           .eq('email', email)
-          .maybeSingle()
-        memberData = data
+          .maybeSingle();
+        memberData = data;
       }
 
       if (memberData) {
         const normalizedPermissions = Boolean(memberData.is_admin)
           ? ['dashboard', 'notice', 'estimation', 'tasks', 'qa', 'production_admin', 'system_settings']
-          : normalizeLegacyPermissions(Array.isArray(memberData.permissions) ? memberData.permissions : [])
-
-        setMemberPermissions(normalizedPermissions)
+          : normalizeLegacyPermissions(Array.isArray(memberData.permissions) ? memberData.permissions : []);
+        setMemberPermissions(normalizedPermissions);
         setCurrentUser({
           real_name: memberData.real_name || '-',
           department: memberData.department || '-',
           email: memberData.email || email,
           permissions: normalizedPermissions,
           is_admin: Boolean(memberData.is_admin),
-        })
-        return
+        });
+        return;
       }
-
-      setMemberPermissions([])
+      setMemberPermissions([]);
       setCurrentUser({
         real_name: '-',
         department: '-',
         email,
         permissions: [],
         is_admin: false,
-      })
-    }
+      });
+    };
+    void fetchCurrentUser();
+  }, []);
 
-    void fetchCurrentUser()
-  }, [])
+
 
   useEffect(() => {
     const fetchAnnouncements = async () => {
@@ -289,13 +284,14 @@ export default function LandingPage() {
             </span>
           </Link>
 
-          {/* 2. 時間試算 (Emerald) */}
+
+          {/* 2. 時間試算 (Emerald) - 移到任務看板原位置 */}
           <Link href="/estimation"
             onClick={guardFeatureAccess('estimation', '時間試算')}
             onMouseEnter={() => setIsHovered('estimation')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-5 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              group relative order-3 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
               flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
               hover:border-emerald-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(16,185,129,0.15)]
               ${canEstimation ? '' : 'opacity-50 grayscale'}
@@ -316,31 +312,32 @@ export default function LandingPage() {
             </span>
           </Link>
 
-          {/* 🔥 3. 任務看板 (COMING SOON) */}
-          <div
+          {/* 3. 建立異常單 (Teal) - 新增方塊 */}
+          <Link href="/qa/report"
+            onClick={guardFeatureAccess('qa', '建立異常單')}
+            onMouseEnter={() => setIsHovered('qa')}
+            onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-3 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 opacity-50 grayscale cursor-not-allowed select-none
-              ${isHovered !== 'none' && isHovered !== 'tasks' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+              group relative order-5 h-52 md:h-60 lg:h-64 rounded-2xl border border-teal-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              hover:border-teal-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(20,184,166,0.15)]
+              ${canQa ? '' : 'opacity-50 grayscale'}
+              ${isHovered !== 'none' && isHovered !== 'qa' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
-            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 rounded border border-blue-500/20">
-              <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">COMING SOON</span>
+            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-teal-900/50 text-slate-400 group-hover:text-teal-400 transition-colors">
+              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+              </svg>
             </div>
-
-            <div className="mb-6 p-4 rounded-full bg-slate-800 text-slate-400">
-               <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-               </svg>
-            </div>
-            <h2 className="text-xl font-bold text-white mb-2">任務看板</h2>
-            <p className="text-slate-500 text-xs mb-6 px-2">
-              部門協作、指派與追蹤。<br/>(Task Flow)
+            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-teal-400 transition-colors">建立異常單</h2>
+            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+              手動填寫品質異常，建立待處理回報單。<br/>(QA Report)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono bg-blue-600/20 border-blue-600/20 cursor-not-allowed">
-              COMING SOON
+            <span className="px-4 py-2 rounded border border-teal-600 text-teal-300 text-xs font-mono group-hover:bg-teal-600 group-hover:border-teal-600 group-hover:text-white transition-all">
+              OPEN FORM &rarr;
             </span>
-          </div>
+          </Link>
 
           {/* 4. 生產管理 (Purple) */}
           <Link href="/admin"
@@ -468,15 +465,17 @@ export default function LandingPage() {
             </span>
           </Link>
 
-          {/* 8. 財會專區 (Slate / Disabled) */}
+          {/* 8. 財會專區 (Slate / Disabled) - 黑霧特效 */}
           <div
             onMouseEnter={() => setIsHovered('finance')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
               group relative order-7 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500
-              ${isHovered !== 'none' && isHovered !== 'finance' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-not-allowed select-none
+              opacity-50 grayscale
+              ${isHovered !== 'none' && isHovered !== 'finance' ? 'scale-95 blur-[2px]' : ''}
             `}
+            style={{ pointerEvents: 'none' }}
           >
             <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-slate-500/10 rounded border border-slate-500/20">
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Soon</span>

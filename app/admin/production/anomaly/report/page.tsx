@@ -157,8 +157,8 @@ export default function QaReportFormPage() {
           <h1 className="text-3xl font-bold text-white tracking-tight">異常回報單</h1>
           <p className="text-teal-400 mt-1 font-mono text-sm uppercase">QA REPORT FORM</p>
         </div>
-        <Link href="/qa" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm">
-          返回品保專區
+        <Link href="/" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm">
+          返回首頁
         </Link>
       </div>
 

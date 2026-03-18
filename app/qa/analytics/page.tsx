@@ -8,6 +8,7 @@ interface AnomalyReportRow {
   created_at: string
   status: string | null
   reason: string | null
+  qa_category: string | null
   qa_department: string | null
   qa_reporter: string | null
   qa_handlers: string[] | null
@@ -49,7 +50,7 @@ export default function QaAnalyticsPage() {
     const map = new Map<string, number>()
 
     for (const row of rows) {
-      const key = (row.reason || '未填寫').trim() || '未填寫'
+      const key = (row.qa_category || '未分類').trim() || '未分類'
       map.set(key, (map.get(key) || 0) + 1)
     }
 
@@ -103,7 +104,7 @@ export default function QaAnalyticsPage() {
     try {
       const { data, error } = await supabase
         .from('schedule_anomaly_reports')
-        .select('created_at, status, reason, qa_department, qa_reporter, qa_handlers, qa_responsible')
+        .select('created_at, status, reason, qa_category, qa_department, qa_reporter, qa_handlers, qa_responsible')
         .eq('report_type', 'qa')
         .gte('created_at', `${startDate}T00:00:00.000Z`)
         .lte('created_at', `${endDate}T23:59:59.999Z`)
