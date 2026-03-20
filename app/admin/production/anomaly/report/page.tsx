@@ -47,21 +47,24 @@ export default function QaReportFormPage() {
   const [orderNumber, setOrderNumber] = useState('')
   const [status] = useState<'pending'>('pending')
   const [reason, setReason] = useState('')
+  const [reporterDepartment, setReporterDepartment] = useState('')
   const [reporter, setReporter] = useState('')
-  const [personnelOptions, setPersonnelOptions] = useState<string[]>(DEFAULT_PERSONNEL_OPTIONS)
+  const [handlerDepartment, setHandlerDepartment] = useState('')
+  const [handlerPersonnel, setHandlerPersonnel] = useState('')
+  const [personnelOptions, setPersonnelOptions] = useState<OptionItem[]>([])
   const [categoryOptions, setCategoryOptions] = useState<string[]>(DEFAULT_CATEGORY_OPTIONS)
   const [departmentOptions, setDepartmentOptions] = useState<string[]>(DEFAULT_DEPARTMENT_OPTIONS)
-  const [department, setDepartment] = useState('')
   const [category, setCategory] = useState('')
-  const [handlers, setHandlers] = useState<string[]>([])
-  const [handlerInput, setHandlerInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // QA 部門欄位：以 reporterDepartment 為主
+  // handlers 欄位補上，預設為單一人員
+  const handlers = handlerPersonnel ? [handlerPersonnel] : [];
 
   useEffect(() => {
     const fetchOptions = async () => {
       const { data, error } = await supabase
         .from('qa_anomaly_option_items')
-        .select('option_type, option_value')
+        .select('option_type, option_value, department_value')
         .order('option_value', { ascending: true })
 
       if (error) {
@@ -72,8 +75,11 @@ export default function QaReportFormPage() {
       const rows = (data as Array<{ option_type: string; option_value: string }>) || []
       const personnel = rows
         .filter((item) => item.option_type === 'personnel')
-        .map((item) => item.option_value)
-        .filter((value) => typeof value === 'string' && value.trim().length > 0)
+        .map((item) => ({
+          option_value: item.option_value,
+          department_value: item.department_value || '',
+        }))
+        .filter((item) => typeof item.option_value === 'string' && item.option_value.trim().length > 0)
 
       const categories = rows
         .filter((item) => item.option_type === 'category')
@@ -85,7 +91,7 @@ export default function QaReportFormPage() {
         .map((item) => item.option_value)
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
 
-      setPersonnelOptions(personnel.length ? personnel : DEFAULT_PERSONNEL_OPTIONS)
+      setPersonnelOptions(personnel.length ? personnel : DEFAULT_PERSONNEL_OPTIONS.map(v => ({ option_value: v, department_value: '' })))
       setCategoryOptions(categories.length ? categories : DEFAULT_CATEGORY_OPTIONS)
       setDepartmentOptions(departments.length ? departments : DEFAULT_DEPARTMENT_OPTIONS)
     }
@@ -96,6 +102,11 @@ export default function QaReportFormPage() {
   const handleSubmit = async () => {
     if (!orderNumber.trim()) {
       alert('請填寫相關單號')
+      return
+    }
+
+    if (!reporterDepartment.trim()) {
+      alert('請選擇部門（必填）')
       return
     }
 
@@ -110,20 +121,14 @@ export default function QaReportFormPage() {
         report_type: 'qa',
         reason: reason.trim(),
         status,
-        source_order_id: null,
-        task_id: null,
         order_number: orderNumber.trim(),
-        item_code: '',
-        quantity: 0,
-        op_name: null,
-        station: null,
-        section_id: null,
         created_at: createdDate ? `${createdDate}T00:00:00.000Z` : new Date().toISOString(),
-        qa_department: department.trim() || null,
+        qa_department: reporterDepartment.trim() || null,
         qa_reporter: reporter.trim() || null,
         qa_handlers: handlers,
         qa_category: category || null,
         qa_responsible: [],
+        handler_department: handlerDepartment.trim() || null,
       }
 
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
@@ -133,11 +138,11 @@ export default function QaReportFormPage() {
       setCreatedDate(getTodayDateInput())
       setOrderNumber('')
       setReason('')
-      setDepartment('')
+      setReporterDepartment('')
       setReporter('')
-      setHandlers([])
+      setHandlerDepartment('')
+      setHandlerPersonnel('')
       setCategory('')
-      setHandlerInput('')
     } catch (err: unknown) {
       if (isQaReportTypeConstraintError(err)) {
         alert('送出失敗：資料庫尚未允許 report_type=qa。請先執行 sql/20260224_allow_qa_report_type.sql migration。')
@@ -183,88 +188,100 @@ export default function QaReportFormPage() {
             />
           </div>
 
-          <div>
-            <label className="text-xs text-slate-400">狀態</label>
-            <div className="mt-1 px-3 py-2 rounded border border-amber-700 bg-amber-900/30 text-amber-300 text-sm font-bold">
-              待處理
+          <div className="md:col-span-2 flex gap-4">
+            <div style={{ width: '50%' }}>
+              <label className="text-xs text-slate-400">異常分類</label>
+              <input
+                list="qa-category-options"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="輸入或選擇異常分類"
+                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+              />
+            </div>
+            <div style={{ width: '50%' }} className="flex flex-col justify-end">
+              <label className="text-xs text-slate-400">狀態</label>
+              <div className="mt-1 w-full">
+                <span className="bg-yellow-400 text-black px-3 py-2 rounded text-xs font-bold w-full block text-center" style={{height:'40px',display:'flex',alignItems:'center',justifyContent:'center'}}>待處理</span>
+              </div>
             </div>
           </div>
 
-          <div>
-            <label className="text-xs text-slate-400">部門</label>
+          <div className="col-span-1">
+            <label className="text-xs text-slate-400">異常回報-部門</label>
             <input
               list="qa-department-options"
-              value={department}
-              onChange={(e) => setDepartment(e.target.value)}
+              value={reporterDepartment}
+              onChange={(e) => {
+                setReporterDepartment(e.target.value);
+                setReporter('');
+              }}
               placeholder="輸入或選擇部門"
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
             />
           </div>
-
-          <div>
-            <label className="text-xs text-slate-400">異常回報人</label>
-            <input
-              list="qa-personnel-options"
-              value={reporter}
-              onChange={(e) => setReporter(e.target.value)}
-              placeholder="輸入或選擇回報人"
-              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs text-slate-400">異常處理人</label>
-            <div className="mt-1 space-y-2">
-              <div className="flex flex-wrap gap-1">
-                {handlers.map((name) => (
-                  <span key={name} className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700 text-cyan-200 text-xs flex items-center gap-1">
-                    {name}
-                    <button type="button" onClick={() => setHandlers((prev) => prev.filter((item) => item !== name))}>×</button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-2">
+          <div className="col-span-1">
+            <label className="text-xs text-slate-400">異常回報-人員</label>
+            {reporterDepartment ? (
+              <>
                 <input
-                  list="qa-personnel-options"
-                  value={handlerInput}
-                  onChange={(e) => setHandlerInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter') return
-                    e.preventDefault()
-                    const value = handlerInput.trim()
-                    if (!value) return
-                    setHandlers((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                    setHandlerInput('')
-                  }}
-                  placeholder="輸入或選擇處理人"
-                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                  list="qa-reporter-personnel-options"
+                  value={reporter}
+                  onChange={(e) => setReporter(e.target.value)}
+                  placeholder="先選部門，再選人員"
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                 />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const value = handlerInput.trim()
-                    if (!value) return
-                    setHandlers((prev) => (prev.includes(value) ? prev : [...prev, value]))
-                    setHandlerInput('')
-                  }}
-                  className="px-3 py-2 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-900/30 text-sm"
-                >
-                  新增
-                </button>
-              </div>
-            </div>
+                <datalist id="qa-reporter-personnel-options">
+                  {personnelOptions.filter(p => p.department_value === reporterDepartment).map((option, idx) => (
+                    <option key={idx} value={option.option_value} />
+                  ))}
+                </datalist>
+              </>
+            ) : (
+              <div className="mt-1 text-slate-500 text-xs">請先選部門</div>
+            )}
           </div>
-
-          <div>
-            <label className="text-xs text-slate-400">異常分類</label>
+          <div className="col-span-1">
+            <label className="text-xs text-slate-400">異常處理-部門</label>
             <input
-              list="qa-category-options"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="輸入或選擇異常分類"
+              list="qa-department-options"
+              value={handlerDepartment}
+              onChange={e => {
+                setHandlerDepartment(e.target.value);
+                setHandlerPersonnel('');
+              }}
+              placeholder="輸入或選擇部門"
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
             />
           </div>
+          <div className="col-span-1">
+            <label className="text-xs text-slate-400">異常處理-人員</label>
+            {handlerDepartment ? (
+              <>
+                <input
+                  list="qa-handler-personnel-options"
+                  value={handlerPersonnel}
+                  onChange={e => setHandlerPersonnel(e.target.value)}
+                  placeholder="先選部門，再選人員"
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                />
+                <datalist id="qa-handler-personnel-options">
+                  {personnelOptions.filter(p => p.department_value === handlerDepartment).map((option, i) => (
+                    <option key={i} value={option.option_value} />
+                  ))}
+                </datalist>
+              </>
+            ) : (
+              <div className="mt-1 text-slate-500 text-xs">請先選部門</div>
+            )}
+          </div>
+          {/* 已移除多餘的先選部門再選人員空格 */}
+        </div>
+
+        <div>
+          {/* 已移除多餘的異常處理部門與人員欄位 */}
+
+          {/* 異常分類欄位已移至狀態欄位，避免重複 */}
         </div>
 
         <div>
@@ -283,8 +300,11 @@ export default function QaReportFormPage() {
         </div>
 
         <datalist id="qa-personnel-options">
-          {personnelOptions.map((option) => (
-            <option key={option} value={option} />
+          {personnelOptions.map((option, idx) => (
+            <option
+              key={typeof option === 'string' ? option : (option.option_value + (option.department_value || '') + idx)}
+              value={typeof option === 'string' ? option : option.option_value}
+            />
           ))}
         </datalist>
         <datalist id="qa-category-options">

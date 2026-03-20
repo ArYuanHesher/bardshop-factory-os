@@ -7,10 +7,11 @@ import { supabase } from '../../../../../lib/supabaseClient'
 type OptionType = 'personnel' | 'category' | 'department'
 
 interface OptionItem {
-  id: number
-  option_type: OptionType
-  option_value: string
-  created_at: string
+  id: number;
+  option_type: OptionType;
+  option_value: string;
+  created_at: string;
+  department_value?: string;
 }
 
 const TYPE_CONFIG: Record<OptionType, { title: string; color: string }> = {
@@ -54,7 +55,7 @@ export default function QaOptionManagerPage() {
     setLoading(true)
     const { data, error } = await supabase
       .from('qa_anomaly_option_items')
-      .select('id, option_type, option_value, created_at')
+      .select('id, option_type, option_value, created_at, department_value')
       .order('option_type', { ascending: true })
       .order('option_value', { ascending: true })
 
@@ -71,7 +72,16 @@ export default function QaOptionManagerPage() {
           .insert(DEFAULT_OPTION_SEED)
 
         if (!seedError) {
-          await fetchItems(false)
+          // Re-fetch without seeding
+          const { data: data2, error: error2 } = await supabase
+            .from('qa_anomaly_option_items')
+            .select('id, option_type, option_value, created_at, department_value')
+            .order('option_type', { ascending: true })
+            .order('option_value', { ascending: true })
+          if (!error2) {
+            setItems(((data2 as OptionItem[]) || []).filter((item) => ALL_TYPES.includes(item.option_type)))
+          }
+          setLoading(false)
           return
         }
 
@@ -84,6 +94,7 @@ export default function QaOptionManagerPage() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchItems()
   }, [fetchItems])
 
@@ -214,6 +225,27 @@ export default function QaOptionManagerPage() {
                             />
                           ) : (
                             <span className="flex-1 text-sm text-slate-200">{item.option_value}</span>
+                          )}
+
+                          {/* 部門下拉選單 */}
+                          {type === 'personnel' && (
+                            <select
+                              value={item.department_value || ''}
+                              onChange={async (e) => {
+                                const dep = e.target.value;
+                                await supabase
+                                  .from('qa_anomaly_option_items')
+                                  .update({ department_value: dep })
+                                  .eq('id', item.id);
+                                await fetchItems();
+                              }}
+                              className="bg-slate-900 border border-cyan-700 rounded px-2 py-1 text-sm text-cyan-300 min-w-[120px]"
+                            >
+                              <option value="">未選擇</option>
+                              {grouped.department.map(dep => (
+                                <option key={dep.id} value={dep.option_value}>{dep.option_value}</option>
+                              ))}
+                            </select>
                           )}
 
                           {isEditing ? (

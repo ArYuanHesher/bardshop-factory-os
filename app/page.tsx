@@ -25,8 +25,10 @@ type MemberDataType = {
 
 
 function normalizeLegacyPermissions(perms: string[]): string[] {
-  // TODO: implement your normalization logic here
-  return perms;
+  // 權限轉換邏輯：null/undefined 預設空陣列
+  if (!Array.isArray(perms)) return [];
+  // 範例：去除重複、過濾空字串
+  return Array.from(new Set(perms.filter(p => typeof p === 'string' && p.trim() !== '')));
 }
 
 export default function HomePage() {
@@ -35,9 +37,10 @@ export default function HomePage() {
   const [memberPermissions, setMemberPermissions] = useState<string[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [currentAnnoIndex, setCurrentAnnoIndex] = useState(0);
+  const [time, setTime] = useState(() => new Date().toLocaleTimeString());
   const [showModal, setShowModal] = useState(false);
-  const [isHovered, setIsHovered] = useState('none');
-  const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
+  const [showQaModal, setShowQaModal] = useState(false);
+  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'estimation' | 'qa' | 'admin' | 'settings' | 'notice' | 'finance'>('none');
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -86,14 +89,14 @@ export default function HomePage() {
       if (memberData) {
         const normalizedPermissions = Boolean(memberData.is_admin)
           ? ['dashboard', 'notice', 'estimation', 'tasks', 'qa', 'production_admin', 'system_settings']
-          : normalizeLegacyPermissions(Array.isArray(memberData.permissions) ? memberData.permissions : []);
+          : normalizeLegacyPermissions(memberData.permissions ?? []);
         setMemberPermissions(normalizedPermissions);
         setCurrentUser({
           real_name: memberData.real_name || '-',
           department: memberData.department || '-',
           email: memberData.email || email,
           permissions: normalizedPermissions,
-          is_admin: Boolean(memberData.is_admin),
+          is_admin: !!memberData.is_admin,
         });
         return;
       }
@@ -113,32 +116,41 @@ export default function HomePage() {
 
   useEffect(() => {
     const fetchAnnouncements = async () => {
-      const { data } = await supabase
-        .from('system_announcements')
-        .select('*')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false })
-      
-      if (data && data.length > 0) {
-        setAnnouncements(data as Announcement[])
+      try {
+        const { data, error } = await supabase
+          .from('system_announcements')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false });
+        if (error) {
+          // 可加強：顯示錯誤訊息
+          console.error('公告查詢失敗:', error.message);
+        }
+        if (data && data.length > 0) {
+          setAnnouncements(data as Announcement[]);
+        }
+      } catch (err) {
+        console.error('fetchAnnouncements error:', err);
       }
-    }
-    fetchAnnouncements()
-  }, [])
+    };
+    fetchAnnouncements();
+  }, []);
 
   useEffect(() => {
-    if (announcements.length <= 1 || showModal) return 
+    if (announcements.length <= 1 || showModal) return;
     const interval = setInterval(() => {
-      setCurrentAnnoIndex((prev) => (prev + 1) % announcements.length)
-    }, 5000) 
-    return () => clearInterval(interval)
-  }, [announcements, showModal])
+      setCurrentAnnoIndex((prev) => (prev + 1) % announcements.length);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [announcements, showModal]);
 
   const handleLogout = () => {
-    document.cookie = "bardshop-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
-    document.cookie = "bardshop-role=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
-    document.cookie = "bardshop-permissions=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;"
-    router.push('/login')
+    document.cookie = "bardshop-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+    document.cookie = "bardshop-role=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+    document.cookie = "bardshop-permissions=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+    supabase.auth.signOut().finally(() => {
+      router.push('/login');
+    });
   }
 
   const currentAnnouncement = announcements[currentAnnoIndex]
@@ -148,16 +160,15 @@ export default function HomePage() {
   }
 
   const guardFeatureAccess = (permissionKey: string, featureName: string) => {
-    if (hasFeaturePermission(permissionKey)) return undefined
-    return (event: React.MouseEvent) => {
-      event.preventDefault()
-      alert(`你目前沒有「${featureName}」權限，請聯絡核心管理員。`)
-    }
+    if (hasFeaturePermission(permissionKey)) return undefined;
+    return (event: React.MouseEvent<HTMLAnchorElement | HTMLDivElement>) => {
+      event.preventDefault();
+      alert(`你目前沒有「${featureName}」權限，請聯絡核心管理員。`);
+    };
   }
 
   const canDashboard = hasFeaturePermission('dashboard')
   const canEstimation = hasFeaturePermission('estimation')
-  const canTasks = hasFeaturePermission('tasks')
   const canProductionAdmin = hasFeaturePermission('production_admin')
   const canSystemSettings = hasFeaturePermission('system_settings')
   const canQa = hasFeaturePermission('qa')
@@ -313,15 +324,15 @@ export default function HomePage() {
           </Link>
 
           {/* 3. 建立異常單 (Teal) - 新增方塊 */}
-          <Link href="/qa/report"
-            onClick={guardFeatureAccess('qa', '建立異常單')}
+          <div
+            onClick={hasFeaturePermission('qa_report') ? () => setShowQaModal(true) : guardFeatureAccess('qa_report', '異常單建立/回報')}
             onMouseEnter={() => setIsHovered('qa')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
               group relative order-5 h-52 md:h-60 lg:h-64 rounded-2xl border border-teal-700 bg-slate-900/40 backdrop-blur-sm 
               flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
               hover:border-teal-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(20,184,166,0.15)]
-              ${canQa ? '' : 'opacity-50 grayscale'}
+              ${hasFeaturePermission('qa_report') ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'qa' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
@@ -330,14 +341,14 @@ export default function HomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-teal-400 transition-colors">建立異常單</h2>
+            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-teal-400 transition-colors">異常單建立/回報</h2>
             <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
-              手動填寫品質異常，建立待處理回報單。<br/>(QA Report)
+              手動填寫品質異常，建立或回報待處理異常單。<br/>(QA Report)
             </p>
             <span className="px-4 py-2 rounded border border-teal-600 text-teal-300 text-xs font-mono group-hover:bg-teal-600 group-hover:border-teal-600 group-hover:text-white transition-all">
               OPEN FORM &rarr;
             </span>
-          </Link>
+          </div>
 
           {/* 4. 生產管理 (Purple) */}
           <Link href="/admin"
@@ -533,6 +544,43 @@ export default function HomePage() {
                 <button onClick={() => setCurrentAnnoIndex(prev => (prev + 1) % announcements.length)} className="text-xs text-slate-400 hover:text-white px-3 py-1 hover:bg-slate-700 rounded">Next &rarr;</button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* --- QA Modal --- */}
+      {showQaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-teal-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden relative">
+            <div className="bg-teal-800 p-4 flex justify-between items-center border-b border-teal-700">
+              <h3 className="text-white font-bold flex items-center gap-2">
+                <span className="w-2 h-6 bg-teal-400 rounded-full"></span>
+                異常單建立/回報
+              </h3>
+              <button onClick={() => setShowQaModal(false)} className="text-teal-400 hover:text-white transition-colors">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-6 flex flex-col gap-6">
+              <div className="flex gap-4">
+                <div
+                  className="flex-1 bg-teal-700/20 border border-teal-600 rounded-xl p-4 cursor-pointer hover:bg-teal-700/40 transition-all text-center"
+                  onClick={() => { setShowQaModal(false); router.push('/qa/report'); }}
+                >
+                  <div className="mb-2 text-teal-400 font-bold text-lg">建立異常單</div>
+                  <div className="text-xs text-slate-300 mb-2">負責建立新的異常單</div>
+                  <span className="px-3 py-1 rounded border border-teal-600 text-teal-300 text-xs font-mono bg-teal-900/30">前往建立</span>
+                </div>
+                <div
+                  className="flex-1 bg-teal-700/20 border border-teal-600 rounded-xl p-4 cursor-pointer hover:bg-teal-700/40 transition-all text-center"
+                  onClick={() => { setShowQaModal(false); router.push('/qa/handling'); }}
+                >
+                  <div className="mb-2 text-teal-400 font-bold text-lg">異常單處理</div>
+                  <div className="text-xs text-slate-300 mb-2">處理已建立的異常單</div>
+                  <span className="px-3 py-1 rounded border border-teal-600 text-teal-300 text-xs font-mono bg-teal-900/30">前往處理</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

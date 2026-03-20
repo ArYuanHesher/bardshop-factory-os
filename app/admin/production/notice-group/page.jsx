@@ -7,7 +7,8 @@ export default function ProductionNoticeGroupSettings() {
   // 移動群組順序
   const [groups, setGroups] = useState([]);
   const [newGroup, setNewGroup] = useState({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
-  const [editIdx, setEditIdx] = useState(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_editIdx, setEditIdx] = useState(null);
   const [editGroup, setEditGroup] = useState({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
 
   const moveGroup = async (idx, direction) => {
@@ -30,7 +31,8 @@ export default function ProductionNoticeGroupSettings() {
     if (!error) setGroups(gs => gs.filter((_, i) => i !== idx));
   };
 
-  const saveEdit = async (idx) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _saveEdit = async (idx) => {
     if (!editGroup.name) return;
     const groupId = groups[idx]?.id;
     if (!groupId) return;
@@ -46,7 +48,8 @@ export default function ProductionNoticeGroupSettings() {
     setEditGroup({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
   };
 
-  const cancelEdit = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _cancelEdit = () => {
     setEditIdx(null);
     setEditGroup({ name: "", sample_days: 0, mass_days: 0, summary: "", mass_qty_standard: 0 });
   };

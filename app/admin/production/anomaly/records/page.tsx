@@ -22,10 +22,17 @@ interface AnomalyReport {
   qa_handlers: string[] | null
   qa_category: string | null
   qa_responsible: string[] | null
+  handler_department: string | null
+  handler_record: string | null
+}
+
+interface PersonnelOption {
+  option_value: string
+  department_value: string
 }
 
 interface OptionState {
-  personnel: string[]
+  personnel: PersonnelOption[]
   categories: string[]
   departments: string[]
 }
@@ -38,7 +45,10 @@ interface CreateFormState {
   department: string
   reporter: string
   category: string
+  handlerDepartment: string
   handlers: string[]
+  handling: string
+  responsibleDepartment: string
   responsible: string[]
 }
 
@@ -48,10 +58,15 @@ interface OptionItem {
   id: number
   option_type: OptionType
   option_value: string
+  department_value?: string
 }
 
 const DEFAULT_OPTIONS: OptionState = {
-  personnel: ['王小明', '李小華', '陳建宏', '課長A', '主管B', '品保C', '作業員A', '作業員B', '技術員C'],
+  personnel: [
+    { option_value: '王小明', department_value: '' },
+    { option_value: '李小華', department_value: '' },
+    { option_value: '陳建宏', department_value: '' },
+  ],
   categories: ['品質異常', '製程異常', '資料異常'],
   departments: ['品保部', '生產部', '工程部'],
 }
@@ -66,7 +81,10 @@ const DEFAULT_CREATE_FORM: CreateFormState = {
   department: '',
   reporter: '',
   category: '',
+  handlerDepartment: '',
   handlers: [],
+  handling: '',
+  responsibleDepartment: '',
   responsible: [],
 }
 
@@ -103,7 +121,7 @@ export default function QaRecordsPage() {
   const fetchOptions = useCallback(async () => {
     const { data, error } = await supabase
       .from('qa_anomaly_option_items')
-      .select('id, option_type, option_value')
+      .select('id, option_type, option_value, department_value')
       .order('option_type', { ascending: true })
       .order('option_value', { ascending: true })
 
@@ -113,20 +131,16 @@ export default function QaRecordsPage() {
     }
 
     const rows = (data as OptionItem[]) || []
-    const personnelRows = rows.filter((row) => row.option_type === 'personnel').map((row) => row.option_value)
+    const personnelRows: PersonnelOption[] = rows
+      .filter((row) => row.option_type === 'personnel')
+      .map((row) => ({ option_value: row.option_value, department_value: row.department_value || '' }))
     const categoriesRows = rows.filter((row) => row.option_type === 'category').map((row) => row.option_value)
     const departmentsRows = rows.filter((row) => row.option_type === 'department').map((row) => row.option_value)
 
-    const next: OptionState = {
-      personnel: personnelRows,
-      categories: categoriesRows,
-      departments: departmentsRows,
-    }
-
     setOptions({
-      personnel: next.personnel.length ? next.personnel : DEFAULT_OPTIONS.personnel,
-      categories: next.categories.length ? next.categories : DEFAULT_OPTIONS.categories,
-      departments: next.departments.length ? next.departments : DEFAULT_OPTIONS.departments,
+      personnel: personnelRows.length ? personnelRows : DEFAULT_OPTIONS.personnel,
+      categories: categoriesRows.length ? categoriesRows : DEFAULT_OPTIONS.categories,
+      departments: departmentsRows.length ? departmentsRows : DEFAULT_OPTIONS.departments,
     })
   }, [])
 
@@ -171,7 +185,10 @@ export default function QaRecordsPage() {
       department: report.qa_department || '',
       reporter: report.qa_reporter || '',
       category: report.qa_category || '',
+      handlerDepartment: report.handler_department || '',
       handlers: normalizeTextArray(report.qa_handlers),
+      handling: report.handler_record || '',
+      responsibleDepartment: '',
       responsible: normalizeTextArray(report.qa_responsible),
     })
   }
@@ -246,6 +263,8 @@ export default function QaRecordsPage() {
         qa_handlers: createForm.handlers,
         qa_category: createForm.category || null,
         qa_responsible: createForm.responsible,
+        handler_department: createForm.handlerDepartment || null,
+        handler_record: createForm.handling.trim() || null,
       }
 
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
@@ -288,6 +307,8 @@ export default function QaRecordsPage() {
           qa_handlers: editForm.handlers,
           qa_category: editForm.category || null,
           qa_responsible: editForm.responsible,
+          handler_department: editForm.handlerDepartment || null,
+          handler_record: editForm.handling.trim() || null,
         })
         .eq('id', editingId)
 
@@ -629,9 +650,8 @@ export default function QaRecordsPage() {
               <th className="p-3">日期</th>
               <th className="p-3">相關單號</th>
               <th className="p-3">狀態</th>
-              <th className="p-3">部門</th>
-              <th className="p-3">異常回報人</th>
-              <th className="p-3">異常處理人</th>
+              <th className="p-3">異常回報</th>
+              <th className="p-3">異常處理</th>
               <th className="p-3">異常分類</th>
               <th className="p-3">異常原因</th>
               <th className="p-3">缺失人員</th>
@@ -640,13 +660,14 @@ export default function QaRecordsPage() {
           </thead>
           <tbody className="divide-y divide-slate-800">
             {loading ? (
-              <tr><td colSpan={10} className="p-8 text-center text-slate-500">載入中...</td></tr>
+              <tr><td colSpan={9} className="p-8 text-center text-slate-500">載入中...</td></tr>
             ) : filteredReportRows.length === 0 ? (
-              <tr><td colSpan={10} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
+              <tr><td colSpan={9} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
             ) : (
               filteredReportRows.map((report) => {
                 const department = report.qa_department || ''
                 const reporter = report.qa_reporter || ''
+                const handlerDept = report.handler_department || ''
                 const handlers = normalizeTextArray(report.qa_handlers)
                 const category = report.qa_category || ''
                 const responsible = normalizeTextArray(report.qa_responsible)
@@ -663,16 +684,18 @@ export default function QaRecordsPage() {
                       </span>
                     </td>
 
-                    <td className="p-3 min-w-[140px]">
-                      <span className="text-slate-100 text-xs">{department || '-'}</span>
+                    <td className="p-3 min-w-[170px]">
+                      <div className="text-xs space-y-0.5">
+                        <div className="text-slate-400">{department || '-'}</div>
+                        <div className="text-slate-100">{reporter || '-'}</div>
+                      </div>
                     </td>
 
                     <td className="p-3 min-w-[170px]">
-                      <span className="text-slate-100 text-xs">{reporter || '-'}</span>
-                    </td>
-
-                    <td className="p-3 min-w-[220px]">
-                      <span className="text-slate-100 text-xs">{handlers.length ? handlers.join('、') : '-'}</span>
+                      <div className="text-xs space-y-0.5">
+                        <div className="text-slate-400">{handlerDept || '-'}</div>
+                        <div className="text-slate-100">{handlers.length ? handlers.join('、') : '-'}</div>
+                      </div>
                     </td>
 
                     <td className="p-3 min-w-[160px]">
@@ -757,10 +780,10 @@ export default function QaRecordsPage() {
               </div>
 
               <div>
-                <label className="text-xs text-slate-400">部門</label>
+                <label className="text-xs text-slate-400">異常回報-部門</label>
                 <select
                   value={createForm.department}
-                  onChange={(e) => setCreateForm((prev) => ({ ...prev, department: e.target.value }))}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, department: e.target.value, reporter: '' }))}
                   className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                 >
                   <option value="">請選擇</option>
@@ -771,46 +794,53 @@ export default function QaRecordsPage() {
               </div>
 
               <div>
-                <label className="text-xs text-slate-400">異常回報人</label>
+                <label className="text-xs text-slate-400">異常回報-人員</label>
+                {createForm.department ? (
+                  <select
+                    value={createForm.reporter}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, reporter: e.target.value }))}
+                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                  >
+                    <option value="">請選擇</option>
+                    {options.personnel.filter((p) => p.department_value === createForm.department).map((p) => (
+                      <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-500 text-sm">請先選部門</div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">異常處理-部門</label>
                 <select
-                  value={createForm.reporter}
-                  onChange={(e) => setCreateForm((prev) => ({ ...prev, reporter: e.target.value }))}
+                  value={createForm.handlerDepartment}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, handlerDepartment: e.target.value, handlers: [] }))}
                   className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                 >
                   <option value="">請選擇</option>
-                  {options.personnel.map((option) => (
+                  {options.departments.map((option) => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="text-xs text-slate-400">異常處理人</label>
-                <div className="mt-1 space-y-2">
-                  <div className="flex flex-wrap gap-1">
-                    {createForm.handlers.map((name) => (
-                      <span key={name} className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700 text-cyan-200 text-xs flex items-center gap-1">
-                        {name}
-                        <button onClick={() => setCreateForm((prev) => ({ ...prev, handlers: prev.handlers.filter((item) => item !== name) }))}>×</button>
-                      </span>
-                    ))}
-                  </div>
+                <label className="text-xs text-slate-400">異常處理-人員</label>
+                {createForm.handlerDepartment ? (
                   <select
-                    defaultValue=""
-                    onChange={(e) => {
-                      const value = e.target.value
-                      if (!value) return
-                      setCreateForm((prev) => prev.handlers.includes(value) ? prev : { ...prev, handlers: [...prev.handlers, value] })
-                      e.currentTarget.value = ''
-                    }}
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                    value={createForm.handlers[0] || ''}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, handlers: e.target.value ? [e.target.value] : [] }))}
+                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                   >
-                    <option value="">+ 新增處理人</option>
-                    {options.personnel.map((option) => (
-                      <option key={option} value={option}>{option}</option>
+                    <option value="">請選擇</option>
+                    {options.personnel.filter((p) => p.department_value === createForm.handlerDepartment).map((p) => (
+                      <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
                     ))}
                   </select>
-                </div>
+                ) : (
+                  <div className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-500 text-sm">請先選部門</div>
+                )}
               </div>
 
               <div>
@@ -839,31 +869,61 @@ export default function QaRecordsPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400">缺失人員</label>
-              <div className="mt-1 space-y-2">
-                <div className="flex flex-wrap gap-1">
-                  {createForm.responsible.map((name) => (
-                    <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
-                      {name}
-                      <button onClick={() => setCreateForm((prev) => ({ ...prev, responsible: prev.responsible.filter((item) => item !== name) }))}>×</button>
-                    </span>
-                  ))}
-                </div>
+              <label className="text-xs text-slate-400">異常處理（手填）</label>
+              <textarea
+                rows={3}
+                value={createForm.handling}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, handling: e.target.value }))}
+                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+              <div>
+                <label className="text-xs text-slate-400">缺失-部門</label>
                 <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    const value = e.target.value
-                    if (!value) return
-                    setCreateForm((prev) => prev.responsible.includes(value) ? prev : { ...prev, responsible: [...prev.responsible, value] })
-                    e.currentTarget.value = ''
-                  }}
-                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                  value={createForm.responsibleDepartment}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, responsibleDepartment: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                 >
-                  <option value="">+ 新增缺失人員</option>
-                  {options.personnel.map((option) => (
+                  <option value="">請選擇</option>
+                  {options.departments.map((option) => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">缺失-人員</label>
+                {createForm.responsibleDepartment ? (
+                  <div className="mt-1 space-y-2">
+                    <div className="flex flex-wrap gap-1">
+                      {createForm.responsible.map((name) => (
+                        <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
+                          {name}
+                          <button onClick={() => setCreateForm((prev) => ({ ...prev, responsible: prev.responsible.filter((item) => item !== name) }))}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const value = e.target.value
+                        if (!value) return
+                        setCreateForm((prev) => prev.responsible.includes(value) ? prev : { ...prev, responsible: [...prev.responsible, value] })
+                        e.currentTarget.value = ''
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                    >
+                      <option value="">+ 新增缺失人員</option>
+                      {options.personnel.filter((p) => p.department_value === createForm.responsibleDepartment).map((p) => (
+                        <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-500 text-sm">請先選部門</div>
+                )}
               </div>
             </div>
 
@@ -883,13 +943,13 @@ export default function QaRecordsPage() {
 
       {editingId && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="w-full max-w-[900px] bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4">
+          <div className="w-full max-w-[900px] bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-2">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-white">編輯異常單</h2>
               <button onClick={closeEditModal} className="px-2 py-1 text-slate-300 hover:text-white">✕</button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-slate-400">日期</label>
                 <input
@@ -914,73 +974,16 @@ export default function QaRecordsPage() {
                 <div className="mt-1 grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setEditForm((prev) => ({ ...prev, status: 'pending' }))}
-                    className={`px-3 py-2 rounded border text-sm font-bold transition-colors ${editForm.status === 'pending' ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
+                    className={`px-3 py-1.5 rounded border text-sm font-bold transition-colors ${editForm.status === 'pending' ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
                   >
                     待處理
                   </button>
                   <button
                     onClick={() => setEditForm((prev) => ({ ...prev, status: 'confirmed' }))}
-                    className={`px-3 py-2 rounded border text-sm font-bold transition-colors ${editForm.status === 'confirmed' ? 'bg-emerald-900/30 border-emerald-600 text-emerald-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
+                    className={`px-3 py-1.5 rounded border text-sm font-bold transition-colors ${editForm.status === 'confirmed' ? 'bg-emerald-900/30 border-emerald-600 text-emerald-300' : 'bg-slate-950 border-slate-700 text-slate-500'}`}
                   >
                     已確認
                   </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400">部門</label>
-                <select
-                  value={editForm.department}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, department: e.target.value }))}
-                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-                >
-                  <option value="">請選擇</option>
-                  {options.departments.map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400">異常回報人</label>
-                <select
-                  value={editForm.reporter}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, reporter: e.target.value }))}
-                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-                >
-                  <option value="">請選擇</option>
-                  {options.personnel.map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400">異常處理人</label>
-                <div className="mt-1 space-y-2">
-                  <div className="flex flex-wrap gap-1">
-                    {editForm.handlers.map((name) => (
-                      <span key={name} className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700 text-cyan-200 text-xs flex items-center gap-1">
-                        {name}
-                        <button onClick={() => setEditForm((prev) => ({ ...prev, handlers: prev.handlers.filter((item) => item !== name) }))}>×</button>
-                      </span>
-                    ))}
-                  </div>
-                  <select
-                    defaultValue=""
-                    onChange={(e) => {
-                      const value = e.target.value
-                      if (!value) return
-                      setEditForm((prev) => prev.handlers.includes(value) ? prev : { ...prev, handlers: [...prev.handlers, value] })
-                      e.currentTarget.value = ''
-                    }}
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-                  >
-                    <option value="">+ 新增處理人</option>
-                    {options.personnel.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
                 </div>
               </div>
 
@@ -997,44 +1000,139 @@ export default function QaRecordsPage() {
                   ))}
                 </select>
               </div>
+
+              <div>
+                <label className="text-xs text-slate-400">異常回報-部門</label>
+                <select
+                  value={editForm.department}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, department: e.target.value, reporter: '' }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                >
+                  <option value="">請選擇</option>
+                  {options.departments.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">異常回報-人員</label>
+                {editForm.department ? (
+                  <select
+                    value={editForm.reporter}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, reporter: e.target.value }))}
+                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                  >
+                    <option value="">請選擇</option>
+                    {options.personnel.filter((p) => p.department_value === editForm.department).map((p) => (
+                      <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-500 text-sm">請先選部門</div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">異常處理-部門</label>
+                <select
+                  value={editForm.handlerDepartment}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, handlerDepartment: e.target.value, handlers: [] }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                >
+                  <option value="">請選擇</option>
+                  {options.departments.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">異常處理-人員</label>
+                {editForm.handlerDepartment ? (
+                  <select
+                    value={editForm.handlers[0] || ''}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, handlers: e.target.value ? [e.target.value] : [] }))}
+                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                  >
+                    <option value="">請選擇</option>
+                    {options.personnel.filter((p) => p.department_value === editForm.handlerDepartment).map((p) => (
+                      <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-500 text-sm">請先選部門</div>
+                )}
+              </div>
+
             </div>
 
             <div>
               <label className="text-xs text-slate-400">異常原因（手填）</label>
               <textarea
-                rows={3}
+                rows={2}
                 value={editForm.reason}
                 onChange={(e) => setEditForm((prev) => ({ ...prev, reason: e.target.value }))}
-                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white"
               />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400">缺失人員</label>
-              <div className="mt-1 space-y-2">
-                <div className="flex flex-wrap gap-1">
-                  {editForm.responsible.map((name) => (
-                    <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
-                      {name}
-                      <button onClick={() => setEditForm((prev) => ({ ...prev, responsible: prev.responsible.filter((item) => item !== name) }))}>×</button>
-                    </span>
-                  ))}
-                </div>
+              <label className="text-xs text-slate-400">異常處理（手填）</label>
+              <textarea
+                rows={2}
+                value={editForm.handling}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, handling: e.target.value }))}
+                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+              <div>
+                <label className="text-xs text-slate-400">缺失-部門</label>
                 <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    const value = e.target.value
-                    if (!value) return
-                    setEditForm((prev) => prev.responsible.includes(value) ? prev : { ...prev, responsible: [...prev.responsible, value] })
-                    e.currentTarget.value = ''
-                  }}
-                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                  value={editForm.responsibleDepartment}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, responsibleDepartment: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                 >
-                  <option value="">+ 新增缺失人員</option>
-                  {options.personnel.map((option) => (
+                  <option value="">請選擇</option>
+                  {options.departments.map((option) => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">缺失-人員</label>
+                {editForm.responsibleDepartment ? (
+                  <div className="mt-1 space-y-2">
+                    <div className="flex flex-wrap gap-1">
+                      {editForm.responsible.map((name) => (
+                        <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
+                          {name}
+                          <button onClick={() => setEditForm((prev) => ({ ...prev, responsible: prev.responsible.filter((item) => item !== name) }))}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const value = e.target.value
+                        if (!value) return
+                        setEditForm((prev) => prev.responsible.includes(value) ? prev : { ...prev, responsible: [...prev.responsible, value] })
+                        e.currentTarget.value = ''
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                    >
+                      <option value="">+ 新增缺失人員</option>
+                      {options.personnel.filter((p) => p.department_value === editForm.responsibleDepartment).map((p) => (
+                        <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-500 text-sm">請先選部門</div>
+                )}
               </div>
             </div>
 

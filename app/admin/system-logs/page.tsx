@@ -53,7 +53,8 @@ export default function SystemLogsPage() {
   }, [])
 
   useEffect(() => {
-    fetchLogs('', '', '')
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchLogs('', '', '')
   }, [fetchLogs])
 
   const getActionColor = (action: string) => {

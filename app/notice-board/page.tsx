@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient.js";
 
 
@@ -24,9 +25,9 @@ export default function NoticeBoardHome() {
   };
   const [groups, setGroups] = useState<Group[]>([]);
   const [search, setSearch] = useState("");
-  const [searchResult, setSearchResult] = useState<any>(null);
+  const [searchResult, setSearchResult] = useState<Record<string, string> | null>(null);
   const [searchSubmitted, setSearchSubmitted] = useState(false);
-  const [bomItems, setBomItems] = useState<any[]>([]);
+  const [bomItems, setBomItems] = useState<Record<string, string>[]>([]);
   const [loading, setLoading] = useState(false);
 
   // 取得BOM與群組資料
@@ -38,7 +39,7 @@ export default function NoticeBoardHome() {
         supabase.from("production_notice_groups").select("*").order("order")
       ]);
       setGroups(groupData || []);
-      let allBomItems: any[] = [];
+      let allBomItems: Record<string, string>[] = [];
       let from = 0;
       const pageSize = 1000;
       let done = false;
@@ -60,8 +61,6 @@ export default function NoticeBoardHome() {
     }
     fetchGroupsAndBom();
   }, []);
-    const [groupFetchError, setGroupFetchError] = useState<any>(null);
-    const [groupFetchRaw, setGroupFetchRaw] = useState<any>(null);
 
   // 搜尋BOM品項編碼
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
@@ -77,9 +76,9 @@ export default function NoticeBoardHome() {
 
   return (
       <div className="relative p-8 max-w-6xl mx-auto min-h-screen text-slate-200">
-        <a href="/" className="absolute top-8 right-8 px-6 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-lg font-bold shadow transition-all z-10">
+        <Link href="/" className="absolute top-8 right-8 px-6 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-lg font-bold shadow transition-all z-10">
           回到首頁
-        </a>
+        </Link>
       <div className="flex flex-col md:flex-row gap-8 mb-10">
         {/* 主卡片 */}
         <div className={`group flex-1 h-60 md:h-72 rounded-2xl border border-cyan-700 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8 transition-all duration-500 shadow-lg`}> 

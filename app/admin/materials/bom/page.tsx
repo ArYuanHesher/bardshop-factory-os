@@ -13,6 +13,16 @@ import Papa from 'papaparse'
 
 
 
+interface BomRow {
+  id?: number
+  product_code: string
+  product_name: string
+  material_code: string
+  material_name: string
+  quantity: number
+  unit: string
+}
+
 function parseCSV(text: string) {
   // 使用 papaparse 解析
   const result = Papa.parse<Record<string, string>>(text, {
@@ -82,7 +92,7 @@ export default function MaterialsBomPage() {
   const fileInput = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const [bomData, setBomData] = useState<any[]>([])
+  const [bomData, setBomData] = useState<BomRow[]>([])
   const [loadingBom, setLoadingBom] = useState(false)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -112,6 +122,7 @@ export default function MaterialsBomPage() {
     fetchBomData();
     fetchMaterialBookCount();
     fetchSubstituteRules();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, search])
 
   // 當substituteMap更新時，批量查詢所有替代料號的庫存
@@ -187,8 +198,8 @@ export default function MaterialsBomPage() {
       }
 
       // 過濾掉 product_code 為空的資料，並記錄問題行
-      const bomRows: any[] = []
-      const errorRows: any[] = []
+      const bomRows: BomRow[] = []
+      const errorRows: { row: number; content: Record<string, string>; msg?: string }[] = []
       rows.forEach((row, idx) => {
         const product_code = row[col.product_code]?.trim()
         const material_code = row[col.material_code]?.trim()
@@ -229,7 +240,7 @@ export default function MaterialsBomPage() {
         setMessage('❌ 上傳失敗：沒有有效資料。\n實際解析到的欄位：' + headers.join(' , '))
         return
       }
-      const { error, data } = await supabase.from('bom').insert(bomRows)
+      const { error } = await supabase.from('bom').insert(bomRows)
       if (error) {
         console.error('Supabase insert error:', error)
         setMessage('❌ 上傳失敗: ' + (error.message || JSON.stringify(error)))
@@ -238,15 +249,17 @@ export default function MaterialsBomPage() {
       setMessage('✅ 上傳成功！')
       setPage(1)
       fetchBomData()
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
       console.error('Upload exception:', err)
-      setMessage('❌ 上傳失敗: ' + (err.message || err.toString()))
+      setMessage('❌ 上傳失敗: ' + message)
     } finally {
       setUploading(false)
       if (fileInput.current) fileInput.current.value = ''
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault()
     setMessage(null)
@@ -266,16 +279,17 @@ export default function MaterialsBomPage() {
         unit: row['單位']
       }))
       // 批次寫入
-      const { error, data } = await supabase.from('bom').insert(bomRows)
+      const { error } = await supabase.from('bom').insert(bomRows)
       if (error) {
         console.error('Supabase insert error:', error)
         setMessage('❌ 上傳失敗: ' + (error.message || JSON.stringify(error)))
         return
       }
       setMessage('✅ 上傳成功！')
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
       console.error('Upload exception:', err)
-      setMessage('❌ 上傳失敗: ' + (err.message || err.toString()))
+      setMessage('❌ 上傳失敗: ' + message)
     } finally {
       setUploading(false)
     }
@@ -387,7 +401,7 @@ export default function MaterialsBomPage() {
                         return <tr><td colSpan={3} className="text-center py-4 text-slate-500">尚無資料</td></tr>;
                       }
                       // 合併相同生產品項編碼
-                      const grouped: Record<string, any> = {};
+                      const grouped: Record<string, { product_name: string; materials: { material_code: string; material_name: string; quantity: number; unit: string }[] }> = {};
                       bomData.forEach(row => {
                         if (!grouped[row.product_code]) {
                           grouped[row.product_code] = {
@@ -403,9 +417,9 @@ export default function MaterialsBomPage() {
                         });
                       });
                       // 展開為每個原料一行，品項名稱與編碼僅在第一行顯示
-                      return Object.entries(grouped).flatMap(([product_code, info]: any) => {
+                      return Object.entries(grouped).flatMap(([product_code, info]) => {
                         const rowSpan = info.materials.length;
-                        return info.materials.map((mat: any, idx: number) => {
+                        return info.materials.map((mat, idx: number) => {
                           const stock = materialMap[mat.material_code] ?? '-';
                           return (
                             <tr key={product_code + '-' + idx} className="odd:bg-slate-900 even:bg-slate-800 align-top">
@@ -436,7 +450,7 @@ export default function MaterialsBomPage() {
                               <td className="border border-slate-700 px-2 py-1">
                                 {substituteMap[mat.material_code]?.length ? (
                                   <div className="flex flex-col gap-1">
-                                    {substituteMap[mat.material_code].map((sub, i) => (
+                                    {substituteMap[mat.material_code].map((sub) => (
                                       <div key={sub.substitute_item_code} className="flex items-center gap-2">
                                         <span className="font-mono text-emerald-400">{sub.substitute_item_code}</span>
                                         <span className="text-xs text-slate-400">(庫存: <span className="font-mono text-green-400">{substituteInventoryMap[sub.substitute_item_code] ?? '-'}</span>)</span>

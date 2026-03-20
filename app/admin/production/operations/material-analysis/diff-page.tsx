@@ -21,8 +21,8 @@ export default function MaterialCodeDiffPage() {
         supabase.from("operation_items").select("item_code"),
         supabase.from("bom").select("product_code")
       ]);
-      const opCodes = (opData || []).map((x: any) => x.item_code);
-      const bomCodes = (bomData || []).map((x: any) => x.product_code);
+      const opCodes = (opData || []).map((x: { item_code: string }) => x.item_code);
+      const bomCodes = (bomData || []).map((x: { product_code: string }) => x.product_code);
       const opSet = new Set(opCodes);
       const bomSet = new Set(bomCodes);
       const onlyInOp = opCodes.filter(code => !bomSet.has(code)).map(code => ({ code, source: "工序母資料庫" as const }));

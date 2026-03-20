@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../../../lib/supabaseClient'
 
 interface AnomalyReportRow {
@@ -13,6 +14,12 @@ interface AnomalyReportRow {
   qa_reporter: string | null
   qa_handlers: string[] | null
   qa_responsible: string[] | null
+  handler_department: string | null
+}
+
+interface PersonnelOption {
+  option_value: string
+  department_value: string
 }
 
 interface RatioItem {
@@ -38,6 +45,7 @@ export default function QaAnalyticsPage() {
   const [endDate, setEndDate] = useState(() => toDateInputValue(new Date()))
   const [loading, setLoading] = useState(false)
   const [rows, setRows] = useState<AnomalyReportRow[]>([])
+  const [personnelMap, setPersonnelMap] = useState<Map<string, string>>(new Map())
 
   const statusSummary = useMemo(() => {
     const total = rows.length
@@ -46,53 +54,121 @@ export default function QaAnalyticsPage() {
     return { total, confirmed, pending }
   }, [rows])
 
-  const reasonRatios = useMemo<RatioItem[]>(() => {
+  // 1. 異常分類佔比 (qa_category)
+  const categoryRatios = useMemo<RatioItem[]>(() => {
     const map = new Map<string, number>()
-
     for (const row of rows) {
       const key = (row.qa_category || '未分類').trim() || '未分類'
       map.set(key, (map.get(key) || 0) + 1)
     }
-
     const total = rows.length || 1
     return [...map.entries()]
       .map(([name, count]) => ({ name, count, percentage: (count / total) * 100 }))
       .sort((a, b) => b.count - a.count)
   }, [rows])
 
-  const personnelRatios = useMemo<RatioItem[]>(() => {
+  // 2. 異常人員佔比 (qa_reporter)
+  const reporterRatios = useMemo<RatioItem[]>(() => {
     const map = new Map<string, number>()
-
     for (const row of rows) {
-      const people = new Set<string>()
-      if (row.qa_reporter?.trim()) people.add(row.qa_reporter.trim())
-      normalizeArray(row.qa_handlers).forEach((name) => name?.trim() && people.add(name.trim()))
-      normalizeArray(row.qa_responsible).forEach((name) => name?.trim() && people.add(name.trim()))
-
-      for (const name of people) {
-        map.set(name, (map.get(name) || 0) + 1)
-      }
+      const key = (row.qa_reporter || '未指定').trim() || '未指定'
+      map.set(key, (map.get(key) || 0) + 1)
     }
-
-    const totalInvolvements = [...map.values()].reduce((sum, count) => sum + count, 0) || 1
+    const total = rows.length || 1
     return [...map.entries()]
-      .map(([name, count]) => ({ name, count, percentage: (count / totalInvolvements) * 100 }))
+      .map(([name, count]) => ({ name, count, percentage: (count / total) * 100 }))
       .sort((a, b) => b.count - a.count)
   }, [rows])
 
+  // 3. 異常部門佔比 (qa_department)
   const departmentRatios = useMemo<RatioItem[]>(() => {
     const map = new Map<string, number>()
-
     for (const row of rows) {
       const key = (row.qa_department || '未指定').trim() || '未指定'
       map.set(key, (map.get(key) || 0) + 1)
     }
-
     const total = rows.length || 1
     return [...map.entries()]
       .map(([name, count]) => ({ name, count, percentage: (count / total) * 100 }))
       .sort((a, b) => b.count - a.count)
   }, [rows])
+
+  // 4. 缺失部門佔比 (qa_responsible → personnelMap → department)
+  const responsibleDeptRatios = useMemo<RatioItem[]>(() => {
+    const map = new Map<string, number>()
+    for (const row of rows) {
+      const people = normalizeArray(row.qa_responsible)
+      const depts = new Set<string>()
+      for (const name of people) {
+        const dept = personnelMap.get(name.trim()) || '未指定'
+        depts.add(dept)
+      }
+      if (depts.size === 0 && people.length === 0) continue
+      for (const dept of depts) {
+        map.set(dept, (map.get(dept) || 0) + 1)
+      }
+    }
+    const totalEntries = [...map.values()].reduce((sum, c) => sum + c, 0) || 1
+    return [...map.entries()]
+      .map(([name, count]) => ({ name, count, percentage: (count / totalEntries) * 100 }))
+      .sort((a, b) => b.count - a.count)
+  }, [rows, personnelMap])
+
+  // 5. 缺失人員佔比 (qa_responsible)
+  const responsibleRatios = useMemo<RatioItem[]>(() => {
+    const map = new Map<string, number>()
+    for (const row of rows) {
+      for (const name of normalizeArray(row.qa_responsible)) {
+        const key = name.trim()
+        if (!key) continue
+        map.set(key, (map.get(key) || 0) + 1)
+      }
+    }
+    const totalEntries = [...map.values()].reduce((sum, c) => sum + c, 0) || 1
+    return [...map.entries()]
+      .map(([name, count]) => ({ name, count, percentage: (count / totalEntries) * 100 }))
+      .sort((a, b) => b.count - a.count)
+  }, [rows])
+
+  const handleDownload = useCallback(() => {
+    if (rows.length === 0) {
+      alert('尚無分析資料，請先執行分析')
+      return
+    }
+
+    const sections: { title: string; countLabel: string; items: RatioItem[] }[] = [
+      { title: '異常分類佔比', countLabel: '筆數', items: categoryRatios },
+      { title: '異常人員佔比', countLabel: '次數', items: reporterRatios },
+      { title: '異常部門佔比', countLabel: '筆數', items: departmentRatios },
+      { title: '缺失部門佔比', countLabel: '筆數', items: responsibleDeptRatios },
+      { title: '缺失人員佔比', countLabel: '次數', items: responsibleRatios },
+    ]
+
+    // Build all rows for a single sheet
+    const allRows: Record<string, string | number>[] = []
+
+    // 總覽區塊
+    allRows.push({ 區塊: '【總覽】', 名稱: '總件數', 數值: statusSummary.total, '佔比(%)': '' as unknown as number })
+    allRows.push({ 區塊: '', 名稱: '已處理件數', 數值: statusSummary.confirmed, '佔比(%)': '' as unknown as number })
+    allRows.push({ 區塊: '', 名稱: '待處理件數', 數值: statusSummary.pending, '佔比(%)': '' as unknown as number })
+    allRows.push({ 區塊: '', 名稱: '', 數值: '', '佔比(%)': '' }) // blank separator
+
+    for (const section of sections) {
+      allRows.push({ 區塊: `【${section.title}】`, 名稱: '名稱', 數值: section.countLabel, '佔比(%)': '佔比(%)' })
+      for (const item of section.items) {
+        allRows.push({ 區塊: '', 名稱: item.name, 數值: item.count, '佔比(%)': Number(item.percentage.toFixed(1)) })
+      }
+      allRows.push({ 區塊: '', 名稱: '', 數值: '', '佔比(%)': '' }) // blank separator
+    }
+
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(allRows)
+    // Auto-size column widths
+    ws['!cols'] = [{ wch: 16 }, { wch: 20 }, { wch: 10 }, { wch: 10 }]
+    XLSX.utils.book_append_sheet(wb, ws, '異常統計分析')
+
+    XLSX.writeFile(wb, `異常統計分析_${startDate}_${endDate}.xlsx`)
+  }, [rows, startDate, endDate, statusSummary, categoryRatios, reporterRatios, departmentRatios, responsibleDeptRatios, responsibleRatios])
 
   const runAnalysis = async () => {
     if (!startDate || !endDate) {
@@ -102,15 +178,31 @@ export default function QaAnalyticsPage() {
 
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('schedule_anomaly_reports')
-        .select('created_at, status, reason, qa_category, qa_department, qa_reporter, qa_handlers, qa_responsible')
-        .eq('report_type', 'qa')
-        .gte('created_at', `${startDate}T00:00:00.000Z`)
-        .lte('created_at', `${endDate}T23:59:59.999Z`)
+      const [reportResult, personnelResult] = await Promise.all([
+        supabase
+          .from('schedule_anomaly_reports')
+          .select('created_at, status, reason, qa_category, qa_department, qa_reporter, qa_handlers, qa_responsible, handler_department')
+          .eq('report_type', 'qa')
+          .gte('created_at', `${startDate}T00:00:00.000Z`)
+          .lte('created_at', `${endDate}T23:59:59.999Z`),
+        supabase
+          .from('qa_anomaly_option_items')
+          .select('option_value, department_value')
+          .eq('option_type', 'personnel'),
+      ])
 
-      if (error) throw error
-      setRows((data as AnomalyReportRow[]) || [])
+      if (reportResult.error) throw reportResult.error
+      setRows((reportResult.data as AnomalyReportRow[]) || [])
+
+      if (personnelResult.data) {
+        const map = new Map<string, string>()
+        for (const p of personnelResult.data as PersonnelOption[]) {
+          if (p.option_value && p.department_value) {
+            map.set(p.option_value, p.department_value)
+          }
+        }
+        setPersonnelMap(map)
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '未知錯誤'
       alert(`分析失敗：${message}`)
@@ -146,6 +238,13 @@ export default function QaAnalyticsPage() {
           >
             {loading ? '分析中...' : '開始分析'}
           </button>
+          <button
+            onClick={handleDownload}
+            disabled={rows.length === 0}
+            className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold disabled:bg-slate-700 disabled:text-slate-400"
+          >
+            下載 XLSX
+          </button>
           <span className="text-xs text-slate-500">共 {rows.length} 筆資料</span>
         </div>
       </div>
@@ -165,13 +264,13 @@ export default function QaAnalyticsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 space-y-3">
-          <h2 className="text-lg text-white font-bold">異常原因佔比</h2>
-          {reasonRatios.length === 0 ? (
+          <h2 className="text-lg text-white font-bold">異常分類佔比</h2>
+          {categoryRatios.length === 0 ? (
             <p className="text-sm text-slate-500">尚無資料</p>
           ) : (
-            reasonRatios.map((item) => (
+            categoryRatios.map((item) => (
               <div key={item.name} className="space-y-1">
                 <div className="flex justify-between text-xs text-slate-300">
                   <span>{item.name}</span>
@@ -187,10 +286,10 @@ export default function QaAnalyticsPage() {
 
         <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 space-y-3">
           <h2 className="text-lg text-white font-bold">異常人員佔比</h2>
-          {personnelRatios.length === 0 ? (
+          {reporterRatios.length === 0 ? (
             <p className="text-sm text-slate-500">尚無資料</p>
           ) : (
-            personnelRatios.map((item) => (
+            reporterRatios.map((item) => (
               <div key={item.name} className="space-y-1">
                 <div className="flex justify-between text-xs text-slate-300">
                   <span>{item.name}</span>
@@ -217,6 +316,44 @@ export default function QaAnalyticsPage() {
                 </div>
                 <div className="h-2 bg-slate-800 rounded">
                   <div className="h-2 bg-indigo-500 rounded" style={{ width: `${Math.max(3, item.percentage)}%` }} />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 space-y-3">
+          <h2 className="text-lg text-white font-bold">缺失部門佔比</h2>
+          {responsibleDeptRatios.length === 0 ? (
+            <p className="text-sm text-slate-500">尚無資料</p>
+          ) : (
+            responsibleDeptRatios.map((item) => (
+              <div key={item.name} className="space-y-1">
+                <div className="flex justify-between text-xs text-slate-300">
+                  <span>{item.name}</span>
+                  <span>{item.count} 筆 / {item.percentage.toFixed(1)}%</span>
+                </div>
+                <div className="h-2 bg-slate-800 rounded">
+                  <div className="h-2 bg-amber-500 rounded" style={{ width: `${Math.max(3, item.percentage)}%` }} />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 space-y-3">
+          <h2 className="text-lg text-white font-bold">缺失人員佔比</h2>
+          {responsibleRatios.length === 0 ? (
+            <p className="text-sm text-slate-500">尚無資料</p>
+          ) : (
+            responsibleRatios.map((item) => (
+              <div key={item.name} className="space-y-1">
+                <div className="flex justify-between text-xs text-slate-300">
+                  <span>{item.name}</span>
+                  <span>{item.count} 次 / {item.percentage.toFixed(1)}%</span>
+                </div>
+                <div className="h-2 bg-slate-800 rounded">
+                  <div className="h-2 bg-rose-500 rounded" style={{ width: `${Math.max(3, item.percentage)}%` }} />
                 </div>
               </div>
             ))

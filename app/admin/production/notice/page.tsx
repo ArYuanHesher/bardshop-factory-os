@@ -12,19 +12,12 @@ interface BomItem {
   mass_days?: number;
 }
 
-interface GroupConfig {
-  name: string;
-  sample_days: number;
-  mass_days: number;
-}
-
 export default function ProductionNoticeSettings() {
-      const [totalCount, setTotalCount] = useState(0);
     const PAGE_SIZE = 50;
     const [page, setPage] = useState(1);
   const [bomItems, setBomItems] = useState<BomItem[]>([]);
   const [search, setSearch] = useState(""); // 預設搜尋為空
-  const [groups, setGroups] = useState<any[]>([]);
+  const [groups, setGroups] = useState<{ id: number; name: string; sample_days: number; mass_days: number; summary?: string; mass_qty_standard?: number }[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [batchGroup, setBatchGroup] = useState("");
   const [showUngrouped, setShowUngrouped] = useState(false); // 預設顯示全部
@@ -59,7 +52,7 @@ export default function ProductionNoticeSettings() {
     // Supabase 群組資料即時訂閱
     const groupSub = supabase
       .channel('production_notice_groups-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'production_notice_groups' }, payload => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'production_notice_groups' }, () => {
         fetchGroups();
       })
       .subscribe();
