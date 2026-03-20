@@ -78,7 +78,7 @@ export function proxy(request: NextRequest) {
       if (path.startsWith('/tasks') && !hasPermission('tasks')) {
         return NextResponse.redirect(new URL('/403', request.url))
       }
-      if (path.startsWith('/qa') && !hasPermission('qa')) {
+      if (path.startsWith('/qa') && !hasPermission('qa') && !hasPermission('qa_report')) {
         return NextResponse.redirect(new URL('/403', request.url))
       }
     }
