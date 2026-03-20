@@ -77,7 +77,7 @@ export default function QaReportFormPage() {
         return
       }
 
-      const rows = (data as Array<{ option_type: string; option_value: string }>) || []
+      const rows = (data as Array<{ option_type: string; option_value: string; department_value?: string }>) || []
       const personnel = rows
         .filter((item) => item.option_type === 'personnel')
         .map((item) => ({
