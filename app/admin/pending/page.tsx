@@ -239,7 +239,8 @@ export default function PendingPage() {
         </div>
 
         <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden min-h-[250px]">
-          <table className="w-full text-left text-sm text-slate-400">
+          <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-slate-400 min-w-[900px]">
             <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono">
               <tr>
                 <th className="p-4 w-24">狀態</th>
