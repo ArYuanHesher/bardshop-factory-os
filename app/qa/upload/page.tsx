@@ -284,10 +284,10 @@ export default function QaBatchUploadPage() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-[1600px] mx-auto min-h-screen space-y-6">
+    <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto min-h-screen space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">批量上傳異常單</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">批量上傳異常單</h1>
           <p className="text-emerald-400 mt-1 font-mono text-sm uppercase">BATCH UPLOAD // CSV PREVIEW & VALIDATION</p>
         </div>
         <Link href="/qa" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm">返回品保專區</Link>

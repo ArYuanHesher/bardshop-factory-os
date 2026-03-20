@@ -175,7 +175,7 @@ export default function HomePage() {
   const canQa = hasFeaturePermission('qa')
 
   return (
-    <div className="h-screen bg-[#050b14] text-slate-300 font-sans selection:bg-cyan-500 selection:text-white relative overflow-hidden flex flex-col items-center justify-center">
+    <div className="min-h-screen bg-[#050b14] text-slate-300 font-sans selection:bg-cyan-500 selection:text-white relative overflow-y-auto flex flex-col items-center justify-start md:justify-center py-4 md:py-0">
       
       {/* --- 背景特效 --- */}
       <div className="absolute inset-0 z-0 pointer-events-none">
@@ -192,7 +192,7 @@ export default function HomePage() {
 
       {/* --- 左上角：公告顯示區 --- */}
       {currentAnnouncement && (
-        <div className="absolute top-6 left-6 z-40 max-w-[280px] md:max-w-sm animate-fade-in-right">
+        <div className="hidden md:block absolute top-6 left-6 z-40 max-w-[280px] md:max-w-sm animate-fade-in-right">
           <div 
             onClick={() => setShowModal(true)}
             className="group cursor-pointer bg-slate-900/60 backdrop-blur-md border border-orange-500/30 rounded-xl p-4 shadow-[0_4px_20px_rgba(0,0,0,0.3)] hover:border-orange-500/60 transition-all hover:translate-x-1"
@@ -225,8 +225,46 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 右上角：時間 + 登出 */}
-      <div className="absolute top-6 right-6 z-40 flex flex-col items-end gap-3">
+      {/* 手機版頂部：公告 + 使用者 */}
+      <div className="md:hidden relative z-40 w-full px-4 pt-4 pb-2 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="font-mono text-lg text-cyan-500/80 font-bold tabular-nums tracking-wider">
+            {time}
+          </div>
+          <button 
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-700 rounded-full text-xs font-mono text-slate-500 hover:text-red-400 hover:border-red-500/50 transition-all bg-slate-900/30"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            LOGOUT
+          </button>
+        </div>
+        {currentUser && (
+          <div className="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 backdrop-blur-sm flex items-center justify-between">
+            <div>
+              <span className="text-sm font-bold text-white">{currentUser.real_name}</span>
+              <span className="text-xs text-cyan-400 ml-2">{currentUser.department}</span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono">{currentUser.email}</span>
+          </div>
+        )}
+        {currentAnnouncement && (
+          <div 
+            onClick={() => setShowModal(true)}
+            className="cursor-pointer bg-slate-900/60 backdrop-blur-md border border-orange-500/30 rounded-xl px-3 py-2.5 flex items-center gap-3"
+          >
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+            </span>
+            <span className="text-white text-sm font-bold truncate flex-1">{currentAnnouncement.title}</span>
+            <span className="text-[10px] text-slate-500 shrink-0">&rarr;</span>
+          </div>
+        )}
+      </div>
+
+      {/* 右上角：時間 + 登出 (桌面版) */}
+      <div className="hidden md:flex absolute top-6 right-6 z-40 flex-col items-end gap-3">
         <div className="font-mono text-2xl md:text-3xl text-cyan-500/80 font-bold tabular-nums tracking-wider">
           {time}
         </div>
@@ -247,29 +285,29 @@ export default function HomePage() {
       </div>
 
       {/* --- 中央內容區 --- */}
-      <div className="relative z-10 w-full max-w-[1400px] px-6 flex flex-col items-center">
+      <div className="relative z-10 w-full max-w-[1400px] px-4 md:px-6 flex flex-col items-center">
         
         {/* LOGO & Header */}
-        <div className="text-center mb-8 animate-fade-in-down flex flex-col items-center">
-          <div className="inline-block px-4 py-1 border border-cyan-500/30 rounded-full bg-cyan-950/30 text-cyan-400 text-xs tracking-[0.3em] uppercase mb-6 shadow-[0_0_10px_rgba(6,182,212,0.2)]">
+        <div className="text-center mb-4 md:mb-8 animate-fade-in-down flex flex-col items-center">
+          <div className="hidden md:inline-block px-4 py-1 border border-cyan-500/30 rounded-full bg-cyan-950/30 text-cyan-400 text-xs tracking-[0.3em] uppercase mb-6 shadow-[0_0_10px_rgba(6,182,212,0.2)]">
             Authorized Access
           </div>
           
-          <h1 className="flex flex-col items-center font-black text-white tracking-tight leading-none mb-6">
-            <span className="text-4xl md:text-6xl mb-2 tracking-widest text-slate-500">BARDSHOP</span>
-            <div className="relative text-5xl md:text-7xl">
+          <h1 className="flex flex-col items-center font-black text-white tracking-tight leading-none mb-3 md:mb-6">
+            <span className="text-2xl md:text-6xl mb-1 md:mb-2 tracking-widest text-slate-500">BARDSHOP</span>
+            <div className="relative text-3xl md:text-7xl">
               EIP<span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">.SYSTEM</span>
-              <span className="absolute -top-1 -right-4 w-4 h-4 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_#22c55e]"></span>
+              <span className="absolute -top-1 -right-3 md:-right-4 w-3 h-3 md:w-4 md:h-4 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_#22c55e]"></span>
             </div>
           </h1>
 
-          <p className="text-slate-500 text-xs md:text-base font-mono tracking-[0.2em] uppercase mb-4">
+          <p className="text-slate-500 text-[10px] md:text-base font-mono tracking-[0.2em] uppercase mb-2 md:mb-4">
             Enterprise Information Portal
           </p>
         </div>
 
         {/* 🔥 四入口選擇器 (Grid 調整為 2x2 或 4欄) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
+        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 w-full">
           
           {/* 1. 產線看板 (Cyan) */}
           <Link href="/dashboard" 
@@ -277,8 +315,8 @@ export default function HomePage() {
             onMouseEnter={() => setIsHovered('production')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-1 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              group relative order-1 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-cyan-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(6,182,212,0.15)]
               ${canDashboard ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'production' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
@@ -288,14 +326,14 @@ export default function HomePage() {
               <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Dashboard</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-cyan-900/50 text-slate-400 group-hover:text-cyan-400 transition-colors">
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-cyan-900/50 text-slate-400 group-hover:text-cyan-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-cyan-400 transition-colors">產線看板</h2>
-            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-cyan-400 transition-colors">產線看板</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
               即時生產進度與狀態。<br/>(Dashboard)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-cyan-600 group-hover:border-cyan-600 group-hover:text-white transition-all">
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-cyan-600 group-hover:border-cyan-600 group-hover:text-white transition-all">
               ENTER SYSTEM &rarr;
             </span>
           </Link>
@@ -307,8 +345,8 @@ export default function HomePage() {
             onMouseEnter={() => setIsHovered('estimation')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-3 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              group relative order-3 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-emerald-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(16,185,129,0.15)]
               ${canEstimation ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'estimation' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
@@ -318,16 +356,16 @@ export default function HomePage() {
               <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Estimator</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-emerald-900/50 text-slate-400 group-hover:text-emerald-400 transition-colors">
-               <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-emerald-900/50 text-slate-400 group-hover:text-emerald-400 transition-colors">
+               <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-emerald-400 transition-colors">時間試算</h2>
-            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-emerald-400 transition-colors">時間試算</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
               生產週期評估與計算。<br/>(Estimator)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-emerald-600 group-hover:border-emerald-600 group-hover:text-white transition-all">
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-emerald-600 group-hover:border-emerald-600 group-hover:text-white transition-all">
               CALCULATE &rarr;
             </span>
           </Link>
@@ -338,8 +376,8 @@ export default function HomePage() {
             onMouseEnter={() => setIsHovered('qa')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-5 h-52 md:h-60 lg:h-64 rounded-2xl border border-teal-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              group relative order-5 h-40 md:h-60 lg:h-64 rounded-2xl border border-teal-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-teal-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(20,184,166,0.15)]
               ${hasFeaturePermission('qa_report') ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'qa' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
@@ -349,16 +387,16 @@ export default function HomePage() {
               <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wider">Report</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-teal-900/50 text-slate-400 group-hover:text-teal-400 transition-colors">
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-teal-900/50 text-slate-400 group-hover:text-teal-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-teal-400 transition-colors">異常單建立/回報</h2>
-            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-teal-400 transition-colors">異常單回報</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
               手動填寫品質異常，建立或回報待處理異常單。<br/>(QA Report)
             </p>
-            <span className="px-4 py-2 rounded border border-teal-600 text-teal-300 text-xs font-mono group-hover:bg-teal-600 group-hover:border-teal-600 group-hover:text-white transition-all">
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-teal-600 text-teal-300 text-xs font-mono group-hover:bg-teal-600 group-hover:border-teal-600 group-hover:text-white transition-all">
               OPEN FORM &rarr;
             </span>
           </div>
@@ -369,8 +407,8 @@ export default function HomePage() {
             onMouseEnter={() => setIsHovered('admin')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-4 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              group relative order-4 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-purple-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(168,85,247,0.15)]
               ${canProductionAdmin ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'admin' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
@@ -380,14 +418,14 @@ export default function HomePage() {
               <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">Production</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-purple-900/50 text-slate-400 group-hover:text-purple-400 transition-colors">
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-purple-900/50 text-slate-400 group-hover:text-purple-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-purple-400 transition-colors">生產管理</h2>
-            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-purple-400 transition-colors">生產管理</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
               生產流程與資料管理。<br/>(Production Admin)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-purple-600 group-hover:border-purple-600 group-hover:text-white transition-all">
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-purple-600 group-hover:border-purple-600 group-hover:text-white transition-all">
               ACCESS &rarr;
             </span>
           </Link>
@@ -398,8 +436,8 @@ export default function HomePage() {
             onMouseEnter={() => setIsHovered('settings')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-8 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              group relative order-8 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-orange-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(249,115,22,0.15)]
               ${canSystemSettings ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'settings' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
@@ -409,17 +447,17 @@ export default function HomePage() {
               <span className="text-[10px] text-orange-400 font-bold uppercase tracking-wider">Settings</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-orange-900/50 text-slate-400 group-hover:text-orange-400 transition-colors">
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-orange-900/50 text-slate-400 group-hover:text-orange-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-orange-400 transition-colors">系統設定</h2>
-            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-orange-400 transition-colors">系統設定</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
               組織與公告管理。<br/>(System Settings)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-orange-600 group-hover:border-orange-600 group-hover:text-white transition-all">
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-orange-600 group-hover:border-orange-600 group-hover:text-white transition-all">
               OPEN SETTINGS &rarr;
             </span>
           </Link>
@@ -433,8 +471,8 @@ export default function HomePage() {
             onMouseEnter={() => setIsHovered('qa')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-6 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              group relative order-6 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-teal-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(20,184,166,0.15)]
               ${canQa ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'qa' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
@@ -444,16 +482,16 @@ export default function HomePage() {
               <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wider">Quality</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-teal-900/50 text-slate-400 group-hover:text-teal-400 transition-colors">
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-teal-900/50 text-slate-400 group-hover:text-teal-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-teal-400 transition-colors">品保專區</h2>
-            <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-teal-400 transition-colors">品保專區</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
               異常回報與品質追蹤。<br/>(Quality Assurance)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-teal-600 group-hover:border-teal-600 group-hover:text-white transition-all">
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-teal-600 group-hover:border-teal-600 group-hover:text-white transition-all">
               OPEN QA &rarr;
             </span>
           </Link>
@@ -466,8 +504,8 @@ export default function HomePage() {
             onMouseEnter={() => setIsHovered('notice')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-2 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
+              group relative order-2 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-cyan-500 hover:bg-cyan-900/40 hover:shadow-[0_0_30px_rgba(34,211,238,0.15)]
               ${canNotice ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'notice' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
@@ -477,16 +515,16 @@ export default function HomePage() {
               <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Notice</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 text-slate-400 group-hover:bg-cyan-900/50 group-hover:text-cyan-400 transition-colors">
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 text-slate-400 group-hover:bg-cyan-900/50 group-hover:text-cyan-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10m-11 9h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2z" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2 group-hover:text-cyan-400 transition-colors">產期告示</h2>
-            <p className="text-slate-500 text-xs mb-6 px-2">
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-cyan-400 transition-colors">產期告示</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 px-1 md:px-2 hidden md:block">
               生產交期公告與提醒。<br/>(Schedule Notice)
             </p>
-            <span className="px-4 py-2 rounded border border-cyan-700 text-cyan-400 text-xs font-mono group-hover:bg-cyan-700/20 group-hover:text-white group-hover:border-cyan-600 group-hover:bg-cyan-600 transition-all">
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-cyan-700 text-cyan-400 text-xs font-mono group-hover:bg-cyan-700/20 group-hover:text-white group-hover:border-cyan-600 group-hover:bg-cyan-600 transition-all">
               NOTICE BOARD &rarr;
             </span>
           </Link>
@@ -496,8 +534,8 @@ export default function HomePage() {
             onMouseEnter={() => setIsHovered('finance')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-7 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm
-              flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-not-allowed select-none
+              group relative order-7 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-not-allowed select-none
               opacity-50 grayscale
               ${isHovered !== 'none' && isHovered !== 'finance' ? 'scale-95 blur-[2px]' : ''}
             `}
@@ -507,23 +545,23 @@ export default function HomePage() {
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Soon</span>
             </div>
 
-            <div className="mb-6 p-4 rounded-full bg-slate-800 text-slate-400">
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 text-slate-400">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-10V6m0 12v-2m9-4a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-white mb-2">財會專區</h2>
-            <p className="text-slate-500 text-xs mb-6 px-2">
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2">財會專區</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 px-1 md:px-2 hidden md:block">
               財務與會計相關作業。<br/>(Finance Center)
             </p>
-            <span className="px-4 py-2 rounded border border-slate-700 text-slate-500 text-xs font-mono">
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-700 text-slate-500 text-xs font-mono">
               COMING SOON
             </span>
           </div>
 
         </div>
         
-        <div className="mt-8 text-center opacity-40 hover:opacity-100 transition-opacity">
+        <div className="mt-4 md:mt-8 text-center opacity-40 hover:opacity-100 transition-opacity pb-4 md:pb-0">
            <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] mb-2">BARDSHOP INC. • INTERNAL USE ONLY</p>
            <div className="h-0.5 w-24 bg-gradient-to-r from-transparent via-slate-600 to-transparent mx-auto"></div>
         </div>

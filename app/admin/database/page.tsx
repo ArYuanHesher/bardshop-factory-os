@@ -99,12 +99,12 @@ export default function DatabaseViewer() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen">
+    <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen">
       
       {/* 標題區 */}
-      <div className="flex flex-col md:flex-row justify-between items-end mb-8 gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-end mb-6 md:mb-8 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">工序母資料庫</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">工序母資料庫</h1>
           <p className="text-cyan-500/80 mt-1 font-mono text-sm uppercase">
             DATABASE VIEWER // 伺服器端搜尋與分頁
           </p>
@@ -126,22 +126,22 @@ export default function DatabaseViewer() {
       </div>
 
       {/* 分頁標籤 (Tabs) */}
-      <div className="flex gap-2 mb-6 border-b border-slate-800">
+      <div className="flex gap-2 mb-6 border-b border-slate-800 overflow-x-auto">
         <button 
           onClick={() => handleTabChange('items')}
-          className={`px-6 py-3 text-sm font-bold border-b-2 transition-all ${activeTab === 'items' ? 'border-cyan-500 text-cyan-400 bg-cyan-950/20' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+          className={`px-4 md:px-6 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${activeTab === 'items' ? 'border-cyan-500 text-cyan-400 bg-cyan-950/20' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
         >
           品項關聯 (Items)
         </button>
         <button 
           onClick={() => handleTabChange('routes')}
-          className={`px-6 py-3 text-sm font-bold border-b-2 transition-all ${activeTab === 'routes' ? 'border-purple-500 text-purple-400 bg-purple-950/20' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+          className={`px-4 md:px-6 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${activeTab === 'routes' ? 'border-purple-500 text-purple-400 bg-purple-950/20' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
         >
           途程表 (Routes)
         </button>
         <button 
           onClick={() => handleTabChange('ops')}
-          className={`px-6 py-3 text-sm font-bold border-b-2 transition-all ${activeTab === 'ops' ? 'border-blue-500 text-blue-400 bg-blue-950/20' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+          className={`px-4 md:px-6 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${activeTab === 'ops' ? 'border-blue-500 text-blue-400 bg-blue-950/20' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
         >
           工序時間 (Operations)
         </button>

@@ -184,11 +184,11 @@ export default function MasterSchedulePage() {
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
   return (
-    <div className="p-6 md:p-8 max-w-[1800px] mx-auto min-h-screen">
+    <div className="p-4 md:p-6 lg:p-8 max-w-[1800px] mx-auto min-h-screen">
       
       <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">各站工時查詢表</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">各站工時查詢表</h1>
           <p className="text-purple-400 mt-1 font-mono text-sm uppercase">
             MASTER SCHEDULE // 已分組顯示 (刪除時將自動退回轉換區)
           </p>

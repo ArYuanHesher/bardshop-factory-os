@@ -226,14 +226,14 @@ export default function PendingPage() {
   )
 
   return (
-    <div className="p-6 md:p-8 max-w-[1800px] mx-auto min-h-screen space-y-12">
+    <div className="p-4 md:p-6 lg:p-8 max-w-[1800px] mx-auto min-h-screen space-y-8 md:space-y-12">
       
       {/* --- 上半部：訂單更新表待修正 --- */}
       <section className="space-y-4">
         <div className="flex items-center gap-3 border-b border-red-900/50 pb-2">
           <div className="w-2 h-8 bg-red-500 rounded-full"></div>
           <div>
-            <h2 className="text-2xl font-bold text-white">訂單更新表待修正</h2>
+            <h2 className="text-xl md:text-2xl font-bold text-white">訂單更新表待修正</h2>
             <p className="text-red-400 text-sm">ORDER ERRORS // 修正後將退回「訂單更新表 (Temp Table)」，請至該處重新確認發單。</p>
           </div>
         </div>
@@ -284,6 +284,7 @@ export default function PendingPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </section>
 
@@ -292,13 +293,14 @@ export default function PendingPage() {
         <div className="flex items-center gap-3 border-b border-yellow-900/50 pb-2">
           <div className="w-2 h-8 bg-yellow-500 rounded-full"></div>
           <div>
-            <h2 className="text-2xl font-bold text-white">工時轉換表待修正</h2>
+            <h2 className="text-xl md:text-2xl font-bold text-white">工時轉換表待修正</h2>
             <p className="text-yellow-400 text-sm">CONVERSION ERRORS // 修正後將回到「工時轉換表」，請至該處重新計算工時。</p>
           </div>
         </div>
 
         <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden min-h-[250px]">
-          <table className="w-full text-left text-sm text-slate-400">
+          <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-slate-400 min-w-[900px]">
             <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono">
               <tr>
                 <th className="p-4 w-32">工單編號</th>
@@ -338,6 +340,7 @@ export default function PendingPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </section>
 

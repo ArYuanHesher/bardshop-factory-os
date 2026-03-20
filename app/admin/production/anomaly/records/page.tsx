@@ -88,17 +88,7 @@ const DEFAULT_CREATE_FORM: CreateFormState = {
   responsible: [],
 }
 
-const RECORDS_LOCK_PASSWORD = '680401'
-
 export default function QaRecordsPage() {
-  const [isLocked, setIsLocked] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('qaRecordsUnlocked') !== 'true';
-    }
-    return true;
-  })
-  const [unlockPasswordInput, setUnlockPasswordInput] = useState('')
-  const [unlockError, setUnlockError] = useState('')
   const [reports, setReports] = useState<AnomalyReport[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -354,25 +344,7 @@ export default function QaRecordsPage() {
   )
 
 
-  const handleUnlock = () => {
-    if (unlockPasswordInput === RECORDS_LOCK_PASSWORD) {
-      setIsLocked(false)
-      setUnlockError('')
-      setUnlockPasswordInput('')
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem('qaRecordsUnlocked', 'true');
-      }
-      return
-    }
-    setUnlockError('密碼錯誤，請重新輸入')
-  }
-  // 若使用者手動登出或想重新鎖定，可加一個「上鎖」按鈕（選用）
-  // const handleLock = () => {
-  //   setIsLocked(true)
-  //   if (typeof window !== 'undefined') {
-  //     sessionStorage.removeItem('qaRecordsUnlocked');
-  //   }
-  // }
+
 
   const reporterFilterOptions = useMemo(
     () => [...new Set(reports.map((report) => report.qa_reporter?.trim()).filter((value): value is string => !!value))],
@@ -452,44 +424,13 @@ export default function QaRecordsPage() {
   }, [baseRowsWithoutStatusFilter, statusFilter.confirmed, statusFilter.pending])
 
   return (
-    <div className="relative p-6 md:p-8 max-w-[1900px] mx-auto min-h-screen space-y-8">
-      {isLocked && (
-        <div className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4">
-            <h2 className="text-xl font-bold text-white">異常紀錄表已上鎖</h2>
-            <p className="text-sm text-slate-400">請輸入密碼以繼續。</p>
-            <input
-              type="password"
-              value={unlockPasswordInput}
-              onChange={(e) => {
-                setUnlockPasswordInput(e.target.value)
-                if (unlockError) setUnlockError('')
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleUnlock()
-              }}
-              placeholder="請輸入密碼"
-              className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            />
-            {unlockError && <p className="text-sm text-rose-400">{unlockError}</p>}
-            <div className="flex justify-end">
-              <button
-                onClick={handleUnlock}
-                className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-              >
-                解鎖
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between">
+    <div className="relative p-4 md:p-6 lg:p-8 max-w-[1900px] mx-auto min-h-screen space-y-6 md:space-y-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">異常紀錄表</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">異常紀錄表</h1>
           <p className="text-cyan-400 mt-1 font-mono text-sm uppercase">QA ANOMALY RECORDS</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={openCreateModal}
             className="px-3 py-2 rounded border border-emerald-600 text-emerald-300 hover:bg-emerald-900/30 text-sm"
@@ -644,7 +585,8 @@ export default function QaRecordsPage() {
       </div>
 
       <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-hidden">
-        <table className="w-full text-left text-sm text-slate-300">
+        <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm text-slate-300 min-w-[1100px]">
           <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono">
             <tr>
               <th className="p-3">日期</th>
@@ -731,6 +673,7 @@ export default function QaRecordsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {creating && (

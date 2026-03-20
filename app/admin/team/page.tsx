@@ -370,12 +370,12 @@ export default function TeamPage() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen relative font-sans">
+    <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen relative font-sans">
       
       {/* 標題區 */}
-      <div className="flex flex-col md:flex-row justify-between items-end mb-8 gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-end mb-6 md:mb-8 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">組織成員管理</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">組織成員管理</h1>
           <p className="text-orange-500/80 mt-1 font-mono text-sm uppercase">
             ACCESS CONTROL // 權限設定與成員列表
           </p>

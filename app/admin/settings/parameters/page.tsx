@@ -36,10 +36,10 @@ export default function ParametersPage() {
   const [activeTab, setActiveTab] = useState<'machines' | 'calendar'>('machines')
 
   return (
-    <div className="p-6 md:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen space-y-6">
+    <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto text-slate-300 min-h-screen space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-end gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">環境參數設定</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">環境參數設定</h1>
           <p className="text-orange-500 mt-1 font-mono text-sm uppercase">
             SYSTEM CONFIGURATION // 機台產能與行事曆
           </p>
@@ -47,10 +47,10 @@ export default function ParametersPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-slate-800">
+      <div className="flex gap-2 border-b border-slate-800 overflow-x-auto">
         <button
           onClick={() => setActiveTab('machines')}
-          className={`px-6 py-3 text-sm font-bold border-b-2 transition-all ${
+          className={`px-4 md:px-6 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'machines' ? 'border-orange-500 text-orange-400 bg-orange-950/20' : 'border-transparent text-slate-500 hover:text-slate-300'
           }`}
         >
@@ -58,7 +58,7 @@ export default function ParametersPage() {
         </button>
         <button
           onClick={() => setActiveTab('calendar')}
-          className={`px-6 py-3 text-sm font-bold border-b-2 transition-all ${
+          className={`px-4 md:px-6 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'calendar' ? 'border-orange-500 text-orange-400 bg-orange-950/20' : 'border-transparent text-slate-500 hover:text-slate-300'
           }`}
         >
@@ -67,7 +67,7 @@ export default function ParametersPage() {
       </div>
 
       {/* Content Area */}
-      <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-6 min-h-[500px]">
+      <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 md:p-6 min-h-[500px]">
         {activeTab === 'machines' ? <MachinesManager /> : <FactoryCalendar />}
       </div>
     </div>
@@ -181,7 +181,7 @@ function MachinesManager() {
   return (
     <div className="space-y-8">
       {/* 新增區塊 */}
-      <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 shadow-xl">
+      <div className="bg-slate-950 p-4 md:p-6 rounded-xl border border-slate-800 shadow-xl">
         <h3 className="text-white font-bold mb-4 flex items-center gap-2">
           <svg className="w-5 h-5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
           新增機台設備

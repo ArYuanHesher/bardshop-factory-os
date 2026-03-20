@@ -315,10 +315,10 @@ export default function MaterialsBomPage() {
   }
 
   return (
-    <div className="p-8 max-w-[1200px] mx-auto min-h-screen text-slate-300 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 max-w-[1200px] mx-auto min-h-screen text-slate-300 space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">BOM表</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">BOM表</h1>
           <p className="text-orange-500 mt-1 font-mono text-sm uppercase">MATERIAL MANAGEMENT // BOM</p>
         </div>
         <div className="flex gap-2">
@@ -339,7 +339,7 @@ export default function MaterialsBomPage() {
         </div>
       </div>
 
-      <div className="bg-slate-900/60 border border-slate-700 rounded-xl p-8 text-slate-400 space-y-4">
+      <div className="bg-slate-900/60 border border-slate-700 rounded-xl p-4 md:p-8 text-slate-400 space-y-4">
         <div className="space-y-2">
           <label className="block font-bold">上傳BOM CSV檔案：</label>
           <input
@@ -366,7 +366,7 @@ export default function MaterialsBomPage() {
         <div className="mt-10">
           <h2 className="text-xl font-bold mb-2 text-white">已上傳BOM資料</h2>
           {/* 搜尋生產品項編碼 */}
-          <div className="mb-4 flex items-center gap-2">
+          <div className="mb-4 flex flex-col md:flex-row md:items-center gap-2">
             <label className="text-slate-300">搜尋生產品項編碼：</label>
             <input
               type="text"

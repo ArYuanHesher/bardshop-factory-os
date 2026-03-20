@@ -160,7 +160,7 @@ export default function ScheduleListPage() {
 
       <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
         <div>
-          <h1 className="text-3xl font-black text-white tracking-tight">排程總表 (管理模式)</h1>
+          <h1 className="text-xl md:text-3xl font-black text-white tracking-tight">排程總表 (管理模式)</h1>
           <p className="text-blue-400 mt-1 font-mono text-sm uppercase flex items-center gap-2">
             <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
             MASTER SCHEDULE // 工單結構化檢視與編輯

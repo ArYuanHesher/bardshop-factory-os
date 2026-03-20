@@ -449,13 +449,13 @@ export default function DailyOperationsPage() {
       
       <div className="flex flex-col md:flex-row justify-between items-end mb-4 gap-4 px-1">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">訂單更新表</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">訂單更新表</h1>
           <p className="text-cyan-500/80 mt-1 font-mono text-sm uppercase">
             DAILY OPERATIONS // 完整資料檢核 (NO TIME CALC)
           </p>
         </div>
         
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
            <label className={`flex items-center gap-2 px-5 py-2 rounded-md shadow cursor-pointer transition-all ${loading ? 'bg-slate-700' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}>
              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
              <span>上傳 CSV</span>
@@ -487,8 +487,8 @@ export default function DailyOperationsPage() {
             </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-<table className="w-full text-left text-[11px] border-collapse table-fixed">
+        <div className="flex-1 overflow-auto custom-scrollbar">
+<table className="w-full text-left text-[11px] border-collapse table-fixed min-w-[900px]">
             {/* 🔥 修正 1: 加入 whitespace-nowrap 防止表頭文字換行 */}
             <thead className="bg-slate-950 text-slate-400 uppercase font-mono sticky top-0 z-10 shadow-lg whitespace-nowrap">
               <tr>

@@ -372,10 +372,10 @@ export default function MaterialsSubstitutePage() {
   }
 
   return (
-    <div className="p-8 max-w-[1400px] mx-auto min-h-screen text-slate-300 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen text-slate-300 space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">替代料號設定</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">替代料號設定</h1>
           <p className="text-orange-500 mt-1 font-mono text-sm uppercase">MATERIAL MANAGEMENT // SUBSTITUTE ITEM</p>
         </div>
         <Link

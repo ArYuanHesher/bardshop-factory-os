@@ -75,19 +75,19 @@ export default function NoticeBoardHome() {
   };
 
   return (
-      <div className="relative p-8 max-w-6xl mx-auto min-h-screen text-slate-200">
-        <Link href="/" className="absolute top-8 right-8 px-6 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-lg font-bold shadow transition-all z-10">
+      <div className="relative p-4 md:p-8 max-w-6xl mx-auto min-h-screen text-slate-200">
+        <Link href="/" className="absolute top-4 right-4 md:top-8 md:right-8 px-4 md:px-6 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-lg font-bold shadow transition-all z-10 text-sm md:text-base">
           回到首頁
         </Link>
-      <div className="flex flex-col md:flex-row gap-8 mb-10">
+      <div className="flex flex-col md:flex-row gap-4 md:gap-8 mb-6 md:mb-10 mt-10 md:mt-0">
         {/* 主卡片 */}
-        <div className={`group flex-1 h-60 md:h-72 rounded-2xl border border-cyan-700 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8 transition-all duration-500 shadow-lg`}> 
+        <div className={`group flex-1 min-h-[240px] md:h-72 rounded-2xl border border-cyan-700 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center justify-center text-center p-4 md:p-8 transition-all duration-500 shadow-lg`}> 
           <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-cyan-900/50 text-slate-400 group-hover:text-cyan-400 transition-colors">
             <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10m-11 9h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2z" />
             </svg>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white mb-2 group-hover:text-cyan-400 transition-colors">產期告示板</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white mb-2 group-hover:text-cyan-400 transition-colors">產期告示板</h1>
           <p className="text-slate-500 text-xs mb-6 group-hover:text-slate-300 px-2">
             生產交期公告與提醒。<br/>(Schedule Notice)
           </p>
@@ -129,16 +129,17 @@ export default function NoticeBoardHome() {
         </div>
       </div>
       {/* 群組資訊卡片 */}
-      <div className="bg-slate-900 border border-slate-700 rounded-xl p-6">
-        <h2 className="text-xl font-bold text-cyan-400 mb-6">群組列表</h2>
-        <table className="w-full text-left text-sm text-slate-400">
+      <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-6">
+        <h2 className="text-lg md:text-xl font-bold text-cyan-400 mb-4 md:mb-6">群組列表</h2>
+        <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm text-slate-400 min-w-[700px]">
           <thead className="bg-slate-950 text-slate-200 uppercase font-mono text-xs">
             <tr>
-              <th className="p-3 w-72 whitespace-nowrap">群組名稱</th>
-              <th className="p-3 w-96 whitespace-nowrap">工序概述</th>
-              <th className="p-3 w-40 whitespace-nowrap">打樣天數</th>
-              <th className="p-3 w-40 whitespace-nowrap">大貨天數</th>
-              <th className="p-3 w-56 whitespace-nowrap">大量大貨數量標準</th>
+              <th className="p-2 md:p-3 whitespace-nowrap">群組名稱</th>
+              <th className="p-2 md:p-3 whitespace-nowrap">工序概述</th>
+              <th className="p-2 md:p-3 whitespace-nowrap">打樣天數</th>
+              <th className="p-2 md:p-3 whitespace-nowrap">大貨天數</th>
+              <th className="p-2 md:p-3 whitespace-nowrap">大量大貨數量標準</th>
             </tr>
           </thead>
           <tbody>
@@ -147,16 +148,17 @@ export default function NoticeBoardHome() {
             ) : (
               groups.map((g, idx) => (
                 <tr key={idx}>
-                  <td className="p-3 w-72 whitespace-nowrap text-white">{g.name}</td>
-                  <td className="p-3 w-96 whitespace-nowrap text-slate-300">{g.summary || '-'}</td>
-                  <td className="p-3 w-40 whitespace-nowrap text-cyan-300">{g.sample_days}</td>
-                  <td className="p-3 w-40 whitespace-nowrap text-orange-300">{g.mass_days}</td>
-                  <td className="p-3 w-56 whitespace-nowrap text-yellow-300">{g.mass_qty_standard ?? '-'}</td>
+                  <td className="p-2 md:p-3 whitespace-nowrap text-white">{g.name}</td>
+                  <td className="p-2 md:p-3 whitespace-nowrap text-slate-300">{g.summary || '-'}</td>
+                  <td className="p-2 md:p-3 whitespace-nowrap text-cyan-300">{g.sample_days}</td>
+                  <td className="p-2 md:p-3 whitespace-nowrap text-orange-300">{g.mass_days}</td>
+                  <td className="p-2 md:p-3 whitespace-nowrap text-yellow-300">{g.mass_qty_standard ?? '-'}</td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

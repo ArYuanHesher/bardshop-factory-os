@@ -314,26 +314,26 @@ export default function EstimationPage() {
 
   // --- 渲染 ---
   return (
-    <div className="h-screen bg-[#050b14] text-slate-300 flex flex-col overflow-hidden font-sans">
+    <div className="min-h-screen md:h-screen bg-[#050b14] text-slate-300 flex flex-col md:overflow-hidden font-sans">
       
       {/* Top Bar */}
-      <div className="flex-none h-16 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-6 z-20">
-        <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+      <div className="flex-none h-14 md:h-16 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 z-20">
+        <h1 className="text-lg md:text-2xl font-bold text-white flex items-center gap-3">
           <span className="w-3 h-8 bg-emerald-500 rounded-sm shadow-[0_0_15px_#10b981]"></span>
           生產時間試算系統 <span className="text-sm text-slate-500 font-mono hidden md:inline ml-2">v3.0 Large</span>
         </h1>
-        <Link href="/" className="text-sm font-bold text-slate-400 hover:text-white flex items-center gap-2 bg-slate-800 px-5 py-2 rounded-full border border-slate-700 hover:border-emerald-500 transition-all">
+        <Link href="/" className="text-sm font-bold text-slate-400 hover:text-white flex items-center gap-2 bg-slate-800 px-3 md:px-5 py-2 rounded-full border border-slate-700 hover:border-emerald-500 transition-all">
            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
            系統首頁
         </Link>
       </div>
 
       {/* Main Grid */}
-      <div className="flex-1 grid grid-cols-12 gap-0 overflow-hidden">
+      <div className="flex-1 flex flex-col md:grid md:grid-cols-12 gap-0 md:overflow-hidden">
         
         {/* COL 1: 搜尋 (30%) */}
-        <div className="col-span-12 md:col-span-4 lg:col-span-3 bg-[#0a101a] border-r border-slate-800 flex flex-col z-10">
-          <div className="p-6 h-full flex flex-col">
+        <div className="md:col-span-4 lg:col-span-3 bg-[#0a101a] md:border-r border-b md:border-b-0 border-slate-800 flex flex-col z-10">
+          <div className="p-4 md:p-6 md:h-full flex flex-col">
              
              {/* Step Header */}
              <div className="flex items-center gap-3 mb-4">
@@ -389,7 +389,7 @@ export default function EstimationPage() {
                    </div>
                 </div>
              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl bg-slate-900/30 p-8">
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl bg-slate-900/30 p-4 md:p-8">
                    <svg className="w-12 h-12 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                    <p className="text-base">請輸入編碼並選取</p>
                    <p className="text-sm mt-1">以解鎖後續步驟</p>
@@ -399,8 +399,8 @@ export default function EstimationPage() {
         </div>
 
         {/* COL 2: 參數設定 (30%) - 核心互動區 */}
-        <div className={`col-span-12 md:col-span-4 lg:col-span-3 bg-[#0a101a] border-r border-slate-800 flex flex-col relative transition-all duration-500 ${!step1Done ? 'opacity-30 grayscale pointer-events-none' : 'opacity-100'}`}>
-          <div className="p-6 h-full overflow-y-auto custom-scrollbar pb-24 space-y-8">
+        <div className={`md:col-span-4 lg:col-span-3 bg-[#0a101a] md:border-r border-b md:border-b-0 border-slate-800 flex flex-col relative transition-all duration-500 ${!step1Done ? 'opacity-30 grayscale pointer-events-none' : 'opacity-100'}`}>
+          <div className="p-4 md:p-6 md:h-full overflow-y-auto custom-scrollbar pb-24 space-y-6 md:space-y-8">
              
              {/* Step 2: 數量 */}
              <div className="space-y-3">
@@ -517,7 +517,7 @@ export default function EstimationPage() {
         </div>
 
         {/* COL 3: 終端機結果 (40%) */}
-        <div className="col-span-12 md:col-span-4 lg:col-span-6 bg-[#050b14] flex flex-col h-full relative border-l border-slate-800">
+        <div className="md:col-span-4 lg:col-span-6 bg-[#050b14] flex flex-col min-h-[400px] md:h-full relative md:border-l border-slate-800">
            {/* Header */}
            <div className="flex-none h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6">
               <span className="text-sm font-mono text-slate-400 flex items-center gap-3">
@@ -536,7 +536,7 @@ export default function EstimationPage() {
            </div>
 
            {/* Content */}
-           <div ref={terminalRef} className="flex-1 overflow-y-auto p-8 font-mono text-base custom-scrollbar">
+           <div ref={terminalRef} className="flex-1 overflow-y-auto p-4 md:p-8 font-mono text-sm md:text-base custom-scrollbar">
               
               {!isCalculating && !showResults && logs.length === 0 && (
                  <div className="h-full flex flex-col items-center justify-center text-slate-700 opacity-40">

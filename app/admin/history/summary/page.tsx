@@ -59,12 +59,12 @@ export default function StationSummaryPage() {
   const formatDate = (iso: string) => new Date(iso).toLocaleDateString()
 
   return (
-    <div className="p-6 md:p-8 max-w-[1800px] mx-auto text-slate-300 min-h-screen">
+    <div className="p-4 md:p-6 lg:p-8 max-w-[1800px] mx-auto text-slate-300 min-h-screen">
       
       {/* 標題與工具列 */}
-      <div className="flex flex-col md:flex-row justify-between items-end mb-8 gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-end mb-6 md:mb-8 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">各站工時總表</h1>
+          <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">各站工時總表</h1>
           <p className="text-green-500 mt-1 font-mono text-sm uppercase">
             STATION TIME DATABASE // 已轉換工時明細
           </p>
