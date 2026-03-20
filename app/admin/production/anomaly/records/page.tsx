@@ -99,7 +99,6 @@ export default function QaRecordsPage() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [options, setOptions] = useState<OptionState>(DEFAULT_OPTIONS)
-  const [selectedReason, setSelectedReason] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('')
   const [selectedReporter, setSelectedReporter] = useState('')
   const [selectedHandler, setSelectedHandler] = useState('')
@@ -338,14 +337,6 @@ export default function QaRecordsPage() {
 
   const reportRows = useMemo(() => [...pendingReports, ...completedReports], [pendingReports, completedReports])
 
-  const reasonFilterOptions = useMemo(
-    () => [...new Set(reports.map((report) => report.reason?.trim()).filter((value): value is string => !!value))],
-    [reports],
-  )
-
-
-
-
   const reporterFilterOptions = useMemo(
     () => [...new Set(reports.map((report) => report.qa_reporter?.trim()).filter((value): value is string => !!value))],
     [reports],
@@ -381,7 +372,6 @@ export default function QaRecordsPage() {
     const keyword = orderKeyword.trim().toLowerCase()
 
     return reportRows.filter((report) => {
-      const reasonMatch = !selectedReason || (report.reason || '').trim() === selectedReason
       const categoryMatch = !selectedCategory || (report.qa_category || '').trim() === selectedCategory
       const departmentMatch = !selectedDepartment || (report.qa_department || '').trim() === selectedDepartment
       const reporterMatch = !selectedReporter || (report.qa_reporter || '').trim() === selectedReporter
@@ -389,7 +379,7 @@ export default function QaRecordsPage() {
       const responsibleMatch = !selectedResponsible || normalizeTextArray(report.qa_responsible).map((name) => name.trim()).includes(selectedResponsible)
       const orderMatch = !keyword || (report.order_number || '').toLowerCase().includes(keyword)
 
-      return reasonMatch && categoryMatch && departmentMatch && reporterMatch && handlerMatch && responsibleMatch && orderMatch
+      return categoryMatch && departmentMatch && reporterMatch && handlerMatch && responsibleMatch && orderMatch
     })
   }, [
     orderKeyword,
@@ -397,7 +387,6 @@ export default function QaRecordsPage() {
     selectedCategory,
     selectedDepartment,
     selectedHandler,
-    selectedReason,
     selectedReporter,
     selectedResponsible,
   ])
@@ -451,20 +440,6 @@ export default function QaRecordsPage() {
 
       <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          <div>
-            <label className="text-xs text-slate-400">篩選異常原因</label>
-            <select
-              value={selectedReason}
-              onChange={(e) => setSelectedReason(e.target.value)}
-              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            >
-              <option value="">全部原因</option>
-              {reasonFilterOptions.map((reason) => (
-                <option key={reason} value={reason}>{reason}</option>
-              ))}
-            </select>
-          </div>
-
           <div>
             <label className="text-xs text-slate-400">篩選部門</label>
             <select
@@ -568,7 +543,6 @@ export default function QaRecordsPage() {
           <span className="text-xs text-slate-500">共 {filteredReportRows.length} 筆符合篩選</span>
           <button
             onClick={() => {
-              setSelectedReason('')
               setSelectedDepartment('')
               setSelectedReporter('')
               setSelectedHandler('')

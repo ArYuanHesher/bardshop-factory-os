@@ -98,6 +98,12 @@ export default function HomePage() {
           permissions: normalizedPermissions,
           is_admin: !!memberData.is_admin,
         });
+
+        // 同步更新 cookie，確保 middleware 使用最新權限
+        const isAdminRole = Boolean(memberData.is_admin) || normalizedPermissions.includes('production_admin');
+        const role = isAdminRole ? 'admin' : 'ops';
+        document.cookie = `bardshop-role=${role}; path=/; max-age=86400; SameSite=Lax;`;
+        document.cookie = `bardshop-permissions=${encodeURIComponent(normalizedPermissions.join(','))}; path=/; max-age=86400; SameSite=Lax;`;
         return;
       }
       setMemberPermissions([]);
