@@ -8,6 +8,7 @@ interface Log {
   user_name: string
   user_email: string | null
   user_department: string | null
+  module: string | null
   action_type: string
   target_resource: string
   details: string | null
@@ -21,12 +22,12 @@ export default function SystemLogsPage() {
   const [filterAction, setFilterAction] = useState('')
   const [filterBoard, setFilterBoard] = useState('')
   const boardOptions = [
-    { value: '', label: '全部看板' },
-    { value: '訂單資料管理', label: '訂單資料管理' },
-    { value: '生產管理入口', label: '生產管理入口' },
-    { value: '產線排程看板', label: '產線排程看板' },
-    { value: '物料管理', label: '物料管理' },
-    { value: '工序資料庫', label: '工序資料庫' },
+    { value: '', label: '全部模組' },
+    { value: '產線看板', label: '產線看板' },
+    { value: '產期告示', label: '產期告示' },
+    { value: '時間試算', label: '時間試算' },
+    { value: '生產管理', label: '生產管理' },
+    { value: '品保專區', label: '品保專區' },
     { value: '系統設定', label: '系統設定' },
   ]
 
@@ -45,7 +46,7 @@ export default function SystemLogsPage() {
       query = query.ilike('action_type', `%${actionFilter}%`)
     }
     if (boardFilter) {
-      query = query.ilike('target_resource', `%${boardFilter}%`)
+      query = query.eq('module', boardFilter)
     }
     const { data } = await query
     if (data) setLogs(data as Log[])
@@ -110,6 +111,7 @@ export default function SystemLogsPage() {
             <tr>
               <th className="p-4 border-b border-slate-800 w-40">時間</th>
               <th className="p-4 border-b border-slate-800 w-56">操作者</th>
+              <th className="p-4 border-b border-slate-800 w-24">模組</th>
               <th className="p-4 border-b border-slate-800 w-32">動作</th>
               <th className="p-4 border-b border-slate-800 w-48">目標對象</th>
               <th className="p-4 border-b border-slate-800">詳細內容</th>
@@ -117,7 +119,7 @@ export default function SystemLogsPage() {
           </thead>
           <tbody className="divide-y divide-slate-800/50">
             {loading ? (
-                <tr><td colSpan={5} className="p-10 text-center">載入中...</td></tr>
+                <tr><td colSpan={6} className="p-10 text-center">載入中...</td></tr>
             ) : logs.map(log => (
               <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
                 <td className="p-4 font-mono text-xs text-slate-500">
@@ -127,6 +129,13 @@ export default function SystemLogsPage() {
                   <div className="font-bold text-white">{log.user_name || '-'}</div>
                   <div className="text-xs text-slate-500">{log.user_email || '-'}</div>
                   <div className="text-xs text-slate-600">{log.user_department || '-'}</div>
+                </td>
+                <td className="p-4">
+                  {log.module ? (
+                    <span className="px-2 py-0.5 rounded bg-slate-800 text-xs text-slate-300 border border-slate-700">{log.module}</span>
+                  ) : (
+                    <span className="text-xs text-slate-600">-</span>
+                  )}
                 </td>
                 <td className={`p-4 font-bold ${getActionColor(log.action_type)}`}>{log.action_type}</td>
                 <td className="p-4 font-mono text-slate-300">{log.target_resource}</td>

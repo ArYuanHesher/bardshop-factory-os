@@ -116,6 +116,7 @@ function MachinesManager() {
       await logSystemAction({
         actionType: '新增機台',
         target: `machine:${newName}`,
+        module: '系統設定',
         details: `${newCategory} / ${newStation}`,
         metadata: { dailyMinutes: newMins }
       })
@@ -135,6 +136,7 @@ function MachinesManager() {
     await logSystemAction({
       actionType: '刪除機台',
       target: `machine:${target?.name || id}`,
+      module: '系統設定',
       details: `${target?.category || '-'} / ${target?.station_type || '-'}`,
       metadata: { machineId: id }
     })
@@ -167,6 +169,7 @@ function MachinesManager() {
           await logSystemAction({
             actionType: '修改機台名稱',
             target: `machine:${target?.name || editingId}`,
+            module: '系統設定',
             details: `更新為 ${tempName.trim()}`,
             metadata: { machineId: editingId }
           })
@@ -383,6 +386,7 @@ function FactoryCalendar() {
       await logSystemAction({
         actionType: '更新行事曆',
         target: `calendar:${dateStr}`,
+        module: '系統設定',
         details: '還原為預設作息',
         metadata: { isHoliday: newIsHoliday, isDefault: true }
       })
@@ -398,6 +402,7 @@ function FactoryCalendar() {
       await logSystemAction({
         actionType: '更新行事曆',
         target: `calendar:${dateStr}`,
+        module: '系統設定',
         details: newIsHoliday ? '設定為休假日' : '設定為上班日',
         metadata: { isHoliday: newIsHoliday, note }
       })

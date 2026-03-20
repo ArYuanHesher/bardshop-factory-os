@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient'
 type LogPayload = {
   actionType: string
   target: string
+  module?: string
   details?: string
   metadata?: Record<string, unknown>
 }
@@ -73,6 +74,7 @@ export const logSystemAction = async (
       user_department: actor.userDepartment,
       action_type: payload.actionType,
       target_resource: payload.target,
+      module: payload.module || null,
       details: payload.details || '',
       metadata: payload.metadata || {},
     })

@@ -88,7 +88,7 @@ export default function HomePage() {
 
       if (memberData) {
         const normalizedPermissions = Boolean(memberData.is_admin)
-          ? ['dashboard', 'notice', 'estimation', 'tasks', 'qa', 'production_admin', 'system_settings']
+          ? ['dashboard', 'notice', 'estimation', 'tasks', 'qa_report', 'qa', 'production_admin', 'system_settings']
           : normalizeLegacyPermissions(memberData.permissions ?? []);
         setMemberPermissions(normalizedPermissions);
         setCurrentUser({
@@ -168,6 +168,7 @@ export default function HomePage() {
   }
 
   const canDashboard = hasFeaturePermission('dashboard')
+  const canNotice = hasFeaturePermission('notice')
   const canEstimation = hasFeaturePermission('estimation')
   const canProductionAdmin = hasFeaturePermission('production_admin')
   const canSystemSettings = hasFeaturePermission('system_settings')
@@ -283,6 +284,10 @@ export default function HomePage() {
               ${isHovered !== 'none' && isHovered !== 'production' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-cyan-500/10 rounded border border-cyan-500/20">
+              <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Dashboard</span>
+            </div>
+
             <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-cyan-900/50 text-slate-400 group-hover:text-cyan-400 transition-colors">
               <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
             </div>
@@ -309,6 +314,10 @@ export default function HomePage() {
               ${isHovered !== 'none' && isHovered !== 'estimation' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 rounded border border-emerald-500/20">
+              <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Estimator</span>
+            </div>
+
             <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-emerald-900/50 text-slate-400 group-hover:text-emerald-400 transition-colors">
                <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
@@ -336,6 +345,10 @@ export default function HomePage() {
               ${isHovered !== 'none' && isHovered !== 'qa' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-teal-500/10 rounded border border-teal-500/20">
+              <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wider">Report</span>
+            </div>
+
             <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-teal-900/50 text-slate-400 group-hover:text-teal-400 transition-colors">
               <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
@@ -428,7 +441,7 @@ export default function HomePage() {
             `}
           >
             <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-teal-500/10 rounded border border-teal-500/20">
-              <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wider">QA</span>
+              <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wider">Quality</span>
             </div>
 
             <div className="mb-6 p-4 rounded-full bg-slate-800 group-hover:bg-teal-900/50 text-slate-400 group-hover:text-teal-400 transition-colors">
@@ -449,17 +462,19 @@ export default function HomePage() {
           {/* 7. 產期告示 (可點擊連結) */}
           <Link
             href="/notice-board"
+            onClick={guardFeatureAccess('notice', '產期告示')}
             onMouseEnter={() => setIsHovered('notice')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
               group relative order-2 h-52 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm
               flex flex-col items-center justify-center text-center p-6 transition-all duration-500 cursor-pointer
               hover:border-cyan-500 hover:bg-cyan-900/40 hover:shadow-[0_0_30px_rgba(34,211,238,0.15)]
+              ${canNotice ? '' : 'opacity-50 grayscale'}
               ${isHovered !== 'none' && isHovered !== 'notice' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
             <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-cyan-500/10 rounded border border-cyan-500/20">
-              <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Go</span>
+              <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Notice</span>
             </div>
 
             <div className="mb-6 p-4 rounded-full bg-slate-800 text-slate-400 group-hover:bg-cyan-900/50 group-hover:text-cyan-400 transition-colors">

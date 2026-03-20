@@ -54,6 +54,7 @@ export default function AnnouncementsPage() {
       await logSystemAction({
         actionType: '新增公告',
         target: `announcement:${title.trim()}`,
+        module: '系統設定',
         details: '系統公告設定 > 發布新公告',
       })
       setTitle('')
@@ -71,6 +72,7 @@ export default function AnnouncementsPage() {
       await logSystemAction({
         actionType: '刪除公告',
         target: `announcement:${target?.title || id}`,
+        module: '系統設定',
         details: '系統公告設定 > 刪除公告',
         metadata: { announcementId: id }
       })
@@ -95,6 +97,7 @@ export default function AnnouncementsPage() {
       await logSystemAction({
         actionType: !currentStatus ? '啟用公告' : '停用公告',
         target: `announcement:${target?.title || id}`,
+        module: '系統設定',
         details: '系統公告設定 > 切換顯示狀態',
         metadata: { announcementId: id, isActive: !currentStatus }
       })

@@ -64,8 +64,9 @@ export default function TeamPage() {
       title: '基本權限',
       options: [
         { key: 'dashboard', label: '產線看板 (Dashboard)' },
-        { key: 'notice', label: '產線告示 (Production Notice)' },
+        { key: 'notice', label: '產期告示 (Schedule Notice)' },
         { key: 'estimation', label: '時間試算 (Estimator)' },
+        { key: 'qa_report', label: '異常單建立/回報 (QA Report)' },
         { key: 'tasks', label: '任務看板 (Task Flow)' },
       ]
     },
@@ -88,7 +89,7 @@ export default function TeamPage() {
       department: '',
       email: '',
       password: '',
-      permissions: ['dashboard', 'notice', 'tasks', 'estimation'], // 預設給予基本權限
+      permissions: ['dashboard', 'notice', 'tasks', 'estimation', 'qa_report'], // 預設給予基本權限
       status: 'Active',
       is_admin: false,
       is_pending_approval: false,
@@ -210,6 +211,7 @@ export default function TeamPage() {
       await logSystemAction({
         actionType: formData.id ? '修改成員' : '新增成員',
         target: `member:${formData.email}`,
+        module: '系統設定',
         details: `${formData.real_name} / ${formData.department}`,
         metadata: {
           memberId: formData.id ?? null,
@@ -233,6 +235,7 @@ export default function TeamPage() {
       await logSystemAction({
         actionType: '刪除成員',
         target: `member:${member.email}`,
+        module: '系統設定',
         details: `${member.real_name} / ${member.department}`,
         metadata: { memberId: member.id ?? null }
       })
@@ -250,6 +253,7 @@ export default function TeamPage() {
       await logSystemAction({
         actionType: '新增部門',
         target: `department:${newDeptName.trim()}`,
+        module: '系統設定',
         details: '組織成員管理 > 部門維護',
       })
       setNewDeptName('')
@@ -271,6 +275,7 @@ export default function TeamPage() {
       await logSystemAction({
         actionType: '刪除部門',
         target: `department:${deptName}`,
+        module: '系統設定',
         details: '組織成員管理 > 部門維護',
         metadata: { departmentId: id }
       })
@@ -347,6 +352,7 @@ export default function TeamPage() {
       await logSystemAction({
         actionType: '批次同步帳號',
         target: 'members:auth_user_id_sync',
+        module: '系統設定',
         details: `成功 ${result.updated || 0} / 失敗 ${failedCount}`,
         metadata: {
           totalCandidates: result.totalCandidates || 0,
@@ -378,8 +384,8 @@ export default function TeamPage() {
         <div className="flex gap-3">
           <button
             onClick={handleSyncAuthUsers}
-            disabled={syncingAuthUsers || unsyncedCount === 0}
-            className={`px-4 py-2 rounded border transition-all font-bold text-sm ${syncingAuthUsers || unsyncedCount === 0 ? 'bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed' : 'bg-cyan-900/30 hover:bg-cyan-800/40 border-cyan-600 text-cyan-300'}`}
+            disabled={syncingAuthUsers}
+            className={`px-4 py-2 rounded border transition-all font-bold text-sm ${syncingAuthUsers ? 'bg-slate-900 border-slate-700 text-slate-500 cursor-not-allowed' : 'bg-cyan-900/30 hover:bg-cyan-800/40 border-cyan-600 text-cyan-300'}`}
           >
             {syncingAuthUsers ? '同步中...' : `同步帳號 (${unsyncedCount})`}
           </button>
@@ -470,6 +476,7 @@ export default function TeamPage() {
                     {member.permissions?.includes('dashboard') && <span className="px-2 py-1 rounded bg-cyan-900/30 text-cyan-400 text-[10px] border border-cyan-800">產線看板</span>}
                     {member.permissions?.includes('notice') && <span className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] border border-slate-600">產線告示</span>}
                     {member.permissions?.includes('estimation') && <span className="px-2 py-1 rounded bg-emerald-900/30 text-emerald-400 text-[10px] border border-emerald-800">時間試算</span>}
+                    {member.permissions?.includes('qa_report') && <span className="px-2 py-1 rounded bg-rose-900/30 text-rose-400 text-[10px] border border-rose-800">異常單回報</span>}
                     {member.permissions?.includes('qa') && <span className="px-2 py-1 rounded bg-teal-900/30 text-teal-400 text-[10px] border border-teal-800">品保專區</span>}
                     {member.permissions?.includes('production_admin') && <span className="px-2 py-1 rounded bg-purple-900/30 text-purple-400 text-[10px] border border-purple-800">生產管理</span>}
                     {member.permissions?.includes('system_settings') && <span className="px-2 py-1 rounded bg-orange-900/30 text-orange-400 text-[10px] border border-orange-800">系統設定</span>}

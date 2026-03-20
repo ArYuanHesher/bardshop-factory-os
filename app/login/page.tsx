@@ -76,7 +76,7 @@ export default function LoginPage() {
       // 4. 設定 Cookie (給 Middleware 過路檢察用)
       document.cookie = `bardshop-token=authorized; path=/; max-age=86400; SameSite=Lax;`
       const finalPermissions = Boolean(member.is_admin)
-        ? ['dashboard', 'notice', 'estimation', 'tasks', 'qa', 'production_admin', 'system_settings']
+        ? ['dashboard', 'notice', 'estimation', 'tasks', 'qa_report', 'qa', 'production_admin', 'system_settings']
         : normalizeLegacyPermissions(Array.isArray(member.permissions) ? member.permissions : [])
 
       const isAdminRole =
