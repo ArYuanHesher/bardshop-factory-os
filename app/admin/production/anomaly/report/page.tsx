@@ -4,6 +4,11 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../../../lib/supabaseClient'
 
+interface OptionItem {
+  option_value: string
+  department_value: string
+}
+
 const DEFAULT_PERSONNEL_OPTIONS = ['王小明', '李小華', '陳建宏', '課長A', '主管B', '品保C', '作業員A', '作業員B', '技術員C']
 const DEFAULT_CATEGORY_OPTIONS = ['品質異常', '製程異常', '資料異常']
 const DEFAULT_DEPARTMENT_OPTIONS = ['品保部', '生產部', '工程部']
