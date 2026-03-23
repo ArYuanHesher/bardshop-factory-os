@@ -3,6 +3,11 @@ import type { NextRequest } from 'next/server'
 
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname
+
+  // API 路徑不受 middleware 管控
+  if (path.startsWith('/api')) {
+    return NextResponse.next()
+  }
   
   const token = request.cookies.get('bardshop-token')?.value
   const role = request.cookies.get('bardshop-role')?.value
