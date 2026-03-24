@@ -11,7 +11,8 @@ interface AnomalyReport {
   status: 'pending' | 'confirmed' | string
   source_order_id: number | null
   order_number: string
-  item_code: string
+  item_code: string | null
+  item_name: string | null
   quantity: number
   op_name: string | null
   station: string | null
@@ -40,6 +41,8 @@ interface OptionState {
 interface CreateFormState {
   createdDate: string
   orderNumber: string
+  itemCode: string
+  itemName: string
   status: 'pending' | 'confirmed'
   reason: string
   department: string
@@ -76,6 +79,8 @@ const getTodayDateInput = () => new Date().toISOString().slice(0, 10)
 const DEFAULT_CREATE_FORM: CreateFormState = {
   createdDate: getTodayDateInput(),
   orderNumber: '',
+  itemCode: '',
+  itemName: '',
   status: 'pending',
   reason: '',
   department: '',
@@ -169,6 +174,8 @@ export default function QaRecordsPage() {
     setEditForm({
       createdDate: report.created_at ? new Date(report.created_at).toISOString().slice(0, 10) : getTodayDateInput(),
       orderNumber: report.order_number || '',
+      itemCode: report.item_code || '',
+      itemName: report.item_name || '',
       status: report.status === 'confirmed' ? 'confirmed' : 'pending',
       reason: report.reason || '',
       department: report.qa_department || '',
@@ -241,7 +248,8 @@ export default function QaRecordsPage() {
         source_order_id: null,
         task_id: null,
         order_number: createForm.orderNumber.trim(),
-        item_code: '',
+        item_code: createForm.itemCode.trim() || null,
+        item_name: createForm.itemName.trim() || null,
         quantity: 0,
         op_name: null,
         station: null,
@@ -289,6 +297,8 @@ export default function QaRecordsPage() {
         .update({
           created_at: editForm.createdDate ? `${editForm.createdDate}T00:00:00.000Z` : undefined,
           order_number: editForm.orderNumber.trim(),
+          item_code: editForm.itemCode.trim() || null,
+          item_name: editForm.itemName.trim() || null,
           status: editForm.status,
           reason: editForm.reason.trim(),
           qa_department: editForm.department || null,
@@ -565,6 +575,7 @@ export default function QaRecordsPage() {
             <tr>
               <th className="px-2 py-3">日期</th>
               <th className="px-2 py-3">相關單號</th>
+              <th className="px-2 py-3">品項</th>
               <th className="px-2 py-3">狀態</th>
               <th className="px-2 py-3">異常回報</th>
               <th className="px-2 py-3">異常處理</th>
@@ -577,9 +588,9 @@ export default function QaRecordsPage() {
           </thead>
           <tbody className="divide-y divide-slate-800">
             {loading ? (
-              <tr><td colSpan={10} className="p-8 text-center text-slate-500">載入中...</td></tr>
+              <tr><td colSpan={11} className="p-8 text-center text-slate-500">載入中...</td></tr>
             ) : filteredReportRows.length === 0 ? (
-              <tr><td colSpan={10} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
+              <tr><td colSpan={11} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
             ) : (
               filteredReportRows.map((report) => {
                 const department = report.qa_department || ''
@@ -594,6 +605,13 @@ export default function QaRecordsPage() {
                   <tr key={report.id} className="hover:bg-slate-800/30 align-top">
                     <td className="px-2 py-3 font-mono text-xs whitespace-nowrap">{new Date(report.created_at).toLocaleDateString()}</td>
                     <td className="px-2 py-3 font-mono text-cyan-300 whitespace-nowrap">{report.order_number}</td>
+
+                    <td className="px-2 py-3">
+                      <div className="text-xs space-y-0.5">
+                        <div className="text-slate-400">{report.item_code || '-'}</div>
+                        <div className="text-slate-100">{report.item_name || '-'}</div>
+                      </div>
+                    </td>
 
                     <td className="px-2 py-3">
                       <span className={`px-2 py-1 rounded border text-xs whitespace-nowrap ${report.status === 'pending' ? 'bg-amber-900/30 border-amber-700 text-amber-300' : 'bg-emerald-900/30 border-emerald-700 text-emerald-300'}`}>
@@ -619,9 +637,9 @@ export default function QaRecordsPage() {
                       <span className="text-slate-100 text-xs">{category || '-'}</span>
                     </td>
 
-                    <td className="px-2 py-3 min-w-[180px] text-slate-200">{report.reason || '-'}</td>
+                    <td className="px-2 py-3 min-w-[140px] text-slate-200 text-xs"><div className="line-clamp-2">{report.reason || '-'}</div></td>
 
-                    <td className="px-2 py-3 min-w-[180px] text-slate-200 text-xs">{report.handler_record || '-'}</td>
+                    <td className="px-2 py-3 min-w-[140px] text-slate-200 text-xs"><div className="line-clamp-2">{report.handler_record || '-'}</div></td>
 
                     <td className="px-2 py-3 min-w-[120px]">
                       <span className="text-slate-100 text-xs">{responsible.length ? responsible.join('、') : '-'}</span>
@@ -677,6 +695,26 @@ export default function QaRecordsPage() {
                 <input
                   value={createForm.orderNumber}
                   onChange={(e) => setCreateForm((prev) => ({ ...prev, orderNumber: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">品項編碼（選填）</label>
+                <input
+                  value={createForm.itemCode}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, itemCode: e.target.value }))}
+                  placeholder="例：A-001"
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">品名/名稱（選填）</label>
+                <input
+                  value={createForm.itemName}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, itemName: e.target.value }))}
+                  placeholder="例：產品名稱"
                   className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                 />
               </div>
@@ -885,6 +923,26 @@ export default function QaRecordsPage() {
                 <input
                   value={editForm.orderNumber}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, orderNumber: e.target.value }))}
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">品項編碼（選填）</label>
+                <input
+                  value={editForm.itemCode}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, itemCode: e.target.value }))}
+                  placeholder="例：A-001"
+                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400">品名/名稱（選填）</label>
+                <input
+                  value={editForm.itemName}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, itemName: e.target.value }))}
+                  placeholder="例：產品名稱"
                   className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
                 />
               </div>

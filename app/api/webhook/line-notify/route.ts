@@ -45,6 +45,8 @@ export async function POST(request: NextRequest) {
       title,
       '',
       `📋 工單編號：${record.order_number || '-'}`,
+      `🔢 品項編碼：${record.item_code || '-'}`,
+      `📦 品名/名稱：${record.item_name || '-'}`,
       `⚠️ 異常原因：${record.reason || '-'}`,
       `🏷️ 分類：${record.qa_category || '-'}`,
       `🏢 回報部門：${record.qa_department || '-'}`,

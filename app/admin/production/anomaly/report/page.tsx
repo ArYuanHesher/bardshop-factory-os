@@ -50,6 +50,8 @@ const isQaReportTypeConstraintError = (err: unknown) => {
 export default function QaReportFormPage() {
   const [createdDate, setCreatedDate] = useState(getTodayDateInput())
   const [orderNumber, setOrderNumber] = useState('')
+  const [itemCode, setItemCode] = useState('')
+  const [itemName, setItemName] = useState('')
   const [status] = useState<'pending'>('pending')
   const [reason, setReason] = useState('')
   const [reporterDepartment, setReporterDepartment] = useState('')
@@ -134,6 +136,8 @@ export default function QaReportFormPage() {
         qa_category: category || null,
         qa_responsible: [],
         handler_department: handlerDepartment.trim() || null,
+        item_code: itemCode.trim() || null,
+        item_name: itemName.trim() || null,
       }
 
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
@@ -142,6 +146,8 @@ export default function QaReportFormPage() {
       alert('✅ 已送出異常回報單')
       setCreatedDate(getTodayDateInput())
       setOrderNumber('')
+      setItemCode('')
+      setItemName('')
       setReason('')
       setReporterDepartment('')
       setReporter('')
@@ -172,8 +178,8 @@ export default function QaReportFormPage() {
         </Link>
       </div>
 
-      <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-6 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-6 space-y-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           <div>
             <label className="text-xs text-slate-400">日期</label>
             <input
@@ -189,6 +195,26 @@ export default function QaReportFormPage() {
             <input
               value={orderNumber}
               onChange={(e) => setOrderNumber(e.target.value)}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">品項編碼（選填）</label>
+            <input
+              value={itemCode}
+              onChange={(e) => setItemCode(e.target.value)}
+              placeholder="例：A-001"
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400">品名/名稱（選填）</label>
+            <input
+              value={itemName}
+              onChange={(e) => setItemName(e.target.value)}
+              placeholder="例：產品名稱"
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
             />
           </div>
