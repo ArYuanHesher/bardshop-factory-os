@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState, useCallback } from 'react'
+import { Suspense, useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '../../lib/supabaseClient'
 
@@ -10,6 +10,9 @@ function UploadPhotoContent() {
   const [uploading, setUploading] = useState(false)
   const [uploaded, setUploaded] = useState<string[]>([])
   const [error, setError] = useState('')
+
+  const cameraRef = useRef<HTMLInputElement>(null)
+  const galleryRef = useRef<HTMLInputElement>(null)
 
   const loadExisting = useCallback(async () => {
     if (!sid) return
@@ -87,24 +90,49 @@ function UploadPhotoContent() {
           <p className="text-sm text-slate-400 mt-1">拍照後圖片會自動同步到電腦表單</p>
         </div>
 
-        <label className="block w-full cursor-pointer">
-          <div className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-cyan-700 rounded-xl p-8 bg-slate-900 hover:bg-slate-800 transition-colors">
-            <span className="text-4xl">📸</span>
-            <span className="text-cyan-300 font-bold text-lg">
-              {uploading ? '上傳中...' : '點擊拍照 / 選圖'}
-            </span>
-            <span className="text-xs text-slate-500">支援多張圖片</span>
-          </div>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            multiple
-            onChange={(e) => void handleUpload(e)}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => cameraRef.current?.click()}
             disabled={uploading}
-            className="hidden"
-          />
-        </label>
+            className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-cyan-700 rounded-xl p-6 bg-slate-900 hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <span className="text-4xl">📸</span>
+            <span className="text-cyan-300 font-bold">
+              {uploading ? '上傳中...' : '拍照'}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => galleryRef.current?.click()}
+            disabled={uploading}
+            className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-violet-700 rounded-xl p-6 bg-slate-900 hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <span className="text-4xl">🖼️</span>
+            <span className="text-violet-300 font-bold">
+              {uploading ? '上傳中...' : '相簿'}
+            </span>
+          </button>
+        </div>
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          multiple
+          onChange={(e) => void handleUpload(e)}
+          disabled={uploading}
+          className="hidden"
+        />
+        <input
+          ref={galleryRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(e) => void handleUpload(e)}
+          disabled={uploading}
+          className="hidden"
+        />
 
         {error && (
           <div className="bg-rose-900/30 border border-rose-700 rounded-lg p-3 text-rose-300 text-sm text-center">
