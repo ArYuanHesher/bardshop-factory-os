@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const LINE_CHANNEL_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
-const LINE_GROUP_ID = process.env.LINE_GROUP_ID || ''
+const LINE_GROUP_IDS = (process.env.LINE_GROUP_ID || '').split(',').map(id => id.trim()).filter(Boolean)
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || ''
 
 export async function POST(request: NextRequest) {
@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    if (!LINE_CHANNEL_TOKEN || !LINE_GROUP_ID) {
+    if (!LINE_CHANNEL_TOKEN || LINE_GROUP_IDS.length === 0) {
       return NextResponse.json({ error: 'LINE credentials not configured' }, { status: 500 })
     }
 
@@ -47,23 +47,26 @@ export async function POST(request: NextRequest) {
 
     const message = lines.join('\n')
 
-    // 3. 推送到 LINE 群組
-    const res = await fetch('https://api.line.me/v2/bot/message/push', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${LINE_CHANNEL_TOKEN}`,
-      },
-      body: JSON.stringify({
-        to: LINE_GROUP_ID,
-        messages: [{ type: 'text', text: message }],
-      }),
-    })
+    // 3. 推送到所有 LINE 群組
+    const results = await Promise.allSettled(
+      LINE_GROUP_IDS.map(groupId =>
+        fetch('https://api.line.me/v2/bot/message/push', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${LINE_CHANNEL_TOKEN}`,
+          },
+          body: JSON.stringify({
+            to: groupId,
+            messages: [{ type: 'text', text: message }],
+          }),
+        })
+      )
+    )
 
-    if (!res.ok) {
-      const err = await res.text()
-      console.error('LINE push failed:', err)
-      return NextResponse.json({ error: 'LINE push failed', detail: err }, { status: 500 })
+    const failures = results.filter(r => r.status === 'rejected')
+    if (failures.length > 0) {
+      console.error('Some LINE pushes failed:', failures)
     }
 
     return NextResponse.json({ ok: true })
