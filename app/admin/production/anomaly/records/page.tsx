@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../../../../../lib/supabaseClient'
 
 interface AnomalyReport {
@@ -25,6 +26,7 @@ interface AnomalyReport {
   qa_responsible: string[] | null
   handler_department: string | null
   handler_record: string | null
+  attachments: string[] | null
 }
 
 interface PersonnelOption {
@@ -53,6 +55,9 @@ interface CreateFormState {
   handling: string
   responsibleDepartment: string
   responsible: string[]
+  attachFiles: File[]
+  previewUrls: string[]
+  existingAttachments: string[]
 }
 
 type OptionType = 'personnel' | 'category' | 'department'
@@ -91,6 +96,9 @@ const DEFAULT_CREATE_FORM: CreateFormState = {
   handling: '',
   responsibleDepartment: '',
   responsible: [],
+  attachFiles: [],
+  previewUrls: [],
+  existingAttachments: [],
 }
 
 export default function QaRecordsPage() {
@@ -111,6 +119,56 @@ export default function QaRecordsPage() {
   const [selectedCategory, setSelectedCategory] = useState('')
   const [statusFilter, setStatusFilter] = useState({ pending: true, confirmed: true })
   const [orderKeyword, setOrderKeyword] = useState('')
+  const [mobileSessionId, setMobileSessionId] = useState('')
+  const [showQrModal, setShowQrModal] = useState(false)
+  const [mobileUrls, setMobileUrls] = useState<string[]>([])
+  const [mobileTarget, setMobileTarget] = useState<'create' | 'edit'>('create')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+
+  const startMobileSession = useCallback((target: 'create' | 'edit') => {
+    const sid = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+    setMobileSessionId(sid)
+    setMobileTarget(target)
+    setShowQrModal(true)
+    setMobileUrls([])
+  }, [])
+
+  useEffect(() => {
+    if (!mobileSessionId || !showQrModal) {
+      if (pollRef.current) clearInterval(pollRef.current)
+      return
+    }
+    const poll = async () => {
+      const { data } = await supabase.storage
+        .from('anomaly-attachments')
+        .list(`mobile/${mobileSessionId}`)
+      if (data && data.length > 0) {
+        const urls = data
+          .filter((f) => f.name !== '.emptyFolderPlaceholder')
+          .map((f) => {
+            const { data: urlData } = supabase.storage
+              .from('anomaly-attachments')
+              .getPublicUrl(`mobile/${mobileSessionId}/${f.name}`)
+            return urlData.publicUrl
+          })
+        setMobileUrls(urls)
+      }
+    }
+    void poll()
+    pollRef.current = setInterval(() => void poll(), 3000)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [mobileSessionId, showQrModal])
+
+  const confirmMobilePhotos = () => {
+    if (mobileTarget === 'create') {
+      setCreateForm((prev) => ({ ...prev, previewUrls: [...prev.previewUrls, ...mobileUrls] }))
+    } else {
+      setEditForm((prev) => ({ ...prev, existingAttachments: [...prev.existingAttachments, ...mobileUrls] }))
+    }
+    setShowQrModal(false)
+    if (pollRef.current) clearInterval(pollRef.current)
+  }
 
   const fetchOptions = useCallback(async () => {
     const { data, error } = await supabase
@@ -186,6 +244,9 @@ export default function QaRecordsPage() {
       handling: report.handler_record || '',
       responsibleDepartment: '',
       responsible: normalizeTextArray(report.qa_responsible),
+      attachFiles: [],
+      previewUrls: [],
+      existingAttachments: Array.isArray(report.attachments) ? report.attachments : [],
     })
   }
 
@@ -241,6 +302,24 @@ export default function QaRecordsPage() {
 
     setSavingCreate(true)
     try {
+      // Collect mobile-uploaded URLs (non-blob URLs from previewUrls)
+      const uploadedUrls: string[] = createForm.previewUrls.filter((u) => !u.startsWith('blob:'))
+      for (const file of createForm.attachFiles) {
+        const ext = file.name.split('.').pop() || 'jpg'
+        const filePath = `records/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const { error: uploadError } = await supabase.storage
+          .from('anomaly-attachments')
+          .upload(filePath, file)
+        if (uploadError) {
+          console.error('Upload error:', uploadError)
+          continue
+        }
+        const { data: urlData } = supabase.storage
+          .from('anomaly-attachments')
+          .getPublicUrl(filePath)
+        if (urlData?.publicUrl) uploadedUrls.push(urlData.publicUrl)
+      }
+
       const payload = {
         report_type: 'qa',
         reason: createForm.reason.trim(),
@@ -262,6 +341,7 @@ export default function QaRecordsPage() {
         qa_responsible: createForm.responsible,
         handler_department: createForm.handlerDepartment || null,
         handler_record: createForm.handling.trim() || null,
+        attachments: uploadedUrls,
       }
 
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
@@ -292,6 +372,23 @@ export default function QaRecordsPage() {
 
     setSavingEdit(true)
     try {
+      const uploadedUrls: string[] = [...editForm.existingAttachments]
+      for (const file of editForm.attachFiles) {
+        const ext = file.name.split('.').pop() || 'jpg'
+        const filePath = `records/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const { error: uploadError } = await supabase.storage
+          .from('anomaly-attachments')
+          .upload(filePath, file)
+        if (uploadError) {
+          console.error('Upload error:', uploadError)
+          continue
+        }
+        const { data: urlData } = supabase.storage
+          .from('anomaly-attachments')
+          .getPublicUrl(filePath)
+        if (urlData?.publicUrl) uploadedUrls.push(urlData.publicUrl)
+      }
+
       const { error } = await supabase
         .from('schedule_anomaly_reports')
         .update({
@@ -308,6 +405,7 @@ export default function QaRecordsPage() {
           qa_responsible: editForm.responsible,
           handler_department: editForm.handlerDepartment || null,
           handler_record: editForm.handling.trim() || null,
+          attachments: uploadedUrls,
         })
         .eq('id', editingId)
 
@@ -583,14 +681,15 @@ export default function QaRecordsPage() {
               <th className="px-2 py-3">異常原因</th>
               <th className="px-2 py-3">處理紀錄</th>
               <th className="px-2 py-3">缺失人員</th>
+              <th className="px-2 py-3">附件</th>
               <th className="px-2 py-3 text-center">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {loading ? (
-              <tr><td colSpan={11} className="p-8 text-center text-slate-500">載入中...</td></tr>
+              <tr><td colSpan={12} className="p-8 text-center text-slate-500">載入中...</td></tr>
             ) : filteredReportRows.length === 0 ? (
-              <tr><td colSpan={11} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
+              <tr><td colSpan={12} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
             ) : (
               filteredReportRows.map((report) => {
                 const department = report.qa_department || ''
@@ -643,6 +742,20 @@ export default function QaRecordsPage() {
 
                     <td className="px-2 py-3 min-w-[120px]">
                       <span className="text-slate-100 text-xs">{responsible.length ? responsible.join('、') : '-'}</span>
+                    </td>
+
+                    <td className="px-2 py-3">
+                      {Array.isArray(report.attachments) && report.attachments.length > 0 ? (
+                        <div className="flex gap-1 flex-wrap">
+                          {report.attachments.map((url, i) => (
+                            <button key={i} type="button" onClick={() => setLightboxUrl(url)}>
+                              <img src={url} alt={`附件${i + 1}`} className="w-10 h-10 object-cover rounded border border-slate-600 hover:border-cyan-400 transition-colors cursor-pointer" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-500">-</span>
+                      )}
                     </td>
 
                     <td className="px-2 py-3 text-center min-w-[110px]">
@@ -885,6 +998,51 @@ export default function QaRecordsPage() {
               </div>
             </div>
 
+            <div>
+              <label className="text-xs text-slate-400">附件圖片（選填）</label>
+              <div className="mt-1 flex gap-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || [])
+                    if (!files.length) return
+                    setCreateForm((prev) => ({ ...prev, attachFiles: [...prev.attachFiles, ...files] }))
+                    const urls = files.map((f) => URL.createObjectURL(f))
+                    setCreateForm((prev) => ({ ...prev, previewUrls: [...prev.previewUrls, ...urls] }))
+                    e.target.value = ''
+                  }}
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-cyan-900 file:text-cyan-200 file:text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => startMobileSession('create')}
+                  className="px-3 py-2 rounded border border-violet-600 text-violet-300 hover:bg-violet-900/30 text-sm whitespace-nowrap"
+                >
+                  📱 手機拍照
+                </button>
+              </div>
+              {createForm.previewUrls.length > 0 && (
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  {createForm.previewUrls.map((url, idx) => (
+                    <div key={idx} className="relative group">
+                      <img src={url} alt={`preview-${idx}`} className="w-16 h-16 object-cover rounded border border-slate-600" />
+                      <button
+                        type="button"
+                        className="absolute -top-1 -right-1 w-5 h-5 bg-rose-600 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center"
+                        onClick={() => setCreateForm((prev) => ({
+                          ...prev,
+                          attachFiles: prev.attachFiles.filter((_, i) => i !== idx),
+                          previewUrls: prev.previewUrls.filter((_, i) => i !== idx),
+                        }))}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end gap-2">
               <button onClick={closeCreateModal} className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800">取消</button>
               <button
@@ -1114,6 +1272,68 @@ export default function QaRecordsPage() {
               </div>
             </div>
 
+            <div>
+              <label className="text-xs text-slate-400">附件圖片</label>
+              {editForm.existingAttachments.length > 0 && (
+                <div className="mt-1 flex gap-2 flex-wrap">
+                  {editForm.existingAttachments.map((url, idx) => (
+                    <div key={`existing-${idx}`} className="relative group">
+                      <img src={url} alt={`existing-${idx}`} className="w-16 h-16 object-cover rounded border border-slate-600" />
+                      <button
+                        type="button"
+                        className="absolute -top-1 -right-1 w-5 h-5 bg-rose-600 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center"
+                        onClick={() => setEditForm((prev) => ({
+                          ...prev,
+                          existingAttachments: prev.existingAttachments.filter((_, i) => i !== idx),
+                        }))}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-1 flex gap-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || [])
+                    if (!files.length) return
+                    setEditForm((prev) => ({ ...prev, attachFiles: [...prev.attachFiles, ...files] }))
+                    const urls = files.map((f) => URL.createObjectURL(f))
+                    setEditForm((prev) => ({ ...prev, previewUrls: [...prev.previewUrls, ...urls] }))
+                    e.target.value = ''
+                  }}
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-cyan-900 file:text-cyan-200 file:text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => startMobileSession('edit')}
+                  className="px-3 py-2 rounded border border-violet-600 text-violet-300 hover:bg-violet-900/30 text-sm whitespace-nowrap"
+                >
+                  📱 手機拍照
+                </button>
+              </div>
+              {editForm.previewUrls.length > 0 && (
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  {editForm.previewUrls.map((url, idx) => (
+                    <div key={`new-${idx}`} className="relative group">
+                      <img src={url} alt={`preview-${idx}`} className="w-16 h-16 object-cover rounded border border-cyan-700" />
+                      <button
+                        type="button"
+                        className="absolute -top-1 -right-1 w-5 h-5 bg-rose-600 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center"
+                        onClick={() => setEditForm((prev) => ({
+                          ...prev,
+                          attachFiles: prev.attachFiles.filter((_, i) => i !== idx),
+                          previewUrls: prev.previewUrls.filter((_, i) => i !== idx),
+                        }))}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end gap-2">
               <button onClick={closeEditModal} className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800">取消</button>
               <button
@@ -1124,6 +1344,60 @@ export default function QaRecordsPage() {
                 {savingEdit ? '儲存中...' : '儲存變更'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showQrModal && (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-sm w-full space-y-4">
+            <h2 className="text-lg font-bold text-white text-center">📱 手機掃碼上傳圖片</h2>
+            <p className="text-xs text-slate-400 text-center">用手機掃描下方 QR Code 拍照上傳，照片會自動同步到表單</p>
+            <div className="flex justify-center bg-white rounded-xl p-4">
+              <QRCodeSVG
+                value={`${window.location.origin}/upload-photo?sid=${mobileSessionId}`}
+                size={200}
+                level="M"
+              />
+            </div>
+            {mobileUrls.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm text-emerald-400 text-center">已收到 {mobileUrls.length} 張圖片</p>
+                <div className="flex gap-2 flex-wrap justify-center">
+                  {mobileUrls.map((url, i) => (
+                    <img key={i} src={url} alt={`mobile-${i}`} className="w-14 h-14 object-cover rounded border border-slate-600" />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => { setShowQrModal(false); if (pollRef.current) clearInterval(pollRef.current) }}
+                className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm"
+              >
+                取消
+              </button>
+              {mobileUrls.length > 0 && (
+                <button
+                  onClick={confirmMobilePhotos}
+                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm"
+                >
+                  確認使用 ({mobileUrls.length} 張)
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lightboxUrl && (
+        <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4" onClick={() => setLightboxUrl(null)}>
+          <div className="relative max-w-4xl max-h-[90vh]">
+            <img src={lightboxUrl} alt="附件大圖" className="max-w-full max-h-[90vh] object-contain rounded-lg" />
+            <button
+              className="absolute top-2 right-2 w-8 h-8 bg-slate-900/80 text-white rounded-full flex items-center justify-center hover:bg-slate-700"
+              onClick={() => setLightboxUrl(null)}
+            >✕</button>
           </div>
         </div>
       )}

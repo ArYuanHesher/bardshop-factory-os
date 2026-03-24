@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../../../../../lib/supabaseClient'
 
 interface OptionItem {
@@ -63,9 +64,54 @@ export default function QaReportFormPage() {
   const [departmentOptions, setDepartmentOptions] = useState<string[]>(DEFAULT_DEPARTMENT_OPTIONS)
   const [category, setCategory] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [attachFiles, setAttachFiles] = useState<File[]>([])
+  const [previewUrls, setPreviewUrls] = useState<string[]>([])
+  const [mobileSessionId, setMobileSessionId] = useState('')
+  const [showQrModal, setShowQrModal] = useState(false)
+  const [mobileUrls, setMobileUrls] = useState<string[]>([])
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // QA 部門欄位：以 reporterDepartment 為主
   // handlers 欄位補上，預設為單一人員
   const handlers = handlerPersonnel ? [handlerPersonnel] : [];
+
+  const startMobileSession = useCallback(() => {
+    const sid = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+    setMobileSessionId(sid)
+    setShowQrModal(true)
+    setMobileUrls([])
+  }, [])
+
+  useEffect(() => {
+    if (!mobileSessionId || !showQrModal) {
+      if (pollRef.current) clearInterval(pollRef.current)
+      return
+    }
+    const poll = async () => {
+      const { data } = await supabase.storage
+        .from('anomaly-attachments')
+        .list(`mobile/${mobileSessionId}`)
+      if (data && data.length > 0) {
+        const urls = data
+          .filter((f) => f.name !== '.emptyFolderPlaceholder')
+          .map((f) => {
+            const { data: urlData } = supabase.storage
+              .from('anomaly-attachments')
+              .getPublicUrl(`mobile/${mobileSessionId}/${f.name}`)
+            return urlData.publicUrl
+          })
+        setMobileUrls(urls)
+      }
+    }
+    void poll()
+    pollRef.current = setInterval(() => void poll(), 3000)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [mobileSessionId, showQrModal])
+
+  const confirmMobilePhotos = () => {
+    setPreviewUrls((prev) => [...prev, ...mobileUrls])
+    setShowQrModal(false)
+    if (pollRef.current) clearInterval(pollRef.current)
+  }
 
   useEffect(() => {
     const fetchOptions = async () => {
@@ -124,6 +170,27 @@ export default function QaReportFormPage() {
 
     setSubmitting(true)
     try {
+      // 上傳圖片到 Supabase Storage
+      // Include mobile-uploaded URLs (non-blob URLs already in previewUrls)
+      const uploadedUrls: string[] = previewUrls.filter((u) => !u.startsWith('blob:'))
+      for (const file of attachFiles) {
+        const ext = file.name.split('.').pop()
+        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const filePath = `reports/${fileName}`
+        const { error: uploadError } = await supabase.storage
+          .from('anomaly-attachments')
+          .upload(filePath, file)
+        if (uploadError) {
+          alert(`圖片上傳失敗：${uploadError.message}`)
+          setSubmitting(false)
+          return
+        }
+        const { data: urlData } = supabase.storage
+          .from('anomaly-attachments')
+          .getPublicUrl(filePath)
+        uploadedUrls.push(urlData.publicUrl)
+      }
+
       const payload = {
         report_type: 'qa',
         reason: reason.trim(),
@@ -138,6 +205,7 @@ export default function QaReportFormPage() {
         handler_department: handlerDepartment.trim() || null,
         item_code: itemCode.trim() || null,
         item_name: itemName.trim() || null,
+        attachments: uploadedUrls,
       }
 
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
@@ -154,6 +222,10 @@ export default function QaReportFormPage() {
       setHandlerDepartment('')
       setHandlerPersonnel('')
       setCategory('')
+      setAttachFiles([])
+      setPreviewUrls([])
+      setMobileSessionId('')
+      setMobileUrls([])
     } catch (err: unknown) {
       if (isQaReportTypeConstraintError(err)) {
         alert('送出失敗：資料庫尚未允許 report_type=qa。請先執行 sql/20260224_allow_qa_report_type.sql migration。')
@@ -324,6 +396,50 @@ export default function QaReportFormPage() {
           />
         </div>
 
+        <div>
+          <label className="text-xs text-slate-400">上傳圖片（選填，可多張）</label>
+          <div className="mt-1 flex gap-2">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files || [])
+                setAttachFiles((prev) => [...prev, ...files])
+                const urls = files.map((f) => URL.createObjectURL(f))
+                setPreviewUrls((prev) => [...prev, ...urls])
+              }}
+              className="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-cyan-700 file:text-white file:text-xs file:cursor-pointer"
+            />
+            <button
+              type="button"
+              onClick={startMobileSession}
+              className="px-4 py-2 rounded border border-violet-600 text-violet-300 hover:bg-violet-900/30 text-sm whitespace-nowrap"
+            >
+              📱 手機拍照
+            </button>
+          </div>
+          {previewUrls.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {previewUrls.map((url, idx) => (
+                <div key={idx} className="relative group">
+                  <img src={url} alt={`preview-${idx}`} className="w-20 h-20 object-cover rounded border border-slate-700" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachFiles((prev) => prev.filter((_, i) => i !== idx))
+                      setPreviewUrls((prev) => prev.filter((_, i) => i !== idx))
+                    }}
+                    className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-400">
           缺失人員請於「異常紀錄表」編輯時填寫。
         </div>
@@ -352,6 +468,48 @@ export default function QaReportFormPage() {
           </button>
         </div>
       </div>
+
+      {showQrModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-sm w-full space-y-4">
+            <h2 className="text-lg font-bold text-white text-center">📱 手機掃碼上傳圖片</h2>
+            <p className="text-xs text-slate-400 text-center">用手機掃描下方 QR Code 拍照上傳，照片會自動同步到此表單</p>
+            <div className="flex justify-center bg-white rounded-xl p-4">
+              <QRCodeSVG
+                value={`${window.location.origin}/upload-photo?sid=${mobileSessionId}`}
+                size={200}
+                level="M"
+              />
+            </div>
+            {mobileUrls.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm text-emerald-400 text-center">已收到 {mobileUrls.length} 張圖片</p>
+                <div className="flex gap-2 flex-wrap justify-center">
+                  {mobileUrls.map((url, i) => (
+                    <img key={i} src={url} alt={`mobile-${i}`} className="w-14 h-14 object-cover rounded border border-slate-600" />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => { setShowQrModal(false); if (pollRef.current) clearInterval(pollRef.current) }}
+                className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm"
+              >
+                取消
+              </button>
+              {mobileUrls.length > 0 && (
+                <button
+                  onClick={confirmMobilePhotos}
+                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm"
+                >
+                  確認使用 ({mobileUrls.length} 張)
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

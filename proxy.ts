@@ -19,7 +19,7 @@ export function proxy(request: NextRequest) {
       .filter(Boolean)
   )
 
-  const isPublicPath = path === '/login' || path === '/apply-account'
+  const isPublicPath = path === '/login' || path === '/apply-account' || path === '/upload-photo'
   const isAdminPath = path.startsWith('/admin')
   const isOpsPath = path.startsWith('/dashboard') || path.startsWith('/estimation') || path.startsWith('/tasks') || path.startsWith('/qa')
   const hasPermissionsCookie = permissions.size > 0
