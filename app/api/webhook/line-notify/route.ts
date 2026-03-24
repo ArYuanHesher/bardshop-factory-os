@@ -63,8 +63,8 @@ export async function POST(request: NextRequest) {
 
     // 3. 推送到所有 LINE 群組
     const results = await Promise.allSettled(
-      LINE_GROUP_IDS.map(groupId =>
-        fetch('https://api.line.me/v2/bot/message/push', {
+      LINE_GROUP_IDS.map(async (groupId) => {
+        const res = await fetch('https://api.line.me/v2/bot/message/push', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -75,12 +75,19 @@ export async function POST(request: NextRequest) {
             messages: [{ type: 'text', text: message }],
           }),
         })
-      )
+        if (!res.ok) {
+          const errorBody = await res.text()
+          console.error(`LINE push failed for group ${groupId}: ${res.status} ${errorBody}`)
+        } else {
+          console.log(`LINE push OK for group ${groupId}`)
+        }
+        return { groupId, status: res.status }
+      })
     )
 
     const failures = results.filter(r => r.status === 'rejected')
     if (failures.length > 0) {
-      console.error('Some LINE pushes failed:', failures)
+      console.error('Some LINE pushes rejected:', failures)
     }
 
     return NextResponse.json({ ok: true })
