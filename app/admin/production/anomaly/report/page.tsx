@@ -336,13 +336,16 @@ export default function QaReportFormPage() {
           <div className="md:col-span-2 flex gap-4">
             <div style={{ width: '50%' }}>
               <label className="text-xs text-slate-400">異常分類</label>
-              <input
-                list="qa-category-options"
+              <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                placeholder="輸入或選擇異常分類"
                 className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-              />
+              >
+                <option value="">請選擇</option>
+                {categoryOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
             </div>
             <div style={{ width: '50%' }} className="flex flex-col justify-end">
               <label className="text-xs text-slate-400">狀態</label>
@@ -494,11 +497,7 @@ export default function QaReportFormPage() {
             />
           ))}
         </datalist>
-        <datalist id="qa-category-options">
-          {categoryOptions.map((option) => (
-            <option key={option} value={option} />
-          ))}
-        </datalist>
+
 
         <div className="flex justify-end">
           <button
