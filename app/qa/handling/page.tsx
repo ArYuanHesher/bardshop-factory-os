@@ -7,6 +7,8 @@ interface QaReport {
   id: number;
   created_at: string;
   order_number: string;
+  item_code: string | null;
+  item_name: string | null;
   qa_category: string | null;
   qa_department: string | null;
   qa_reporter: string | null;
@@ -90,6 +92,7 @@ export default function QaHandlePage() {
             <tr>
               <th className="p-3">日期</th>
               <th className="p-3">相關單號</th>
+              <th className="p-3">品項</th>
               <th className="p-3">異常分類</th>
               <th className="p-3">異常回報</th>
               <th className="p-3">異常處理</th>
@@ -102,6 +105,10 @@ export default function QaHandlePage() {
               <tr key={report.id}>
                 <td className="p-3">{new Date(report.created_at).toLocaleDateString()}</td>
                 <td className="p-3">{report.order_number}</td>
+                <td className="p-3">
+                  <div className="text-xs">{report.item_code || '-'}</div>
+                  <div className="text-xs text-slate-100">{report.item_name || '-'}</div>
+                </td>
                 <td className="p-3">{report.qa_category || '-'}</td>
                 <td className="p-3">
                   <div>{report.qa_department || '-'}</div>
