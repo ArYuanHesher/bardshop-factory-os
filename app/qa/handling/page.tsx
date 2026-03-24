@@ -34,6 +34,8 @@ export default function QaHandlePage() {
   const [mobileUrls, setMobileUrls] = useState<string[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [notifyPreview, setNotifyPreview] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const startMobileSession = useCallback(() => {
     const sid = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -97,6 +99,46 @@ export default function QaHandlePage() {
     setEditExistingAttachments(Array.isArray(report.attachments) ? report.attachments : []);
   };
 
+  const buildLineMessage = (report: QaReport, handlingText: string) => {
+    const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+    const handlers = Array.isArray(report.qa_handlers) ? report.qa_handlers : [];
+    const lines = [
+      '✅ 【異常單處理完成】',
+      '',
+      `📋 工單編號：${report.order_number || '-'}`,
+      `🔢 品項編碼：${report.item_code || '-'}`,
+      `📦 品名/名稱：${report.item_name || '-'}`,
+      `⚠️ 異常原因：${report.reason || '-'}`,
+      `🏷️ 分類：${report.qa_category || '-'}`,
+      `🏢 回報部門：${report.qa_department || '-'}`,
+      `👤 回報人員：${report.qa_reporter || '-'}`,
+      `🏭 處理部門：${report.handler_department || '-'}`,
+      `🔧 處理人員：${handlers.join('、') || '-'}`,
+      `📝 處理紀錄：${handlingText || '-'}`,
+      `📌 狀態：🟢 已完成`,
+      `🕐 通知時間：${now}`,
+    ];
+    return lines.join('\n');
+  };
+
+  const handleCopyNotify = async () => {
+    if (!notifyPreview) return;
+    try {
+      await navigator.clipboard.writeText(notifyPreview);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = notifyPreview;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   const handleSave = async () => {
     if (!handlerRecord.trim()) {
       alert('請填寫異常處理');
@@ -104,6 +146,7 @@ export default function QaHandlePage() {
     }
     setSaving(true);
     try {
+      const currentReport = pendingReports.find((r) => r.id === editId);
       const uploadedUrls: string[] = [...editExistingAttachments];
       for (const file of editAttachFiles) {
         const ext = file.name.split('.').pop() || 'jpg';
@@ -123,7 +166,11 @@ export default function QaHandlePage() {
         .update({ handler_record: handlerRecord, status: 'confirmed', attachments: uploadedUrls })
         .eq('id', editId);
       if (error) throw error;
-      alert('✅ 已完成異常處理');
+      if (currentReport) {
+        const msg = buildLineMessage(currentReport, handlerRecord.trim());
+        setNotifyPreview(msg);
+        setCopied(false);
+      }
       setEditId(null);
       setHandlerRecord('');
       // 重新載入
@@ -339,8 +386,36 @@ export default function QaHandlePage() {
         </div>
       )}
 
+      {notifyPreview && (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-lg w-full space-y-4">
+            <h2 className="text-lg font-bold text-white text-center">📨 通知訊息預覽</h2>
+            <p className="text-xs text-slate-400 text-center">此訊息與 LINE Bot 推播內容相同，可複製後手動貼到 LINE 群組</p>
+            <pre className="bg-slate-950 border border-slate-700 rounded-lg p-4 text-sm text-slate-200 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto select-all">{notifyPreview}</pre>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => setNotifyPreview(null)}
+                className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm"
+              >
+                關閉
+              </button>
+              <button
+                onClick={() => void handleCopyNotify()}
+                className={`px-4 py-2 rounded font-bold text-sm transition-colors ${
+                  copied
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                }`}
+              >
+                {copied ? '✅ 已複製！' : '📋 複製訊息'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {lightboxUrl && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setLightboxUrl(null)}>
+        <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4" onClick={() => setLightboxUrl(null)}>
           <div className="relative max-w-4xl max-h-[90vh]">
             <img src={lightboxUrl} alt="附件大圖" className="max-w-full max-h-[90vh] object-contain rounded-lg" />
             <button
