@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       `🏢 回報部門：${record.qa_department || '-'}`,
       `👤 回報人員：${record.qa_reporter || '-'}`,
       `🏭 處理部門：${record.handler_department || '-'}`,
-      `🔧 處理人員：${(record.handler_names || []).join('、') || '-'}`,
+      `🔧 處理人員：${(record.handler_names || record.qa_handlers || []).join('、') || '-'}`,
       `📌 狀態：${statusText}`,
       `🕐 通知時間：${now}`,
     ]
