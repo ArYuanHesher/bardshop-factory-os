@@ -1403,6 +1403,7 @@ export default function QaRecordsPage() {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-sm w-full space-y-4">
             <h2 className="text-lg font-bold text-white text-center">📱 手機掃碼上傳圖片</h2>
             <p className="text-xs text-slate-400 text-center">用手機掃描下方 QR Code 拍照上傳，照片會自動同步到表單</p>
+            <p className="text-sm text-amber-400 font-bold text-center bg-amber-900/30 border border-amber-700 rounded-lg px-3 py-2">⚠️ 照片全部上傳完成前請勿關閉此視窗</p>
             <div className="flex justify-center bg-white rounded-xl p-4">
               <QRCodeSVG
                 value={`${window.location.origin}/upload-photo?sid=${mobileSessionId}`}
