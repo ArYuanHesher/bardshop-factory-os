@@ -7,33 +7,25 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || ''
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    console.log('=== Supabase Webhook Received ===')
-    console.log('Headers:', JSON.stringify(Object.fromEntries(request.headers.entries())))
-    console.log('Body:', JSON.stringify(body))
 
     // 1. 驗證 Supabase Webhook 來源
     const authHeader = request.headers.get('authorization')
     if (WEBHOOK_SECRET && authHeader !== `Bearer ${WEBHOOK_SECRET}`) {
-      console.log('Auth failed:', authHeader)
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     if (!LINE_CHANNEL_TOKEN || !LINE_GROUP_ID) {
-      console.log('Missing LINE config:', { hasToken: !!LINE_CHANNEL_TOKEN, hasGroupId: !!LINE_GROUP_ID })
       return NextResponse.json({ error: 'LINE credentials not configured' }, { status: 500 })
     }
 
     const record = body.record
 
     if (!record) {
-      console.log('No record in body, keys:', Object.keys(body))
       return NextResponse.json({ error: 'No record in payload' }, { status: 400 })
     }
 
     // 2. 組裝 LINE 訊息
-    const createdAt = record.created_at
-      ? new Date(record.created_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
-      : '-'
+    const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
 
     const statusText = record.status === 'pending' ? '🔴 待處理' : '🟢 已確認'
 
@@ -46,7 +38,7 @@ export async function POST(request: NextRequest) {
       `🏢 部門：${record.qa_department || '-'}`,
       `👤 回報人：${record.qa_reporter || '-'}`,
       `📌 狀態：${statusText}`,
-      `🕐 時間：${createdAt}`,
+      `🕐 通知時間：${now}`,
     ]
 
     if (record.handler_record) {
