@@ -4,25 +4,6 @@ const LINE_CHANNEL_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
 const LINE_GROUP_IDS = (process.env.LINE_GROUP_ID || '').split(',').map(id => id.trim()).filter(Boolean)
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || ''
 
-// 防重複發送：記錄最近已通知的 record id + 事件類型，30秒內不重複
-const recentNotifications = new Map<string, number>()
-const DEDUP_WINDOW_MS = 30_000 // 30秒
-
-function isDuplicate(recordId: number, eventType: string): boolean {
-  const key = `${recordId}_${eventType}`
-  const now = Date.now()
-  const lastSent = recentNotifications.get(key)
-  if (lastSent && now - lastSent < DEDUP_WINDOW_MS) {
-    return true
-  }
-  recentNotifications.set(key, now)
-  // 清理過期記錄
-  for (const [k, t] of recentNotifications) {
-    if (now - t > DEDUP_WINDOW_MS * 2) recentNotifications.delete(k)
-  }
-  return false
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -38,24 +19,21 @@ export async function POST(request: NextRequest) {
     }
 
     const record = body.record
-    const oldRecord = body.old_record
     const eventType = body.type // INSERT or UPDATE
 
     if (!record) {
       return NextResponse.json({ error: 'No record in payload' }, { status: 400 })
     }
 
-    // UPDATE 事件：只在狀態變更時才通知
+    // 只在以下情況發送通知：
+    // 1. INSERT（新增異常單）→ 一律通知
+    // 2. UPDATE → 只在狀態變成 'confirmed'（已確認/已完成）時通知
+    //    注意：Supabase webhook 的 old_record 預設不含完整欄位，
+    //    所以不能用 old_record.status 判斷，改用 record.status 判斷
     if (eventType === 'UPDATE') {
-      if (!oldRecord || oldRecord.status === record.status) {
-        return NextResponse.json({ ok: true, skipped: 'status not changed' })
+      if (record.status !== 'confirmed') {
+        return NextResponse.json({ ok: true, skipped: 'not a completion update' })
       }
-    }
-
-    // 防重複：同一筆記錄 30 秒內不重複發送
-    if (isDuplicate(record.id, eventType)) {
-      console.log(`Skipped duplicate notification for record ${record.id} (${eventType})`)
-      return NextResponse.json({ ok: true, skipped: 'duplicate within 30s' })
     }
 
     // 2. 組裝 LINE 訊息
