@@ -70,6 +70,8 @@ export default function QaReportFormPage() {
   const [showQrModal, setShowQrModal] = useState(false)
   const [mobileUrls, setMobileUrls] = useState<string[]>([])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [notifyPreview, setNotifyPreview] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   // QA 部門欄位：以 reporterDepartment 為主
   // handlers 欄位補上，預設為單一人員
   const handlers = handlerPersonnel ? [handlerPersonnel] : [];
@@ -152,6 +154,44 @@ export default function QaReportFormPage() {
     void fetchOptions()
   }, [])
 
+  const buildLineMessage = () => {
+    const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
+    const lines = [
+      '\ud83d\udea8 \u3010\u7570\u5e38\u55ae\u901a\u77e5\u3011',
+      '',
+      `\ud83d\udccb \u5de5\u55ae\u7de8\u865f\uff1a${orderNumber.trim() || '-'}`,
+      `\ud83d\udd22 \u54c1\u9805\u7de8\u78bc\uff1a${itemCode.trim() || '-'}`,
+      `\ud83d\udce6 \u54c1\u540d/\u540d\u7a31\uff1a${itemName.trim() || '-'}`,
+      `\u26a0\ufe0f \u7570\u5e38\u539f\u56e0\uff1a${reason.trim() || '-'}`,
+      `\ud83c\udff7\ufe0f \u5206\u985e\uff1a${category || '-'}`,
+      `\ud83c\udfe2 \u56de\u5831\u90e8\u9580\uff1a${reporterDepartment.trim() || '-'}`,
+      `\ud83d\udc64 \u56de\u5831\u4eba\u54e1\uff1a${reporter.trim() || '-'}`,
+      `\ud83c\udfed \u8655\u7406\u90e8\u9580\uff1a${handlerDepartment.trim() || '-'}`,
+      `\ud83d\udd27 \u8655\u7406\u4eba\u54e1\uff1a${handlers.join('\u3001') || '-'}`,
+      `\ud83d\udccc \u72c0\u614b\uff1a\ud83d\udd34 \u5f85\u8655\u7406`,
+      `\ud83d\udd50 \u901a\u77e5\u6642\u9593\uff1a${now}`,
+    ]
+    return lines.join('\n')
+  }
+
+  const handleCopyNotify = async () => {
+    if (!notifyPreview) return
+    try {
+      await navigator.clipboard.writeText(notifyPreview)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      const textarea = document.createElement('textarea')
+      textarea.value = notifyPreview
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
   const handleSubmit = async () => {
     if (!orderNumber.trim()) {
       alert('請填寫相關單號')
@@ -211,8 +251,7 @@ export default function QaReportFormPage() {
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
       if (error) throw error
 
-      alert('✅ 已送出異常回報單')
-      setCreatedDate(getTodayDateInput())
+      const msg = buildLineMessage()
       setOrderNumber('')
       setItemCode('')
       setItemName('')
@@ -226,6 +265,9 @@ export default function QaReportFormPage() {
       setPreviewUrls([])
       setMobileSessionId('')
       setMobileUrls([])
+      setCreatedDate(getTodayDateInput())
+      setNotifyPreview(msg)
+      setCopied(false)
     } catch (err: unknown) {
       if (isQaReportTypeConstraintError(err)) {
         alert('送出失敗：資料庫尚未允許 report_type=qa。請先執行 sql/20260224_allow_qa_report_type.sql migration。')
@@ -506,6 +548,34 @@ export default function QaReportFormPage() {
                   確認使用 ({mobileUrls.length} 張)
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {notifyPreview && (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-lg w-full space-y-4">
+            <h2 className="text-lg font-bold text-white text-center">📨 通知訊息預覽</h2>
+            <p className="text-xs text-slate-400 text-center">此訊息與 LINE Bot 推播內容相同，可複製後手動貼到 LINE 群組</p>
+            <pre className="bg-slate-950 border border-slate-700 rounded-lg p-4 text-sm text-slate-200 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto select-all">{notifyPreview}</pre>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => setNotifyPreview(null)}
+                className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm"
+              >
+                關閉
+              </button>
+              <button
+                onClick={() => void handleCopyNotify()}
+                className={`px-4 py-2 rounded font-bold text-sm transition-colors ${
+                  copied
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                }`}
+              >
+                {copied ? '✅ 已複製！' : '📋 複製訊息'}
+              </button>
             </div>
           </div>
         </div>
