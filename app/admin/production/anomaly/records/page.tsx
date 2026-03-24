@@ -125,6 +125,8 @@ export default function QaRecordsPage() {
   const [mobileTarget, setMobileTarget] = useState<'create' | 'edit'>('create')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+  const [notifyPreview, setNotifyPreview] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   const startMobileSession = useCallback((target: 'create' | 'edit') => {
     const sid = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
@@ -168,6 +170,50 @@ export default function QaRecordsPage() {
     }
     setShowQrModal(false)
     if (pollRef.current) clearInterval(pollRef.current)
+  }
+
+  const buildLineMessage = (form: CreateFormState, type: 'insert' | 'update') => {
+    const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
+    const statusText = form.status === 'pending' ? '🔴 待處理' : '🟢 已完成'
+    const isUpdate = type === 'update'
+    const title = isUpdate ? '✅ 【異常單處理完成】' : '🚨 【異常單通知】'
+    const lines = [
+      title,
+      '',
+      `📋 工單編號：${form.orderNumber.trim() || '-'}`,
+      `🔢 品項編碼：${form.itemCode.trim() || '-'}`,
+      `📦 品名/名稱：${form.itemName.trim() || '-'}`,
+      `⚠️ 異常原因：${form.reason.trim() || '-'}`,
+      `🏷️ 分類：${form.category || '-'}`,
+      `🏢 回報部門：${form.department || '-'}`,
+      `👤 回報人員：${form.reporter || '-'}`,
+      `🏭 處理部門：${form.handlerDepartment || '-'}`,
+      `🔧 處理人員：${form.handlers.join('、') || '-'}`,
+      `📌 狀態：${statusText}`,
+      `🕐 通知時間：${now}`,
+    ]
+    if (isUpdate && form.handling.trim()) {
+      lines.splice(lines.length - 2, 0, `📝 處理紀錄：${form.handling.trim()}`)
+    }
+    return lines.join('\n')
+  }
+
+  const handleCopyNotify = async () => {
+    if (!notifyPreview) return
+    try {
+      await navigator.clipboard.writeText(notifyPreview)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      const textarea = document.createElement('textarea')
+      textarea.value = notifyPreview
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
   }
 
   const fetchOptions = useCallback(async () => {
@@ -347,7 +393,9 @@ export default function QaRecordsPage() {
       const { error } = await supabase.from('schedule_anomaly_reports').insert(payload)
       if (error) throw error
 
-      alert('✅ 已新增異常單')
+      const msg = buildLineMessage(createForm, 'insert')
+      setNotifyPreview(msg)
+      setCopied(false)
       closeCreateModal()
       await fetchReports()
     } catch (err: unknown) {
@@ -411,7 +459,9 @@ export default function QaRecordsPage() {
 
       if (error) throw error
 
-      alert('✅ 已更新異常單')
+      const msg = buildLineMessage(editForm, editForm.status === 'confirmed' ? 'update' : 'insert')
+      setNotifyPreview(msg)
+      setCopied(false)
       closeEditModal()
       await fetchReports()
     } catch (err: unknown) {
@@ -1385,6 +1435,34 @@ export default function QaRecordsPage() {
                   確認使用 ({mobileUrls.length} 張)
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {notifyPreview && (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-lg w-full space-y-4">
+            <h2 className="text-lg font-bold text-white text-center">📨 通知訊息預覽</h2>
+            <p className="text-xs text-slate-400 text-center">此訊息與 LINE Bot 推播內容相同，可複製後手動貼到 LINE 群組</p>
+            <pre className="bg-slate-950 border border-slate-700 rounded-lg p-4 text-sm text-slate-200 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto select-all">{notifyPreview}</pre>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => setNotifyPreview(null)}
+                className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm"
+              >
+                關閉
+              </button>
+              <button
+                onClick={() => void handleCopyNotify()}
+                className={`px-4 py-2 rounded font-bold text-sm transition-colors ${
+                  copied
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                }`}
+              >
+                {copied ? '✅ 已複製！' : '📋 複製訊息'}
+              </button>
             </div>
           </div>
         </div>
