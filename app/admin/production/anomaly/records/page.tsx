@@ -563,22 +563,23 @@ export default function QaRecordsPage() {
         <table className="w-full text-left text-sm text-slate-300 min-w-[1100px]">
           <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono">
             <tr>
-              <th className="p-3">日期</th>
-              <th className="p-3">相關單號</th>
-              <th className="p-3">狀態</th>
-              <th className="p-3">異常回報</th>
-              <th className="p-3">異常處理</th>
-              <th className="p-3">異常分類</th>
-              <th className="p-3">異常原因</th>
-              <th className="p-3">缺失人員</th>
-              <th className="p-3 text-center">操作</th>
+              <th className="px-2 py-3">日期</th>
+              <th className="px-2 py-3">相關單號</th>
+              <th className="px-2 py-3">狀態</th>
+              <th className="px-2 py-3">異常回報</th>
+              <th className="px-2 py-3">異常處理</th>
+              <th className="px-2 py-3">異常分類</th>
+              <th className="px-2 py-3">異常原因</th>
+              <th className="px-2 py-3">處理紀錄</th>
+              <th className="px-2 py-3">缺失人員</th>
+              <th className="px-2 py-3 text-center">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {loading ? (
-              <tr><td colSpan={9} className="p-8 text-center text-slate-500">載入中...</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-slate-500">載入中...</td></tr>
             ) : filteredReportRows.length === 0 ? (
-              <tr><td colSpan={9} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
             ) : (
               filteredReportRows.map((report) => {
                 const department = report.qa_department || ''
@@ -591,40 +592,42 @@ export default function QaRecordsPage() {
 
                 return (
                   <tr key={report.id} className="hover:bg-slate-800/30 align-top">
-                    <td className="p-3 font-mono text-xs whitespace-nowrap">{new Date(report.created_at).toLocaleDateString()}</td>
-                    <td className="p-3 font-mono text-cyan-300 whitespace-nowrap">{report.order_number}</td>
+                    <td className="px-2 py-3 font-mono text-xs whitespace-nowrap">{new Date(report.created_at).toLocaleDateString()}</td>
+                    <td className="px-2 py-3 font-mono text-cyan-300 whitespace-nowrap">{report.order_number}</td>
 
-                    <td className="p-3 min-w-[120px]">
+                    <td className="px-2 py-3">
                       <span className={`px-2 py-1 rounded border text-xs whitespace-nowrap ${report.status === 'pending' ? 'bg-amber-900/30 border-amber-700 text-amber-300' : 'bg-emerald-900/30 border-emerald-700 text-emerald-300'}`}>
                         {statusLabel || '-'}
                       </span>
                     </td>
 
-                    <td className="p-3 min-w-[170px]">
+                    <td className="px-2 py-3 min-w-[130px]">
                       <div className="text-xs space-y-0.5">
                         <div className="text-slate-400">{department || '-'}</div>
                         <div className="text-slate-100">{reporter || '-'}</div>
                       </div>
                     </td>
 
-                    <td className="p-3 min-w-[170px]">
+                    <td className="px-2 py-3 min-w-[130px]">
                       <div className="text-xs space-y-0.5">
                         <div className="text-slate-400">{handlerDept || '-'}</div>
                         <div className="text-slate-100">{handlers.length ? handlers.join('、') : '-'}</div>
                       </div>
                     </td>
 
-                    <td className="p-3 min-w-[160px]">
+                    <td className="px-2 py-3 min-w-[100px]">
                       <span className="text-slate-100 text-xs">{category || '-'}</span>
                     </td>
 
-                    <td className="p-3 min-w-[220px] text-slate-200">{report.reason || '-'}</td>
+                    <td className="px-2 py-3 min-w-[180px] text-slate-200">{report.reason || '-'}</td>
 
-                    <td className="p-3 min-w-[220px]">
+                    <td className="px-2 py-3 min-w-[180px] text-slate-200 text-xs">{report.handler_record || '-'}</td>
+
+                    <td className="px-2 py-3 min-w-[120px]">
                       <span className="text-slate-100 text-xs">{responsible.length ? responsible.join('、') : '-'}</span>
                     </td>
 
-                    <td className="p-3 text-center min-w-[130px]">
+                    <td className="px-2 py-3 text-center min-w-[110px]">
                       <div className="flex items-center justify-center gap-2">
                         <button
                           onClick={() => openEditModal(report)}

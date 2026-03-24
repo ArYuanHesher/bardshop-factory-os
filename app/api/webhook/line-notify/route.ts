@@ -19,30 +19,44 @@ export async function POST(request: NextRequest) {
     }
 
     const record = body.record
+    const oldRecord = body.old_record
+    const eventType = body.type // INSERT or UPDATE
 
     if (!record) {
       return NextResponse.json({ error: 'No record in payload' }, { status: 400 })
     }
 
+    // UPDATE 事件：只在狀態變更為已完成時才通知
+    if (eventType === 'UPDATE') {
+      if (!oldRecord || oldRecord.status === record.status) {
+        return NextResponse.json({ ok: true, skipped: 'status not changed' })
+      }
+    }
+
     // 2. 組裝 LINE 訊息
     const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
 
-    const statusText = record.status === 'pending' ? '🔴 待處理' : '🟢 已確認'
+    const statusText = record.status === 'pending' ? '🔴 待處理' : '🟢 已完成'
+
+    const isUpdate = eventType === 'UPDATE'
+    const title = isUpdate ? '✅ 【異常單處理完成】' : '🚨 【異常單通知】'
 
     const lines = [
-      '🚨 【異常單通知】',
+      title,
       '',
       `📋 工單編號：${record.order_number || '-'}`,
       `⚠️ 異常原因：${record.reason || '-'}`,
       `🏷️ 分類：${record.qa_category || '-'}`,
-      `🏢 部門：${record.qa_department || '-'}`,
-      `👤 回報人：${record.qa_reporter || '-'}`,
+      `🏢 回報部門：${record.qa_department || '-'}`,
+      `👤 回報人員：${record.qa_reporter || '-'}`,
+      `🏭 處理部門：${record.handler_department || '-'}`,
+      `🔧 處理人員：${(record.handler_names || []).join('、') || '-'}`,
       `📌 狀態：${statusText}`,
       `🕐 通知時間：${now}`,
     ]
 
-    if (record.handler_record) {
-      lines.push(`📝 處理紀錄：${record.handler_record}`)
+    if (isUpdate && record.handler_record) {
+      lines.splice(lines.length - 2, 0, `📝 處理紀錄：${record.handler_record}`)
     }
 
     const message = lines.join('\n')

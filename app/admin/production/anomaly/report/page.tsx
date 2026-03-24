@@ -214,68 +214,66 @@ export default function QaReportFormPage() {
 
           <div className="col-span-1">
             <label className="text-xs text-slate-400">異常回報-部門</label>
-            <input
-              list="qa-department-options"
+            <select
               value={reporterDepartment}
               onChange={(e) => {
                 setReporterDepartment(e.target.value);
                 setReporter('');
               }}
-              placeholder="輸入或選擇部門"
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            />
+            >
+              <option value="">請選擇</option>
+              {departmentOptions.map((dept) => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
           </div>
           <div className="col-span-1">
             <label className="text-xs text-slate-400">異常回報-人員</label>
             {reporterDepartment ? (
-              <>
-                <input
-                  list="qa-reporter-personnel-options"
-                  value={reporter}
-                  onChange={(e) => setReporter(e.target.value)}
-                  placeholder="先選部門，再選人員"
-                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-                />
-                <datalist id="qa-reporter-personnel-options">
-                  {personnelOptions.filter(p => p.department_value === reporterDepartment).map((option, idx) => (
-                    <option key={idx} value={option.option_value} />
-                  ))}
-                </datalist>
-              </>
+              <select
+                value={reporter}
+                onChange={(e) => setReporter(e.target.value)}
+                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+              >
+                <option value="">請選擇</option>
+                {personnelOptions.filter(p => p.department_value === reporterDepartment).map((option, idx) => (
+                  <option key={idx} value={option.option_value}>{option.option_value}</option>
+                ))}
+              </select>
             ) : (
               <div className="mt-1 text-slate-500 text-xs">請先選部門</div>
             )}
           </div>
           <div className="col-span-1">
             <label className="text-xs text-slate-400">異常處理-部門</label>
-            <input
-              list="qa-department-options"
+            <select
               value={handlerDepartment}
               onChange={e => {
                 setHandlerDepartment(e.target.value);
                 setHandlerPersonnel('');
               }}
-              placeholder="輸入或選擇部門"
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-            />
+            >
+              <option value="">請選擇</option>
+              {departmentOptions.map((dept) => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
           </div>
           <div className="col-span-1">
             <label className="text-xs text-slate-400">異常處理-人員</label>
             {handlerDepartment ? (
-              <>
-                <input
-                  list="qa-handler-personnel-options"
-                  value={handlerPersonnel}
-                  onChange={e => setHandlerPersonnel(e.target.value)}
-                  placeholder="先選部門，再選人員"
-                  className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-                />
-                <datalist id="qa-handler-personnel-options">
-                  {personnelOptions.filter(p => p.department_value === handlerDepartment).map((option, i) => (
-                    <option key={i} value={option.option_value} />
-                  ))}
-                </datalist>
-              </>
+              <select
+                value={handlerPersonnel}
+                onChange={e => setHandlerPersonnel(e.target.value)}
+                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+              >
+                <option value="">請選擇</option>
+                {personnelOptions.filter(p => p.department_value === handlerDepartment).map((option, i) => (
+                  <option key={i} value={option.option_value}>{option.option_value}</option>
+                ))}
+              </select>
             ) : (
               <div className="mt-1 text-slate-500 text-xs">請先選部門</div>
             )}
@@ -314,11 +312,6 @@ export default function QaReportFormPage() {
         </datalist>
         <datalist id="qa-category-options">
           {categoryOptions.map((option) => (
-            <option key={option} value={option} />
-          ))}
-        </datalist>
-        <datalist id="qa-department-options">
-          {departmentOptions.map((option) => (
             <option key={option} value={option} />
           ))}
         </datalist>
