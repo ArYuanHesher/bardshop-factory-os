@@ -395,7 +395,7 @@ export default function QaHandlePage() {
             <pre className="bg-slate-950 border border-slate-700 rounded-lg p-4 text-sm text-slate-200 whitespace-pre-wrap leading-relaxed max-h-[50vh] overflow-y-auto select-all">{notifyPreview}</pre>
             <div className="flex gap-2 justify-center">
               <button
-                onClick={() => setNotifyPreview(null)}
+                onClick={() => { if (confirm('確定關閉？關閉後訊息將無法再次查看。')) setNotifyPreview(null) }}
                 className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm"
               >
                 關閉
