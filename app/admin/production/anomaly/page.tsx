@@ -70,6 +70,20 @@ export default function QaZonePage() {
           <p className="text-slate-400 text-sm">以日期區間分析異常原因與相關人員的比例分布。</p>
           <p className="text-xs text-emerald-400 font-mono mt-4">OPEN ANALYTICS →</p>
         </Link>
+
+        <Link
+          href="/qa/personnel-stats"
+          className="group rounded-2xl border border-slate-700 bg-slate-900/50 p-6 hover:border-rose-500 hover:bg-slate-800/60 transition-all"
+        >
+          <div className="mb-4 inline-flex p-3 rounded-full bg-slate-800 group-hover:bg-rose-900/40 text-slate-300 group-hover:text-rose-300 transition-colors">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2 group-hover:text-rose-300">異常人員統計</h2>
+          <p className="text-slate-400 text-sm">依缺失人員交叉分析異常分類次數，支援排序與 XLSX 匯出。</p>
+          <p className="text-xs text-rose-400 font-mono mt-4">PERSONNEL STATS →</p>
+        </Link>
       </div>
     </div>
   )
