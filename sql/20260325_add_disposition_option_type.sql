@@ -8,13 +8,9 @@
 --   請執行下方 Step 1 移除限制後再新增選項。
 -- ============================================================
 
--- Step 1（若有 CHECK constraint 才需執行）
--- 查詢是否存在限制：
--- SELECT conname FROM pg_constraint WHERE conrelid = 'qa_anomaly_option_items'::regclass AND contype = 'c';
---
--- 若存在，請將 <constraint_name> 替換為實際名稱後執行：
--- ALTER TABLE qa_anomaly_option_items
---   DROP CONSTRAINT <constraint_name>;
+-- Step 1：移除 option_type 的 CHECK constraint
+ALTER TABLE qa_anomaly_option_items
+  DROP CONSTRAINT qa_anomaly_option_items_option_type_check;
 
 -- Step 2：新增初始缺失處置選項（可依需求增減）
 INSERT INTO qa_anomaly_option_items (option_type, option_value)

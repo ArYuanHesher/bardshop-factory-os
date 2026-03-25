@@ -67,32 +67,6 @@ export default function QaAnalyticsPage() {
       .sort((a, b) => b.count - a.count)
   }, [rows])
 
-  // 2. 異常人員佔比 (qa_reporter)
-  const reporterRatios = useMemo<RatioItem[]>(() => {
-    const map = new Map<string, number>()
-    for (const row of rows) {
-      const key = (row.qa_reporter || '未指定').trim() || '未指定'
-      map.set(key, (map.get(key) || 0) + 1)
-    }
-    const total = rows.length || 1
-    return [...map.entries()]
-      .map(([name, count]) => ({ name, count, percentage: (count / total) * 100 }))
-      .sort((a, b) => b.count - a.count)
-  }, [rows])
-
-  // 3. 異常部門佔比 (qa_department)
-  const departmentRatios = useMemo<RatioItem[]>(() => {
-    const map = new Map<string, number>()
-    for (const row of rows) {
-      const key = (row.qa_department || '未指定').trim() || '未指定'
-      map.set(key, (map.get(key) || 0) + 1)
-    }
-    const total = rows.length || 1
-    return [...map.entries()]
-      .map(([name, count]) => ({ name, count, percentage: (count / total) * 100 }))
-      .sort((a, b) => b.count - a.count)
-  }, [rows])
-
   // 4. 缺失部門佔比 (qa_responsible → personnelMap → department)
   const responsibleDeptRatios = useMemo<RatioItem[]>(() => {
     const map = new Map<string, number>()
@@ -138,8 +112,6 @@ export default function QaAnalyticsPage() {
 
     const sections: { title: string; countLabel: string; items: RatioItem[] }[] = [
       { title: '異常分類佔比', countLabel: '筆數', items: categoryRatios },
-      { title: '異常人員佔比', countLabel: '次數', items: reporterRatios },
-      { title: '異常部門佔比', countLabel: '筆數', items: departmentRatios },
       { title: '缺失部門佔比', countLabel: '筆數', items: responsibleDeptRatios },
       { title: '缺失人員佔比', countLabel: '次數', items: responsibleRatios },
     ]
@@ -168,7 +140,7 @@ export default function QaAnalyticsPage() {
     XLSX.utils.book_append_sheet(wb, ws, '異常統計分析')
 
     XLSX.writeFile(wb, `異常統計分析_${startDate}_${endDate}.xlsx`)
-  }, [rows, startDate, endDate, statusSummary, categoryRatios, reporterRatios, departmentRatios, responsibleDeptRatios, responsibleRatios])
+  }, [rows, startDate, endDate, statusSummary, categoryRatios, responsibleDeptRatios, responsibleRatios])
 
   const runAnalysis = async () => {
     if (!startDate || !endDate) {
@@ -278,44 +250,6 @@ export default function QaAnalyticsPage() {
                 </div>
                 <div className="h-2 bg-slate-800 rounded">
                   <div className="h-2 bg-cyan-500 rounded" style={{ width: `${Math.max(3, item.percentage)}%` }} />
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 space-y-3">
-          <h2 className="text-lg text-white font-bold">異常人員佔比</h2>
-          {reporterRatios.length === 0 ? (
-            <p className="text-sm text-slate-500">尚無資料</p>
-          ) : (
-            reporterRatios.map((item) => (
-              <div key={item.name} className="space-y-1">
-                <div className="flex justify-between text-xs text-slate-300">
-                  <span>{item.name}</span>
-                  <span>{item.count} 次 / {item.percentage.toFixed(1)}%</span>
-                </div>
-                <div className="h-2 bg-slate-800 rounded">
-                  <div className="h-2 bg-emerald-500 rounded" style={{ width: `${Math.max(3, item.percentage)}%` }} />
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 space-y-3">
-          <h2 className="text-lg text-white font-bold">異常部門佔比</h2>
-          {departmentRatios.length === 0 ? (
-            <p className="text-sm text-slate-500">尚無資料</p>
-          ) : (
-            departmentRatios.map((item) => (
-              <div key={item.name} className="space-y-1">
-                <div className="flex justify-between text-xs text-slate-300">
-                  <span>{item.name}</span>
-                  <span>{item.count} 筆 / {item.percentage.toFixed(1)}%</span>
-                </div>
-                <div className="h-2 bg-slate-800 rounded">
-                  <div className="h-2 bg-indigo-500 rounded" style={{ width: `${Math.max(3, item.percentage)}%` }} />
                 </div>
               </div>
             ))

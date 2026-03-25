@@ -24,6 +24,7 @@ interface AnomalyReport {
   qa_handlers: string[] | null
   qa_category: string | null
   qa_responsible: string[] | null
+  qa_disposition: Record<string, string> | null
   handler_department: string | null
   handler_record: string | null
   attachments: string[] | null
@@ -38,6 +39,7 @@ interface OptionState {
   personnel: PersonnelOption[]
   categories: string[]
   departments: string[]
+  dispositions: string[]
 }
 
 interface CreateFormState {
@@ -55,12 +57,13 @@ interface CreateFormState {
   handling: string
   responsibleDepartment: string
   responsible: string[]
+  disposition: Record<string, string>
   attachFiles: File[]
   previewUrls: string[]
   existingAttachments: string[]
 }
 
-type OptionType = 'personnel' | 'category' | 'department'
+type OptionType = 'personnel' | 'category' | 'department' | 'disposition'
 
 interface OptionItem {
   id: number
@@ -77,9 +80,20 @@ const DEFAULT_OPTIONS: OptionState = {
   ],
   categories: ['品質異常', '製程異常', '資料異常'],
   departments: ['品保部', '生產部', '工程部'],
+  dispositions: ['重工', '報廢', '讓步接收', '退貨', '隔離', '待判定'],
 }
 
 const getTodayDateInput = () => new Date().toISOString().slice(0, 10)
+
+// Safely parse disposition regardless of whether DB returned object or JSON string
+const parseDisp = (val: unknown): Record<string, string> => {
+  if (!val) return {}
+  if (typeof val === 'string') {
+    try { return JSON.parse(val) as Record<string, string> } catch { return {} }
+  }
+  if (typeof val === 'object') return val as Record<string, string>
+  return {}
+}
 
 const DEFAULT_CREATE_FORM: CreateFormState = {
   createdDate: getTodayDateInput(),
@@ -96,6 +110,7 @@ const DEFAULT_CREATE_FORM: CreateFormState = {
   handling: '',
   responsibleDepartment: '',
   responsible: [],
+  disposition: {},
   attachFiles: [],
   previewUrls: [],
   existingAttachments: [],
@@ -234,11 +249,13 @@ export default function QaRecordsPage() {
       .map((row) => ({ option_value: row.option_value, department_value: row.department_value || '' }))
     const categoriesRows = rows.filter((row) => row.option_type === 'category').map((row) => row.option_value)
     const departmentsRows = rows.filter((row) => row.option_type === 'department').map((row) => row.option_value)
+    const dispositionsRows = rows.filter((row) => row.option_type === 'disposition').map((row) => row.option_value)
 
     setOptions({
       personnel: personnelRows.length ? personnelRows : DEFAULT_OPTIONS.personnel,
       categories: categoriesRows.length ? categoriesRows : DEFAULT_OPTIONS.categories,
       departments: departmentsRows.length ? departmentsRows : DEFAULT_OPTIONS.departments,
+      dispositions: dispositionsRows.length ? dispositionsRows : DEFAULT_OPTIONS.dispositions,
     })
   }, [])
 
@@ -290,6 +307,7 @@ export default function QaRecordsPage() {
       handling: report.handler_record || '',
       responsibleDepartment: '',
       responsible: normalizeTextArray(report.qa_responsible),
+      disposition: parseDisp(report.qa_disposition),
       attachFiles: [],
       previewUrls: [],
       existingAttachments: Array.isArray(report.attachments) ? report.attachments : [],
@@ -385,6 +403,7 @@ export default function QaRecordsPage() {
         qa_handlers: createForm.handlers,
         qa_category: createForm.category || null,
         qa_responsible: createForm.responsible,
+        qa_disposition: Object.keys(createForm.disposition).length > 0 ? createForm.disposition : null,
         handler_department: createForm.handlerDepartment || null,
         handler_record: createForm.handling.trim() || null,
         attachments: uploadedUrls,
@@ -451,6 +470,7 @@ export default function QaRecordsPage() {
           qa_handlers: editForm.handlers,
           qa_category: editForm.category || null,
           qa_responsible: editForm.responsible,
+          qa_disposition: Object.keys(editForm.disposition).length > 0 ? editForm.disposition : null,
           handler_department: editForm.handlerDepartment || null,
           handler_record: editForm.handling.trim() || null,
           attachments: uploadedUrls,
@@ -721,25 +741,23 @@ export default function QaRecordsPage() {
         <table className="w-full text-left text-sm text-slate-300 min-w-[1100px]">
           <thead className="bg-slate-950 text-slate-200 uppercase text-xs font-mono">
             <tr>
-              <th className="px-2 py-3">日期</th>
-              <th className="px-2 py-3">相關單號</th>
+              <th className="px-2 py-3">日期 / 相關單號</th>
               <th className="px-2 py-3">品項</th>
               <th className="px-2 py-3">狀態</th>
               <th className="px-2 py-3">異常回報</th>
               <th className="px-2 py-3">異常處理</th>
-              <th className="px-2 py-3">異常分類</th>
-              <th className="px-2 py-3">異常原因</th>
+              <th className="px-2 py-3">異常分類 / 原因</th>
               <th className="px-2 py-3">處理紀錄</th>
-              <th className="px-2 py-3">缺失人員</th>
+              <th className="px-2 py-3">缺失人員 / 處置</th>
               <th className="px-2 py-3">附件</th>
               <th className="px-2 py-3 text-center">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {loading ? (
-              <tr><td colSpan={12} className="p-8 text-center text-slate-500">載入中...</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-slate-500">載入中...</td></tr>
             ) : filteredReportRows.length === 0 ? (
-              <tr><td colSpan={12} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-slate-500">無符合條件的異常紀錄</td></tr>
             ) : (
               filteredReportRows.map((report) => {
                 const department = report.qa_department || ''
@@ -752,8 +770,12 @@ export default function QaRecordsPage() {
 
                 return (
                   <tr key={report.id} className="hover:bg-slate-800/30 align-top">
-                    <td className="px-2 py-3 font-mono text-xs whitespace-nowrap">{new Date(report.created_at).toLocaleDateString()}</td>
-                    <td className="px-2 py-3 font-mono text-cyan-300 whitespace-nowrap">{report.order_number}</td>
+                    <td className="px-2 py-3">
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-mono text-slate-300 whitespace-nowrap">{new Date(report.created_at).toLocaleDateString()}</div>
+                        <div className="font-mono text-cyan-300 whitespace-nowrap">{report.order_number}</div>
+                      </div>
+                    </td>
 
                     <td className="px-2 py-3">
                       <div className="text-xs space-y-0.5">
@@ -782,16 +804,33 @@ export default function QaRecordsPage() {
                       </div>
                     </td>
 
-                    <td className="px-2 py-3 min-w-[100px]">
-                      <span className="text-slate-100 text-xs">{category || '-'}</span>
+                    <td className="px-2 py-3 min-w-[140px]">
+                      <div className="text-xs space-y-0.5">
+                        <div className="text-slate-400 whitespace-nowrap">{category || '-'}</div>
+                        <div className="text-slate-100 line-clamp-2">{report.reason || '-'}</div>
+                      </div>
                     </td>
-
-                    <td className="px-2 py-3 min-w-[140px] text-slate-200 text-xs"><div className="line-clamp-2">{report.reason || '-'}</div></td>
 
                     <td className="px-2 py-3 min-w-[140px] text-slate-200 text-xs"><div className="line-clamp-2">{report.handler_record || '-'}</div></td>
 
-                    <td className="px-2 py-3 min-w-[120px]">
-                      <span className="text-slate-100 text-xs">{responsible.length ? responsible.join('、') : '-'}</span>
+                    <td className="px-2 py-3 min-w-[150px]">
+                      {(() => {
+                        const dispMap = parseDisp(report.qa_disposition)
+                        return responsible.length > 0 ? (
+                          <div className="space-y-1">
+                            {responsible.map((person) => (
+                              <div key={person} className="text-xs flex items-center gap-1 flex-wrap">
+                                <span className="text-slate-300 whitespace-nowrap">{person}</span>
+                                {dispMap[person] && (
+                                  <span className="px-1.5 py-0.5 rounded bg-violet-900/30 border border-violet-700/50 text-violet-200 whitespace-nowrap">{dispMap[person]}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-500">-</span>
+                        )
+                      })()}
                     </td>
 
                     <td className="px-2 py-3">
@@ -1018,12 +1057,29 @@ export default function QaRecordsPage() {
                 <label className="text-xs text-slate-400">缺失-人員</label>
                 {createForm.responsibleDepartment ? (
                   <div className="mt-1 space-y-2">
-                    <div className="flex flex-wrap gap-1">
+                    <div className="space-y-1.5">
                       {createForm.responsible.map((name) => (
-                        <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
-                          {name}
-                          <button onClick={() => setCreateForm((prev) => ({ ...prev, responsible: prev.responsible.filter((item) => item !== name) }))}>×</button>
-                        </span>
+                        <div key={name} className="flex items-center gap-2 px-2 py-1.5 rounded bg-amber-900/20 border border-amber-700/50">
+                          <span className="text-amber-200 text-xs font-medium flex-shrink-0">{name}</span>
+                          <select
+                            value={createForm.disposition[name] || ''}
+                            onChange={(e) => setCreateForm((prev) => ({ ...prev, disposition: { ...prev.disposition, [name]: e.target.value } }))}
+                            className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs text-white min-w-0"
+                          >
+                            <option value="">處置...</option>
+                            {options.dispositions.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => setCreateForm((prev) => {
+                              const newDisp = { ...prev.disposition }
+                              delete newDisp[name]
+                              return { ...prev, responsible: prev.responsible.filter((item) => item !== name), disposition: newDisp }
+                            })}
+                            className="text-amber-500 hover:text-white text-sm flex-shrink-0"
+                          >×</button>
+                        </div>
                       ))}
                     </div>
                     <select
@@ -1292,12 +1348,29 @@ export default function QaRecordsPage() {
                 <label className="text-xs text-slate-400">缺失-人員</label>
                 {editForm.responsibleDepartment ? (
                   <div className="mt-1 space-y-2">
-                    <div className="flex flex-wrap gap-1">
+                    <div className="space-y-1.5">
                       {editForm.responsible.map((name) => (
-                        <span key={name} className="px-2 py-0.5 rounded bg-amber-900/40 border border-amber-700 text-amber-200 text-xs flex items-center gap-1">
-                          {name}
-                          <button onClick={() => setEditForm((prev) => ({ ...prev, responsible: prev.responsible.filter((item) => item !== name) }))}>×</button>
-                        </span>
+                        <div key={name} className="flex items-center gap-2 px-2 py-1.5 rounded bg-amber-900/20 border border-amber-700/50">
+                          <span className="text-amber-200 text-xs font-medium flex-shrink-0">{name}</span>
+                          <select
+                            value={editForm.disposition[name] || ''}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, disposition: { ...prev.disposition, [name]: e.target.value } }))}
+                            className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs text-white min-w-0"
+                          >
+                            <option value="">處置...</option>
+                            {options.dispositions.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => setEditForm((prev) => {
+                              const newDisp = { ...prev.disposition }
+                              delete newDisp[name]
+                              return { ...prev, responsible: prev.responsible.filter((item) => item !== name), disposition: newDisp }
+                            })}
+                            className="text-amber-500 hover:text-white text-sm flex-shrink-0"
+                          >×</button>
+                        </div>
                       ))}
                     </div>
                     <select

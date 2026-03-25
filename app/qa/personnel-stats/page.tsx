@@ -6,8 +6,13 @@ import * as XLSX from 'xlsx'
 import { supabase } from '../../../lib/supabaseClient'
 
 interface AnomalyRow {
+  id: number
+  order_number: string
+  item_code: string | null
+  item_name: string | null
   qa_responsible: string[] | null
   qa_category: string | null
+  qa_disposition: Record<string, string> | null
   created_at: string
   status: string | null
 }
@@ -20,6 +25,15 @@ function normalizeArray(value: string[] | null | undefined): string[] {
   return Array.isArray(value) ? value : []
 }
 
+function parseDisp(val: unknown): Record<string, string> {
+  if (!val) return {}
+  if (typeof val === 'string') {
+    try { return JSON.parse(val) as Record<string, string> } catch { return {} }
+  }
+  if (typeof val === 'object') return val as Record<string, string>
+  return {}
+}
+
 export default function PersonnelStatsPage() {
   const [startDate, setStartDate] = useState(() => {
     const d = new Date()
@@ -29,27 +43,69 @@ export default function PersonnelStatsPage() {
   const [endDate, setEndDate] = useState(() => toDateInputValue(new Date()))
   const [loading, setLoading] = useState(false)
   const [rows, setRows] = useState<AnomalyRow[]>([])
+  const [dispositionOptions, setDispositionOptions] = useState<string[]>([
+    '重工', '報廢', '讓步接收', '退貨', '隔離', '待判定',
+  ])
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [personFilter, setPersonFilter] = useState('')
 
   // 排序狀態：'total' | category name
   const [sortBy, setSortBy] = useState<string>('total')
 
-  const runQuery = async () => {
+  const runQuery = useCallback(async () => {
     if (!startDate || !endDate) { alert('請選擇日期區間'); return }
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('schedule_anomaly_reports')
-        .select('qa_responsible, qa_category, created_at, status')
-        .eq('report_type', 'qa')
-        .gte('created_at', `${startDate}T00:00:00.000Z`)
-        .lte('created_at', `${endDate}T23:59:59.999Z`)
-      if (error) throw error
-      setRows((data as AnomalyRow[]) || [])
+      const [reportRes, optRes] = await Promise.all([
+        supabase
+          .from('schedule_anomaly_reports')
+          .select('id, order_number, item_code, item_name, qa_responsible, qa_category, qa_disposition, created_at, status')
+          .eq('report_type', 'qa')
+          .gte('created_at', `${startDate}T00:00:00.000Z`)
+          .lte('created_at', `${endDate}T23:59:59.999Z`),
+        supabase
+          .from('qa_anomaly_option_items')
+          .select('option_value')
+          .eq('option_type', 'disposition')
+          .order('option_value', { ascending: true }),
+      ])
+      if (reportRes.error) throw reportRes.error
+      setRows((reportRes.data as AnomalyRow[]) || [])
       setSortBy('total')
+      const opts = (optRes.data || []).map((r: { option_value: string }) => r.option_value)
+      if (opts.length > 0) setDispositionOptions(opts)
     } catch (err: unknown) {
       alert(`查詢失敗：${err instanceof Error ? err.message : '未知錯誤'}`)
     } finally {
       setLoading(false)
+    }
+  }, [startDate, endDate])
+
+  const handleDispositionChange = async (rowId: number, person: string, newDisposition: string) => {
+    const savingKey = `${rowId}-${person}`
+    setSavingId(savingKey)
+    try {
+      const currentRow = rows.find((r) => r.id === rowId)
+      const currentDisp = parseDisp(currentRow?.qa_disposition)
+      const updatedDisp = { ...currentDisp }
+      if (newDisposition) {
+        updatedDisp[person] = newDisposition
+      } else {
+        delete updatedDisp[person]
+      }
+      const payload = Object.keys(updatedDisp).length > 0 ? updatedDisp : null
+      const { error } = await supabase
+        .from('schedule_anomaly_reports')
+        .update({ qa_disposition: payload })
+        .eq('id', rowId)
+      if (error) throw error
+      setRows((prev) =>
+        prev.map((r) => r.id === rowId ? { ...r, qa_disposition: payload } : r)
+      )
+    } catch (err: unknown) {
+      alert(`儲存失敗：${err instanceof Error ? err.message : '未知錯誤'}`)
+    } finally {
+      setSavingId(null)
     }
   }
 
@@ -100,6 +156,19 @@ export default function PersonnelStatsPage() {
   const totalCount = useMemo(() => [...personMap.values()].flatMap((m) => [...m.values()]).reduce((s, c) => s + c, 0), [personMap])
   const uniquePersons = personMap.size
   const uniqueCategories = allCategories.length
+
+  // 所有缺失人員列表（依統計排序）
+  const allPersons = useMemo(() => sortedPersons, [sortedPersons])
+
+  // 個別紀錄明細（依人員篩選）
+  const detailRows = useMemo(() => {
+    return rows.filter((row) => {
+      const persons = normalizeArray(row.qa_responsible)
+      if (persons.length === 0) return false
+      if (personFilter && !persons.map((p) => p.trim()).includes(personFilter)) return false
+      return true
+    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  }, [rows, personFilter])
 
   const handleDownload = useCallback(() => {
     if (rows.length === 0) { alert('尚無資料，請先查詢'); return }
@@ -179,6 +248,123 @@ export default function PersonnelStatsPage() {
         </div>
       </div>
 
+      {/* 個別紀錄明細（可設定缺失處置） */}
+      {rows.length > 0 && (
+        <div className="bg-slate-900/50 border border-violet-700/40 rounded-2xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-700 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-white">個別紀錄明細</h2>
+              <p className="text-xs text-violet-400 mt-0.5">可在此直接設定各筆紀錄的缺失處置</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-xs text-slate-400">篩選缺失人員</label>
+              <select
+                value={personFilter}
+                onChange={(e) => setPersonFilter(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white text-sm"
+              >
+                <option value="">全部人員</option>
+                {allPersons.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              {personFilter && (
+                <button
+                  onClick={() => setPersonFilter('')}
+                  className="px-2 py-1.5 rounded border border-slate-700 text-slate-400 hover:text-white text-xs"
+                >
+                  清除
+                </button>
+              )}
+              <span className="text-xs text-slate-500">{detailRows.length} 筆</span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-slate-300 min-w-[800px]">
+              <thead className="bg-slate-950 text-slate-400 uppercase text-xs font-mono">
+                <tr>
+                  <th className="px-4 py-3 text-left">日期</th>
+                  <th className="px-4 py-3 text-left">相關單號</th>
+                  <th className="px-4 py-3 text-left">品項</th>
+                  <th className="px-4 py-3 text-left">異常分類</th>
+                  <th className="px-4 py-3 text-left">缺失人員</th>
+                  <th className="px-4 py-3 text-left">缺失處置</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {detailRows.map((row) => {
+                  const persons = normalizeArray(row.qa_responsible)
+                  const dispMap = parseDisp(row.qa_disposition)
+                  return (
+                    <tr key={row.id} className="hover:bg-slate-800/30 align-middle">
+                      <td className="px-4 py-3 font-mono text-xs whitespace-nowrap text-slate-400">
+                        {new Date(row.created_at).toLocaleDateString('zh-TW')}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-cyan-300 whitespace-nowrap text-xs">
+                        {row.order_number || '-'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-xs space-y-0.5">
+                          <div className="text-slate-400">{row.item_code || '-'}</div>
+                          <div className="text-slate-200">{row.item_name || '-'}</div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-amber-300">{row.qa_category || '-'}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {persons.map((p) => (
+                            <span key={p} className="px-2 py-0.5 rounded bg-rose-900/30 border border-rose-700/50 text-rose-200 text-xs">
+                              {p}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="space-y-1.5">
+                          {persons.map((person) => {
+                            const savingKey = `${row.id}-${person}`
+                            const isPersonSaving = savingId === savingKey
+                            return (
+                              <div key={person} className="flex items-center gap-2">
+                                <span className="text-xs text-slate-400 whitespace-nowrap">{person}：</span>
+                                <select
+                                  value={dispMap[person] || ''}
+                                  disabled={isPersonSaving}
+                                  onChange={(e) => void handleDispositionChange(row.id, person, e.target.value)}
+                                  className={`bg-slate-950 border rounded px-2 py-0.5 text-xs min-w-[100px] transition-colors ${
+                                    dispMap[person] ? 'border-violet-600 text-violet-200' : 'border-slate-700 text-slate-400'
+                                  } ${isPersonSaving ? 'opacity-50' : ''}`}
+                                >
+                                  <option value="">未設定</option>
+                                  {dispositionOptions.map((opt) => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                                {isPersonSaving && <span className="text-xs text-slate-500">儲存中...</span>}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {detailRows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                      {personFilter ? `「${personFilter}」在此區間無缺失紀錄` : '此區間內無缺失人員資料'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* 交叉統計表 */}
       {rows.length === 0 ? (
         <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-12 text-center text-slate-500">
@@ -190,6 +376,10 @@ export default function PersonnelStatsPage() {
         </div>
       ) : (
         <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-x-auto">
+          <div className="px-5 py-4 border-b border-slate-700">
+            <h2 className="text-lg font-bold text-white">人員 × 分類 交叉統計</h2>
+            <p className="text-xs text-slate-500 mt-0.5">點擊人員姓名可在上方明細中篩選</p>
+          </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700 text-slate-400 text-xs">
@@ -221,7 +411,16 @@ export default function PersonnelStatsPage() {
                 }))
                 return (
                   <tr key={person} className="hover:bg-slate-800/40">
-                    <td className="px-4 py-3 font-medium text-white sticky left-0 bg-slate-900/80 z-10">{person}</td>
+                    <td className="px-4 py-3 font-medium sticky left-0 bg-slate-900/80 z-10">
+                      <button
+                        className={`hover:text-rose-300 transition-colors text-left ${personFilter === person ? 'text-rose-300' : 'text-white'}`}
+                        onClick={() => setPersonFilter(personFilter === person ? '' : person)}
+                        title="點擊以在明細中篩選此人員"
+                      >
+                        {person}
+                        {personFilter === person && <span className="ml-1 text-xs">▲</span>}
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <div className="w-16 bg-slate-800 rounded h-1.5 hidden md:block">
