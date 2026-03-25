@@ -58,7 +58,7 @@ export default function QaReportFormPage() {
   const [reporterDepartment, setReporterDepartment] = useState('')
   const [reporter, setReporter] = useState('')
   const [handlerDepartment, setHandlerDepartment] = useState('')
-  const [handlerPersonnel, setHandlerPersonnel] = useState('')
+  const [handlerPersonnel, setHandlerPersonnel] = useState<string[]>([])
   const [personnelOptions, setPersonnelOptions] = useState<OptionItem[]>([])
   const [categoryOptions, setCategoryOptions] = useState<string[]>(DEFAULT_CATEGORY_OPTIONS)
   const [departmentOptions, setDepartmentOptions] = useState<string[]>(DEFAULT_DEPARTMENT_OPTIONS)
@@ -73,8 +73,7 @@ export default function QaReportFormPage() {
   const [notifyPreview, setNotifyPreview] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // QA 部門欄位：以 reporterDepartment 為主
-  // handlers 欄位補上，預設為單一人員
-  const handlers = handlerPersonnel ? [handlerPersonnel] : [];
+  const handlers = handlerPersonnel;
 
   const startMobileSession = useCallback(() => {
     const sid = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
@@ -259,7 +258,7 @@ export default function QaReportFormPage() {
       setReporterDepartment('')
       setReporter('')
       setHandlerDepartment('')
-      setHandlerPersonnel('')
+      setHandlerPersonnel([])
       setCategory('')
       setAttachFiles([])
       setPreviewUrls([])
@@ -394,7 +393,7 @@ export default function QaReportFormPage() {
               value={handlerDepartment}
               onChange={e => {
                 setHandlerDepartment(e.target.value);
-                setHandlerPersonnel('');
+                setHandlerPersonnel([]);
               }}
               className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
             >
@@ -407,16 +406,31 @@ export default function QaReportFormPage() {
           <div className="col-span-1">
             <label className="text-xs text-slate-400">異常處理-人員</label>
             {handlerDepartment ? (
-              <select
-                value={handlerPersonnel}
-                onChange={e => setHandlerPersonnel(e.target.value)}
-                className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-              >
-                <option value="">請選擇</option>
-                {personnelOptions.filter(p => p.department_value === handlerDepartment).map((option, i) => (
-                  <option key={i} value={option.option_value}>{option.option_value}</option>
-                ))}
-              </select>
+              <div className="mt-1 space-y-2">
+                <div className="flex flex-wrap gap-1">
+                  {handlerPersonnel.map((name) => (
+                    <span key={name} className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700 text-cyan-200 text-xs flex items-center gap-1">
+                      {name}
+                      <button type="button" onClick={() => setHandlerPersonnel((prev) => prev.filter((h) => h !== name))}>×</button>
+                    </span>
+                  ))}
+                </div>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const value = e.target.value
+                    if (!value) return
+                    setHandlerPersonnel((prev) => prev.includes(value) ? prev : [...prev, value])
+                    e.currentTarget.value = ''
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                >
+                  <option value="">+ 新增處理人員</option>
+                  {personnelOptions.filter(p => p.department_value === handlerDepartment).map((option, i) => (
+                    <option key={i} value={option.option_value}>{option.option_value}</option>
+                  ))}
+                </select>
+              </div>
             ) : (
               <div className="mt-1 text-slate-500 text-xs">請先選部門</div>
             )}

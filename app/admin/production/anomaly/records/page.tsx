@@ -949,16 +949,31 @@ export default function QaRecordsPage() {
               <div>
                 <label className="text-xs text-slate-400">異常處理-人員</label>
                 {createForm.handlerDepartment ? (
-                  <select
-                    value={createForm.handlers[0] || ''}
-                    onChange={(e) => setCreateForm((prev) => ({ ...prev, handlers: e.target.value ? [e.target.value] : [] }))}
-                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-                  >
-                    <option value="">請選擇</option>
-                    {options.personnel.filter((p) => p.department_value === createForm.handlerDepartment).map((p) => (
-                      <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
-                    ))}
-                  </select>
+                  <div className="mt-1 space-y-2">
+                    <div className="flex flex-wrap gap-1">
+                      {createForm.handlers.map((name) => (
+                        <span key={name} className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700 text-cyan-200 text-xs flex items-center gap-1">
+                          {name}
+                          <button onClick={() => setCreateForm((prev) => ({ ...prev, handlers: prev.handlers.filter((h) => h !== name) }))}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const value = e.target.value
+                        if (!value) return
+                        setCreateForm((prev) => prev.handlers.includes(value) ? prev : { ...prev, handlers: [...prev.handlers, value] })
+                        e.currentTarget.value = ''
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                    >
+                      <option value="">+ 新增處理人員</option>
+                      {options.personnel.filter((p) => p.department_value === createForm.handlerDepartment).map((p) => (
+                        <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
+                      ))}
+                    </select>
+                  </div>
                 ) : (
                   <div className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-500 text-sm">請先選部門</div>
                 )}
@@ -1236,16 +1251,31 @@ export default function QaRecordsPage() {
               <div>
                 <label className="text-xs text-slate-400">異常處理-人員</label>
                 {editForm.handlerDepartment ? (
-                  <select
-                    value={editForm.handlers[0] || ''}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, handlers: e.target.value ? [e.target.value] : [] }))}
-                    className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
-                  >
-                    <option value="">請選擇</option>
-                    {options.personnel.filter((p) => p.department_value === editForm.handlerDepartment).map((p) => (
-                      <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
-                    ))}
-                  </select>
+                  <div className="mt-1 space-y-2">
+                    <div className="flex flex-wrap gap-1">
+                      {editForm.handlers.map((name) => (
+                        <span key={name} className="px-2 py-0.5 rounded bg-cyan-900/40 border border-cyan-700 text-cyan-200 text-xs flex items-center gap-1">
+                          {name}
+                          <button onClick={() => setEditForm((prev) => ({ ...prev, handlers: prev.handlers.filter((h) => h !== name) }))}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const value = e.target.value
+                        if (!value) return
+                        setEditForm((prev) => prev.handlers.includes(value) ? prev : { ...prev, handlers: [...prev.handlers, value] })
+                        e.currentTarget.value = ''
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white"
+                    >
+                      <option value="">+ 新增處理人員</option>
+                      {options.personnel.filter((p) => p.department_value === editForm.handlerDepartment).map((p) => (
+                        <option key={p.option_value} value={p.option_value}>{p.option_value}</option>
+                      ))}
+                    </select>
+                  </div>
                 ) : (
                   <div className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-500 text-sm">請先選部門</div>
                 )}
