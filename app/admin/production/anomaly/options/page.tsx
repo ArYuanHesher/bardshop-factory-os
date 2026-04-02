@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { NavButton } from '../../../../../components/NavButton'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../../../lib/supabaseClient'
 
@@ -175,9 +176,7 @@ export default function QaOptionManagerPage() {
         </div>
         <div className="flex gap-2">
           <button onClick={() => void fetchItems()} className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm">重新整理</button>
-          <Link href="/qa" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm">
-            返回品保專區
-          </Link>
+          <NavButton href="/qa" direction="back" title="返回品保專區" className="px-3 py-2" />
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { NavButton } from '../../../components/NavButton'
 
 export default function SystemSettingsHomePage() {
   return (
@@ -11,12 +12,7 @@ export default function SystemSettingsHomePage() {
             <h1 className="text-4xl font-black text-white tracking-tight mb-2">系統設定</h1>
             <p className="text-orange-500 font-mono tracking-widest uppercase text-sm">SYSTEM SETTINGS</p>
           </div>
-          <Link
-            href="/"
-            className="px-4 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm"
-          >
-            返回首頁
-          </Link>
+          <NavButton href="/" direction="home" title="返回首頁" />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">

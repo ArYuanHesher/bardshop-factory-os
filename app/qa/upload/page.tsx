@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import { NavButton } from '../../../components/NavButton'
 import { supabase } from '../../../lib/supabaseClient'
 
 interface ParsedCsvRow {
@@ -290,12 +291,10 @@ export default function QaBatchUploadPage() {
           <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">批量上傳異常單</h1>
           <p className="text-emerald-400 mt-1 font-mono text-sm uppercase">BATCH UPLOAD // CSV PREVIEW & VALIDATION</p>
         </div>
-        <Link href="/qa" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm">返回品保專區</Link>
+        <NavButton href="/qa" direction="back" title="返回品保專區" />
       </div>
 
-      <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-5 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <input type="file" accept=".csv,text/csv" onChange={onFileChange} className="text-sm text-slate-300 file:mr-3 file:px-3 file:py-2 file:rounded file:border file:border-slate-700 file:bg-slate-950 file:text-slate-200" />
+      <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={downloadTemplateCsv}
             className="px-4 py-2 rounded border border-slate-700 text-slate-200 hover:bg-slate-800"
@@ -310,10 +309,9 @@ export default function QaBatchUploadPage() {
             {uploading ? '匯入中...' : '加入異常紀錄表'}
           </button>
           {fileName && <span className="text-xs text-slate-400">目前檔案：{fileName}</span>}
-        </div>
-
-        <p className="text-xs text-slate-500">CSV 建議欄位：日期、相關單號、部門、異常回報人、異常處理人、異常分類、異常原因、缺失人員。</p>
       </div>
+
+      <p className="text-xs text-slate-500">CSV 建議欄位：日期、相關單號、部門、異常回報人、異常處理人、異常分類、異常原因、缺失人員。</p>
 
       <div className="bg-slate-900/50 border border-slate-700 rounded-xl overflow-auto">
         <table className="min-w-[1200px] w-full text-left text-sm text-slate-300">

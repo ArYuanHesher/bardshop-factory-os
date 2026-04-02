@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useMemo, useState } from 'react'
+import { NavButton } from '../../../components/NavButton'
 import * as XLSX from 'xlsx'
 import { supabase } from '../../../lib/supabaseClient'
 
@@ -10,6 +11,7 @@ interface AnomalyRow {
   order_number: string
   item_code: string | null
   item_name: string | null
+  reason: string | null
   qa_responsible: string[] | null
   qa_category: string | null
   qa_disposition: Record<string, string> | null
@@ -59,7 +61,7 @@ export default function PersonnelStatsPage() {
       const [reportRes, optRes] = await Promise.all([
         supabase
           .from('schedule_anomaly_reports')
-          .select('id, order_number, item_code, item_name, qa_responsible, qa_category, qa_disposition, created_at, status')
+          .select('id, order_number, item_code, item_name, reason, qa_responsible, qa_category, qa_disposition, created_at, status')
           .eq('report_type', 'qa')
           .gte('created_at', `${startDate}T00:00:00.000Z`)
           .lte('created_at', `${endDate}T23:59:59.999Z`),
@@ -198,12 +200,10 @@ export default function PersonnelStatsPage() {
           <h1 className="text-3xl font-bold text-white tracking-tight">異常人員統計</h1>
           <p className="text-rose-400 mt-1 font-mono text-sm uppercase">PERSONNEL STATS // 缺失人員 × 異常分類</p>
         </div>
-        <Link href="/qa" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm">返回品保專區</Link>
+        <NavButton href="/qa" direction="back" title="返回品保專區" />
       </div>
 
-      {/* 日期篩選 */}
-      <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-5">
-        <div className="flex flex-wrap items-end gap-3">
+      <div className="flex items-center gap-4 flex-wrap">
           <div>
             <label className="text-xs text-slate-400">起始日期</label>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
@@ -229,7 +229,6 @@ export default function PersonnelStatsPage() {
             下載 XLSX
           </button>
           <span className="text-xs text-slate-500">共 {rows.length} 筆資料</span>
-        </div>
       </div>
 
       {/* 摘要卡片 */}
@@ -288,6 +287,7 @@ export default function PersonnelStatsPage() {
                   <th className="px-4 py-3 text-left">相關單號</th>
                   <th className="px-4 py-3 text-left">品項</th>
                   <th className="px-4 py-3 text-left">異常分類</th>
+                  <th className="px-4 py-3 text-left">異常原因</th>
                   <th className="px-4 py-3 text-left">缺失人員</th>
                   <th className="px-4 py-3 text-left">缺失處置</th>
                 </tr>
@@ -312,6 +312,9 @@ export default function PersonnelStatsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs text-amber-300">{row.qa_category || '-'}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-slate-300">{row.reason || '-'}</span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
@@ -354,7 +357,7 @@ export default function PersonnelStatsPage() {
                 })}
                 {detailRows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                       {personFilter ? `「${personFilter}」在此區間無缺失紀錄` : '此區間內無缺失人員資料'}
                     </td>
                   </tr>

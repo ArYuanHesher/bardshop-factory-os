@@ -64,8 +64,7 @@ export default function TeamPage() {
       title: '基本權限',
       options: [
         { key: 'dashboard', label: '產線看板 (Dashboard)' },
-        { key: 'notice', label: '產期告示 (Schedule Notice)' },
-        { key: 'estimation', label: '時間試算 (Estimator)' },
+        { key: 'notice', label: '產期告示/試算/預留 (Notice & Estimator)' },
         { key: 'qa_report', label: '異常單建立/回報 (QA Report)' },
         { key: 'tasks', label: '任務看板 (Task Flow)' },
       ]
@@ -89,7 +88,7 @@ export default function TeamPage() {
       department: '',
       email: '',
       password: '',
-      permissions: ['dashboard', 'notice', 'tasks', 'estimation', 'qa_report'], // 預設給予基本權限
+      permissions: ['dashboard', 'notice', 'tasks', 'qa_report'], // 預設給予基本權限
       status: 'Active',
       is_admin: false,
       is_pending_approval: false,
@@ -474,8 +473,7 @@ export default function TeamPage() {
                     {member.is_pending_approval && <span className="px-2 py-1 rounded bg-yellow-900/30 text-yellow-300 text-[10px] border border-yellow-600 font-bold">待管理員指派權限</span>}
                     {member.permissions?.includes('tasks') && <span className="px-2 py-1 rounded bg-blue-900/30 text-blue-400 text-[10px] border border-blue-800">任務看板</span>}
                     {member.permissions?.includes('dashboard') && <span className="px-2 py-1 rounded bg-cyan-900/30 text-cyan-400 text-[10px] border border-cyan-800">產線看板</span>}
-                    {member.permissions?.includes('notice') && <span className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] border border-slate-600">產線告示</span>}
-                    {member.permissions?.includes('estimation') && <span className="px-2 py-1 rounded bg-emerald-900/30 text-emerald-400 text-[10px] border border-emerald-800">時間試算</span>}
+                    {member.permissions?.includes('notice') && <span className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] border border-slate-600">產期告示/試算/預留</span>}
                     {member.permissions?.includes('qa_report') && <span className="px-2 py-1 rounded bg-rose-900/30 text-rose-400 text-[10px] border border-rose-800">異常單回報</span>}
                     {member.permissions?.includes('qa') && <span className="px-2 py-1 rounded bg-teal-900/30 text-teal-400 text-[10px] border border-teal-800">品保專區</span>}
                     {member.permissions?.includes('production_admin') && <span className="px-2 py-1 rounded bg-purple-900/30 text-purple-400 text-[10px] border border-purple-800">生產管理</span>}

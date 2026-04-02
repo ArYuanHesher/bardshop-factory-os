@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { NavButton } from '../../../../components/NavButton'
 
 export default function QaZonePage() {
   return (
@@ -10,11 +11,10 @@ export default function QaZonePage() {
           <h1 className="text-3xl font-bold text-white tracking-tight">品保專區</h1>
           <p className="text-teal-400 mt-1 font-mono text-sm uppercase">QUALITY ASSURANCE // 異常提報與紀錄追蹤</p>
         </div>
-        <Link href="/" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm whitespace-nowrap">回到首頁</Link>
+        <NavButton href="/" direction="home" title="回到首頁" className="px-3 py-2" />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-
         <Link
           href="/qa/records"
           className="group rounded-2xl border border-slate-700 bg-slate-900/50 p-6 hover:border-cyan-500 hover:bg-slate-800/60 transition-all"

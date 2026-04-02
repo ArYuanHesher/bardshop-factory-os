@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useMemo, useState } from 'react'
+import { NavButton } from '../../../components/NavButton'
 import * as XLSX from 'xlsx'
 import { supabase } from '../../../lib/supabaseClient'
 
@@ -190,7 +191,7 @@ export default function QaAnalyticsPage() {
           <h1 className="text-3xl font-bold text-white tracking-tight">異常統計分析</h1>
           <p className="text-indigo-400 mt-1 font-mono text-sm uppercase">ANOMALY ANALYTICS // REASON & PERSONNEL RATIO</p>
         </div>
-        <Link href="/qa" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm">返回品保專區</Link>
+        <NavButton href="/qa" direction="back" title="返回品保專區" />
       </div>
 
       <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-5">

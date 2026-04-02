@@ -59,6 +59,11 @@ export const NAV_GROUPS = [
         name: '群組設定',
         path: '/admin/production/notice-group',
         icon: 'M12 6v6l4 2'
+      },
+      {
+        name: '產期詢問確認',
+        path: '/admin/production/notice/schedule-confirm',
+        icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
       }
     ]
   },

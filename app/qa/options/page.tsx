@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { NavButton } from '../../../components/NavButton'
 
 const CARDS = [
   {
@@ -69,10 +70,10 @@ export default function OptionsHubPage() {
           <h1 className="text-3xl font-bold text-white tracking-tight">下拉選項管理</h1>
           <p className="text-fuchsia-400 mt-1 font-mono text-sm uppercase">QA DROPDOWN OPTION MANAGER</p>
         </div>
-        <Link href="/qa" className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 text-sm whitespace-nowrap">返回品保專區</Link>
+        <NavButton href="/qa" direction="back" title="返回品保專區" />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {CARDS.map((card) => (
           <Link
             key={card.href}

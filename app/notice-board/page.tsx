@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { NavButton } from "../../components/NavButton";
 import { supabase } from "../../lib/supabaseClient.js";
 
 
@@ -76,9 +77,9 @@ export default function NoticeBoardHome() {
 
   return (
       <div className="relative p-4 md:p-8 max-w-6xl mx-auto min-h-screen text-slate-200">
-        <Link href="/" className="absolute top-4 right-4 md:top-8 md:right-8 px-4 md:px-6 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-lg font-bold shadow transition-all z-10 text-sm md:text-base">
-          回到首頁
-        </Link>
+        <div className="absolute top-4 right-4 md:top-8 md:right-8 z-10">
+          <NavButton href="/" direction="home" title="回到首頁" className="px-4 py-2" />
+        </div>
       <div className="flex flex-col md:flex-row gap-4 md:gap-8 mb-6 md:mb-10 mt-10 md:mt-0">
         {/* 主卡片 */}
         <div className={`group flex-1 min-h-[240px] md:h-72 rounded-2xl border border-cyan-700 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center justify-center text-center p-4 md:p-8 transition-all duration-500 shadow-lg`}> 
@@ -127,6 +128,20 @@ export default function NoticeBoardHome() {
             </div>
           )}
         </div>
+
+        {/* 時間試算 快速入口 */}
+        <Link href="/estimation" className="group md:w-64 min-h-[160px] md:h-72 rounded-2xl border border-emerald-700 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center justify-center text-center p-4 md:p-6 transition-all duration-300 shadow-lg hover:border-emerald-500 hover:bg-emerald-900/20 hover:shadow-[0_0_24px_rgba(16,185,129,0.15)]">
+          <div className="mb-4 p-3 rounded-full bg-slate-800 group-hover:bg-emerald-900/50 text-slate-400 group-hover:text-emerald-400 transition-colors">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h2 className="text-lg font-bold text-white mb-1 group-hover:text-emerald-400 transition-colors">時間試算</h2>
+          <p className="text-slate-500 text-xs mb-4 group-hover:text-slate-300 px-2">生產週期評估與計算<br/>(Estimator)</p>
+          <span className="px-4 py-2 rounded border border-emerald-700 text-emerald-400 text-xs font-mono group-hover:bg-emerald-600 group-hover:border-emerald-600 group-hover:text-white transition-all">
+            CALCULATE &rarr;
+          </span>
+        </Link>
       </div>
       {/* 群組資訊卡片 */}
       <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 md:p-6">

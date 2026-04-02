@@ -36,6 +36,14 @@ interface ItemRouteRow {
   route_id: string
 }
 
+// --- 輔助函式：清除 Excel ="" 格式 ---
+const stripExcelFormula = (val: string | undefined | null): string => {
+  if (!val) return ''
+  const s = val.trim()
+  const match = s.match(/^="(.*)"$/)
+  return match ? match[1] : s
+}
+
 // --- 輔助函式：建立資料指紋 (用於嚴格比對) ---
 const createFingerprint = (row: Partial<OrderData>) => {
   return JSON.stringify({
@@ -275,17 +283,17 @@ export default function DailyOperationsPage() {
 
       const rawResults = csvData.map((row) => {
         return {
-          order_number: row['工單編號']?.trim() || '',
-          doc_type: row['單據種類']?.trim() || '',
-          designer: row['美編']?.trim() || '',
-          customer: row['客戶/供應商名']?.trim() || '',
-          handler: row['承辦人']?.trim() || '',
-          issuer: row['開單人員']?.trim() || '',
-          item_code: row['品項編碼'] || '',
-          item_name: row['品名/規格']?.trim() || '',
-          quantity: parseFloat(row['數量']) || 0,
-          delivery_date: row['交付日期']?.trim() || '',
-          plate_count: row['盤數']?.trim() || '',
+          order_number: stripExcelFormula(row['工單編號']),
+          doc_type: stripExcelFormula(row['單據種類']),
+          designer: stripExcelFormula(row['美編']),
+          customer: stripExcelFormula(row['客戶/供應商名']),
+          handler: stripExcelFormula(row['承辦人']),
+          issuer: stripExcelFormula(row['開單人員']),
+          item_code: stripExcelFormula(row['品項編碼']),
+          item_name: stripExcelFormula(row['品名/規格']),
+          quantity: parseFloat(stripExcelFormula(row['數量'])) || 0,
+          delivery_date: stripExcelFormula(row['交付日期']),
+          plate_count: stripExcelFormula(row['盤數']),
           matched_route_id: null,
           total_time_min: 0,
           status: 'Pending',

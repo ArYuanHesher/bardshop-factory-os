@@ -371,6 +371,36 @@ export default function MaterialsSubstitutePage() {
     await fetchData()
   }
 
+  const handleExportCSV = () => {
+    const header = ['主料號', '主料名稱', '替代料號', '替代料名稱', '優先順序', '備註', '更新時間']
+    const rows = [...rules]
+      .sort((a, b) => {
+        const src = a.source_item_code.localeCompare(b.source_item_code)
+        return src !== 0 ? src : a.priority - b.priority
+      })
+      .map((rule) => [
+        rule.source_item_code,
+        itemNameMap.get(rule.source_item_code) || '',
+        rule.substitute_item_code,
+        itemNameMap.get(rule.substitute_item_code) || '',
+        rule.priority,
+        rule.note || '',
+        new Date(rule.updated_at).toLocaleString(),
+      ])
+
+    const csvContent = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `替代料號設定_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-screen text-slate-300 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -531,13 +561,22 @@ export default function MaterialsSubstitutePage() {
           <div className="text-sm text-slate-400">
             目前共 {rules.length} 筆替代規則，篩選後 {filteredRules.length} 筆（同主料號內依優先順序排列）
           </div>
-          <input
-            type="text"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="搜尋：料號 / 料名 / 備註"
-            className="w-full md:w-[320px] bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-cyan-500 outline-none"
-          />
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="搜尋：料號 / 料名 / 備註"
+              className="w-full md:w-[280px] bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:border-cyan-500 outline-none"
+            />
+            <button
+              onClick={handleExportCSV}
+              disabled={rules.length === 0}
+              className="px-4 py-2 rounded border border-emerald-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-900/50 text-sm font-bold whitespace-nowrap disabled:opacity-40"
+            >
+              匯出 CSV
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">

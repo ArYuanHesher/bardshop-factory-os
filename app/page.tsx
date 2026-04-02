@@ -40,6 +40,7 @@ export default function HomePage() {
   const [time, setTime] = useState(() => new Date().toLocaleTimeString());
   const [showModal, setShowModal] = useState(false);
   const [showQaModal, setShowQaModal] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const [isHovered, setIsHovered] = useState<'none' | 'production' | 'estimation' | 'qa' | 'admin' | 'settings' | 'notice' | 'finance'>('none');
 
   useEffect(() => {
@@ -345,36 +346,35 @@ export default function HomePage() {
           </Link>
 
 
-          {/* 2. 時間試算 (Emerald) - 移到任務看板原位置 */}
-          <Link href="/estimation"
-            onClick={guardFeatureAccess('estimation', '時間試算')}
+          {/* 2. 資訊看板 (Amber) */}
+          <div
+            onClick={() => setShowInfoModal(true)}
             onMouseEnter={() => setIsHovered('estimation')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
               group relative order-3 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
               flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
-              hover:border-emerald-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(16,185,129,0.15)]
-              ${canEstimation ? '' : 'opacity-50 grayscale'}
+              hover:border-amber-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(245,158,11,0.15)]
               ${isHovered !== 'none' && isHovered !== 'estimation' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
             `}
           >
-            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 rounded border border-emerald-500/20">
-              <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Estimator</span>
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/20">
+              <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Info Board</span>
             </div>
 
-            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-emerald-900/50 text-slate-400 group-hover:text-emerald-400 transition-colors">
-               <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-               </svg>
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-amber-900/50 text-slate-400 group-hover:text-amber-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
             </div>
-            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-emerald-400 transition-colors">時間試算</h2>
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-amber-400 transition-colors">資訊看板</h2>
             <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
-              生產週期評估與計算。<br/>(Estimator)
+              各部門訊息交流與公告。<br/>(Info Board)
             </p>
-            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-emerald-600 group-hover:border-emerald-600 group-hover:text-white transition-all">
-              CALCULATE &rarr;
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-amber-600 group-hover:border-amber-600 group-hover:text-white transition-all">
+              OPEN BOARD &rarr;
             </span>
-          </Link>
+          </div>
 
           {/* 3. 建立異常單 (Teal) - 新增方塊 */}
           <div
@@ -526,9 +526,9 @@ export default function HomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10m-11 9h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2z" />
               </svg>
             </div>
-            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-cyan-400 transition-colors">產期告示</h2>
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-cyan-400 transition-colors">產期告示 / 試算</h2>
             <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 px-1 md:px-2 hidden md:block">
-              生產交期公告與提醒。<br/>(Schedule Notice)
+              交期公告查詢與生產週期試算。<br/>(Notice / Estimator)
             </p>
             <span className="hidden md:inline-block px-4 py-2 rounded border border-cyan-700 text-cyan-400 text-xs font-mono group-hover:bg-cyan-700/20 group-hover:text-white group-hover:border-cyan-600 group-hover:bg-cyan-600 transition-all">
               NOTICE BOARD &rarr;
@@ -603,6 +603,58 @@ export default function HomePage() {
                 <button onClick={() => setCurrentAnnoIndex(prev => (prev + 1) % announcements.length)} className="text-xs text-slate-400 hover:text-white px-3 py-1 hover:bg-slate-700 rounded">Next &rarr;</button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* --- Info Board Modal --- */}
+      {showInfoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-amber-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden relative">
+            <div className="bg-amber-800 p-4 flex justify-between items-center border-b border-amber-700">
+              <h3 className="text-white font-bold flex items-center gap-2">
+                <span className="w-2 h-6 bg-amber-400 rounded-full"></span>
+                資訊看板
+              </h3>
+              <button onClick={() => setShowInfoModal(false)} className="text-amber-400 hover:text-white transition-colors">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <div
+                className="bg-amber-700/20 border border-amber-600 rounded-xl p-5 cursor-pointer hover:bg-amber-700/40 transition-all flex items-center gap-4"
+                onClick={() => { setShowInfoModal(false); router.push('/info-board?flow=bizChange'); }}
+              >
+                <div className="text-3xl">✏️</div>
+                <div className="flex-1">
+                  <div className="text-amber-400 font-bold text-lg mb-1">業務改單表</div>
+                  <div className="text-xs text-slate-300">業務改單請求、變更紀錄</div>
+                </div>
+                <span className="px-3 py-1 rounded border border-amber-600 text-amber-300 text-xs font-mono bg-amber-900/30">前往 →</span>
+              </div>
+              <div
+                className="bg-amber-700/20 border border-amber-600 rounded-xl p-5 cursor-pointer hover:bg-amber-700/40 transition-all flex items-center gap-4"
+                onClick={() => { setShowInfoModal(false); router.push('/info-board/schedule'); }}
+              >
+                <div className="text-3xl">📅</div>
+                <div className="flex-1">
+                  <div className="text-amber-400 font-bold text-lg mb-1">產期詢問/預留</div>
+                  <div className="text-xs text-slate-300">產期詢問登記及預留產程</div>
+                </div>
+                <span className="px-3 py-1 rounded border border-amber-600 text-amber-300 text-xs font-mono bg-amber-900/30">前往 →</span>
+              </div>
+              <div
+                className="bg-amber-700/20 border border-amber-600 rounded-xl p-5 cursor-pointer hover:bg-amber-700/40 transition-all flex items-center gap-4"
+                onClick={() => { setShowInfoModal(false); router.push('/info-board?flow=stOrder'); }}
+              >
+                <div className="text-3xl">📦</div>
+                <div className="flex-1">
+                  <div className="text-amber-400 font-bold text-lg mb-1">常平訂單</div>
+                  <div className="text-xs text-slate-300">常平訂單處理與追蹤</div>
+                </div>
+                <span className="px-3 py-1 rounded border border-amber-600 text-amber-300 text-xs font-mono bg-amber-900/30">前往 →</span>
+              </div>
+            </div>
           </div>
         </div>
       )}

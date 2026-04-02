@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { NavButton } from '../../../components/NavButton'
 
 const CATEGORIES = [
   {
@@ -71,15 +72,7 @@ export default function DashboardMenuPage() {
       
       {/* 🔥 新增：左上角返回系統入口按鈕 */}
       <div className="absolute top-6 left-6">
-        <Link 
-          href="/" 
-          className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700 border border-slate-700 hover:border-cyan-500/50 rounded-full text-sm font-bold text-slate-400 hover:text-white transition-all backdrop-blur-sm group"
-        >
-          <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          回系統入口
-        </Link>
+        <NavButton href="/" direction="home" title="回系統入口" className="px-4 py-2" />
       </div>
 
       <div className="text-center mb-12">
