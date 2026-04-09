@@ -41,7 +41,9 @@ export default function HomePage() {
   const [showModal, setShowModal] = useState(false);
   const [showQaModal, setShowQaModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
-  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'estimation' | 'qa' | 'admin' | 'settings' | 'notice' | 'finance'>('none');
+  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'estimation' | 'qa' | 'admin' | 'settings' | 'notice' | 'finance' | 'product_dev'>('none');
+  const [showProductDevModal, setShowProductDevModal] = useState(false);
+  const [downloadingBom, setDownloadingBom] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -165,6 +167,40 @@ export default function HomePage() {
     if (currentUser?.is_admin) return true
     return memberPermissions.includes(permissionKey)
   }
+
+  const downloadMaterialList = async () => {
+    setDownloadingBom(true);
+    try {
+      const { data, error } = await supabase
+        .from('material_inventory_list')
+        .select('item_code, item_name, spec')
+        .order('sequence_no', { ascending: true, nullsFirst: false })
+        .order('id', { ascending: true });
+      if (error) throw new Error(error.message);
+      const rows = (data ?? []) as { item_code: string; item_name: string; spec: string }[];
+      const header = '品項編碼,品項名稱,規格';
+      const csvContent = [
+        header,
+        ...rows.map(r =>
+          [r.item_code, r.item_name, r.spec]
+            .map(v => `"${String(v ?? '').replace(/"/g, '""')}"`)
+            .join(',')
+        ),
+      ].join('\n');
+      const bom = '\uFEFF';
+      const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `物料清單_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`下載失敗：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDownloadingBom(false);
+    }
+  };
 
   const guardFeatureAccess = (permissionKey: string, featureName: string) => {
     if (hasFeaturePermission(permissionKey)) return undefined;
@@ -535,7 +571,37 @@ export default function HomePage() {
             </span>
           </Link>
 
-          {/* 8. 財會專區 (Slate / Disabled) - 黑霧特效 */}
+          {/* 9. 商品開發 (Green) */}
+          <div
+            onClick={() => setShowProductDevModal(true)}
+            onMouseEnter={() => setIsHovered('product_dev')}
+            onMouseLeave={() => setIsHovered('none')}
+            className={`
+              group relative order-9 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
+              hover:border-green-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(34,197,94,0.15)]
+              ${isHovered !== 'none' && isHovered !== 'product_dev' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+            `}
+          >
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-green-500/10 rounded border border-green-500/20">
+              <span className="text-[10px] text-green-400 font-bold uppercase tracking-wider">Product Dev</span>
+            </div>
+
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-green-900/50 text-slate-400 group-hover:text-green-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-green-400 transition-colors">商品開發</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
+              商品開發相關作業。<br/>(Product Development)
+            </p>
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-green-600 group-hover:border-green-600 group-hover:text-white transition-all">
+              OPEN &rarr;
+            </span>
+          </div>
+
+          {/* 8. 財會專區 (Slate / Disabled) - 黑霧特效 */
           <div
             onMouseEnter={() => setIsHovered('finance')}
             onMouseLeave={() => setIsHovered('none')}
@@ -659,7 +725,40 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* --- QA Modal --- */}
+      {/* --- 商品開發 Modal --- */}
+      {showProductDevModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-green-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden relative">
+            <div className="bg-green-900/60 p-4 flex justify-between items-center border-b border-green-700">
+              <h3 className="text-white font-bold flex items-center gap-2">
+                <span className="w-2 h-6 bg-green-400 rounded-full"></span>
+                商品開發
+              </h3>
+              <button onClick={() => setShowProductDevModal(false)} className="text-green-400 hover:text-white transition-colors">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <button
+                onClick={downloadMaterialList}
+                disabled={downloadingBom}
+                className="bg-green-700/20 border border-green-600 rounded-xl p-5 cursor-pointer hover:bg-green-700/40 transition-all flex items-center gap-4 w-full text-left disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="text-3xl">{downloadingBom ? '⏳' : '📥'}</div>
+                <div className="flex-1">
+                  <div className="text-green-400 font-bold text-lg mb-1">下載物料清單</div>
+                  <div className="text-xs text-slate-300">匯出品項編碼、品項名稱、規格（CSV）</div>
+                </div>
+                <span className="px-3 py-1 rounded border border-green-600 text-green-300 text-xs font-mono bg-green-900/30">
+                  {downloadingBom ? '下載中...' : '下載 →'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- QA Modal --- */
       {showQaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="bg-slate-900 border border-teal-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden relative">
