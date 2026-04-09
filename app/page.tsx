@@ -758,7 +758,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* --- QA Modal --- */
+      {/* --- QA Modal --- */}
       {showQaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="bg-slate-900 border border-teal-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden relative">
