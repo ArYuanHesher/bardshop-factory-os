@@ -601,7 +601,7 @@ export default function HomePage() {
             </span>
           </div>
 
-          {/* 8. 財會專區 (Slate / Disabled) - 黑霧特效 */
+          {/* 8. 財會專區 (Slate / Disabled) - 黑霧特效 */}
           <div
             onMouseEnter={() => setIsHovered('finance')}
             onMouseLeave={() => setIsHovered('none')}
