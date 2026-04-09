@@ -171,13 +171,23 @@ export default function HomePage() {
   const downloadMaterialList = async () => {
     setDownloadingBom(true);
     try {
-      const { data, error } = await supabase
-        .from('material_inventory_list')
-        .select('item_code, item_name, spec')
-        .order('sequence_no', { ascending: true, nullsFirst: false })
-        .order('id', { ascending: true });
-      if (error) throw new Error(error.message);
-      const rows = (data ?? []) as { item_code: string; item_name: string; spec: string }[];
+      const PAGE = 1000;
+      let allRows: { item_code: string; item_name: string; spec: string }[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('material_inventory_list')
+          .select('item_code, item_name, spec')
+          .order('sequence_no', { ascending: true, nullsFirst: false })
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        const chunk = (data ?? []) as { item_code: string; item_name: string; spec: string }[];
+        allRows = allRows.concat(chunk);
+        if (chunk.length < PAGE) break;
+        from += PAGE;
+      }
+      const rows = allRows;
       const header = '品項編碼,品項名稱,規格';
       const csvContent = [
         header,
