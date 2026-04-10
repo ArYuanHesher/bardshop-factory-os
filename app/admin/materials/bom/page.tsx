@@ -435,8 +435,8 @@ export default function MaterialsBomPage() {
             <div className="text-slate-400">載入中...</div>
           ) : (
             <>
-              <div className="overflow-x-auto w-full">
-                <table className="min-w-max border border-slate-700 text-sm">
+              <div className="w-full">
+                <table className="w-full border border-slate-700 text-sm table-fixed">
                   <thead>
                     <tr className="bg-slate-800 text-slate-200">
                       <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">生產品項編碼</th>
@@ -481,7 +481,7 @@ export default function MaterialsBomPage() {
                             <tr key={product_code + '-' + idx} className="odd:bg-slate-900 even:bg-slate-800">
                               {idx === 0 && (
                                 <td
-                                  className="border border-slate-700 px-2 py-0.5 font-mono whitespace-nowrap bg-slate-950/80 text-base align-middle text-center"
+                                  className="border border-slate-700 px-2 py-0.5 font-mono bg-slate-950/80 text-base align-middle text-center break-all"
                                   rowSpan={rowSpan}
                                   style={{ verticalAlign: 'middle', fontWeight: 700, borderRightWidth: 3 }}
                                 >
@@ -490,9 +490,9 @@ export default function MaterialsBomPage() {
                               )}
                               {idx === 0 && (
                                 <td
-                                  className="border border-slate-700 px-2 py-0.5 bg-slate-950/80 align-middle text-center"
+                                  className="border border-slate-700 px-2 py-0.5 bg-slate-950/80 align-middle text-center break-words"
                                   rowSpan={rowSpan}
-                                  style={{ verticalAlign: 'middle', fontWeight: 500, borderRightWidth: 3, maxWidth: 320 }}
+                                  style={{ verticalAlign: 'middle', fontWeight: 500, borderRightWidth: 3 }}
                                 >
                                   {info.product_name}
                                 </td>
@@ -506,11 +506,11 @@ export default function MaterialsBomPage() {
                                   {mat.note || ''}
                                 </td>
                               )}
-                              <td className="border border-slate-700 px-2 py-0.5 font-mono whitespace-nowrap text-cyan-300">{mat.material_code}</td>
-                              <td className="border border-slate-700 px-2 py-0.5 whitespace-nowrap">{mat.material_name}</td>
-                              <td className="border border-slate-700 px-2 py-0.5 whitespace-nowrap text-orange-300 text-right">{mat.quantity}</td>
-                              <td className="border border-slate-700 px-2 py-0.5 whitespace-nowrap text-slate-400">{mat.unit}</td>
-                              <td className="border border-slate-700 px-2 py-0.5 whitespace-nowrap font-mono text-green-400 text-right">{stock}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 font-mono text-cyan-300 break-all">{mat.material_code}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 break-words">{mat.material_name}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 text-orange-300 text-right">{mat.quantity}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 text-slate-400">{mat.unit}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 font-mono text-green-400 text-right">{stock}</td>
                               {/* 替代料號及庫存顯示 */}
                               <td className="border border-slate-700 px-2 py-1">
                                 {substituteMap[mat.material_code]?.length ? (
