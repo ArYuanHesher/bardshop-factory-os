@@ -4,7 +4,7 @@
 import React from 'react'
 
 import Link from 'next/link'
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 
 import { supabase } from '../../../../lib/supabaseClient'
@@ -94,6 +94,54 @@ export default function MaterialsBomPage() {
   const [uploading, setUploading] = useState(false)
   const [downloadingCsv, setDownloadingCsv] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+
+  // === 欄寬調整 ===
+  const COL_KEYS = ['prod_code','prod_name','note','mat_code','mat_name','qty','unit','stock','substitute'] as const
+  const COL_LABELS = ['生產品項編碼','生產品項名稱','備註','消耗品項編碼','消耗品項名稱','數量','單位','庫存','替代料號/庫存']
+  const DEFAULT_WIDTHS: Record<string, number> = { prod_code: 160, prod_name: 260, note: 80, mat_code: 160, mat_name: 200, qty: 60, unit: 50, stock: 70, substitute: 180 }
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('bom_col_widths')
+        if (saved) return JSON.parse(saved)
+      } catch {}
+    }
+    return { ...DEFAULT_WIDTHS }
+  })
+  const [resizeMode, setResizeMode] = useState(false)
+  const dragRef = useRef<{ key: string; startX: number; startW: number } | null>(null)
+
+  const saveWidths = useCallback((widths: Record<string, number>) => {
+    try { localStorage.setItem('bom_col_widths', JSON.stringify(widths)) } catch {}
+  }, [])
+
+  const onMouseDown = useCallback((key: string, e: React.MouseEvent) => {
+    if (!resizeMode) return
+    e.preventDefault()
+    dragRef.current = { key, startX: e.clientX, startW: colWidths[key] }
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return
+      const diff = ev.clientX - dragRef.current.startX
+      const newW = Math.max(40, dragRef.current.startW + diff)
+      setColWidths(prev => {
+        const next = { ...prev, [dragRef.current!.key]: newW }
+        saveWidths(next)
+        return next
+      })
+    }
+    const onMouseUp = () => {
+      dragRef.current = null
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [resizeMode, colWidths, saveWidths])
+
+  const resetWidths = useCallback(() => {
+    setColWidths({ ...DEFAULT_WIDTHS })
+    saveWidths({ ...DEFAULT_WIDTHS })
+  }, [saveWidths])
   const [bomData, setBomData] = useState<BomRow[]>([])
   const [loadingBom, setLoadingBom] = useState(false)
   const [page, setPage] = useState(1)
@@ -435,19 +483,54 @@ export default function MaterialsBomPage() {
             <div className="text-slate-400">載入中...</div>
           ) : (
             <>
-              <div className="w-full">
-                <table className="w-full border border-slate-700 text-sm table-fixed">
+              {/* 欄寬調整開關 */}
+              <div className="flex items-center gap-3 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setResizeMode(m => !m)}
+                  className={`px-3 py-1 rounded text-xs font-bold border transition-all ${
+                    resizeMode
+                      ? 'border-yellow-500 text-yellow-300 bg-yellow-900/30'
+                      : 'border-slate-600 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  {resizeMode ? '🔓 編輯欄寬中（拖曳欄位邊緣）' : '🔒 調整欄寬'}
+                </button>
+                {resizeMode && (
+                  <button
+                    type="button"
+                    onClick={resetWidths}
+                    className="px-3 py-1 rounded text-xs border border-slate-600 text-slate-400 hover:bg-slate-800"
+                  >
+                    重設預設寬度
+                  </button>
+                )}
+              </div>
+              <div className="w-full overflow-x-auto">
+                <table className="border border-slate-700 text-sm" style={{ tableLayout: 'fixed', width: Object.values(colWidths).reduce((a, b) => a + b, 0) }}>
+                  <colgroup>
+                    {COL_KEYS.map(key => (
+                      <col key={key} style={{ width: colWidths[key] }} />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr className="bg-slate-800 text-slate-200">
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">生產品項編碼</th>
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">生產品項名稱</th>
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">備註</th>
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">消耗品項編碼</th>
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">消耗品項名稱</th>
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">數量</th>
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">單位</th>
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">庫存</th>
-                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">替代料號/庫存</th>
+                      {COL_KEYS.map((key, i) => (
+                        <th
+                          key={key}
+                          className="border border-slate-700 px-2 py-1 whitespace-nowrap relative select-none"
+                          style={{ width: colWidths[key] }}
+                        >
+                          {COL_LABELS[i]}
+                          {resizeMode && (
+                            <span
+                              onMouseDown={(e) => onMouseDown(key, e)}
+                              className="absolute top-0 right-0 w-2 h-full cursor-col-resize bg-yellow-500/40 hover:bg-yellow-400/70 transition-colors"
+                              style={{ zIndex: 10 }}
+                            />
+                          )}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
