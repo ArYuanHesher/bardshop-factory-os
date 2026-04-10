@@ -222,7 +222,7 @@ export default function HomePage() {
       let from = 0;
       while (true) {
         const { data, error } = await supabase
-          .from('bom_list')
+          .from('bom')
           .select('product_code, product_name')
           .order('product_code', { ascending: true })
           .range(from, from + PAGE - 1);
