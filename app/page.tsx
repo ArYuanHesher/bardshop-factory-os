@@ -44,6 +44,7 @@ export default function HomePage() {
   const [isHovered, setIsHovered] = useState<'none' | 'production' | 'estimation' | 'qa' | 'admin' | 'settings' | 'notice' | 'finance' | 'product_dev'>('none');
   const [showProductDevModal, setShowProductDevModal] = useState(false);
   const [downloadingBom, setDownloadingBom] = useState(false);
+  const [downloadingProducts, setDownloadingProducts] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -209,6 +210,54 @@ export default function HomePage() {
       alert(`下載失敗：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setDownloadingBom(false);
+    }
+  };
+
+  const downloadProductList = async () => {
+    setDownloadingProducts(true);
+    try {
+      const PAGE = 1000;
+      const seen = new Set<string>();
+      const allRows: { product_code: string; product_name: string }[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('bom_list')
+          .select('product_code, product_name')
+          .order('product_code', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        const chunk = (data ?? []) as { product_code: string; product_name: string }[];
+        for (const row of chunk) {
+          if (!seen.has(row.product_code)) {
+            seen.add(row.product_code);
+            allRows.push(row);
+          }
+        }
+        if (chunk.length < PAGE) break;
+        from += PAGE;
+      }
+      const header = '生產品項編碼,生產品項名稱';
+      const csvContent = [
+        header,
+        ...allRows.map(r =>
+          [r.product_code, r.product_name]
+            .map(v => `"${String(v ?? '').replace(/"/g, '""')}"`)
+            .join(',')
+        ),
+      ].join('\n');
+      const bom = '\uFEFF';
+      const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `生產品項_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`下載失敗：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDownloadingProducts(false);
     }
   };
 
@@ -761,6 +810,20 @@ export default function HomePage() {
                 </div>
                 <span className="px-3 py-1 rounded border border-green-600 text-green-300 text-xs font-mono bg-green-900/30">
                   {downloadingBom ? '下載中...' : '下載 →'}
+                </span>
+              </button>
+              <button
+                onClick={downloadProductList}
+                disabled={downloadingProducts}
+                className="bg-green-700/20 border border-green-600 rounded-xl p-5 cursor-pointer hover:bg-green-700/40 transition-all flex items-center gap-4 w-full text-left disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="text-3xl">{downloadingProducts ? '⏳' : '📦'}</div>
+                <div className="flex-1">
+                  <div className="text-green-400 font-bold text-lg mb-1">下載生產品項</div>
+                  <div className="text-xs text-slate-300">匯出生產品項編碼、生產品項名稱（CSV）</div>
+                </div>
+                <span className="px-3 py-1 rounded border border-green-600 text-green-300 text-xs font-mono bg-green-900/30">
+                  {downloadingProducts ? '下載中...' : '下載 →'}
                 </span>
               </button>
             </div>
