@@ -17,6 +17,7 @@ interface BomRow {
   id?: number
   product_code: string
   product_name: string
+  note?: string
   material_code: string
   material_name: string
   quantity: number
@@ -104,7 +105,7 @@ export default function MaterialsBomPage() {
   async function fetchBomData() {
     setLoadingBom(true)
     // 查詢條件
-    let query = supabase.from('bom').select('*', { count: 'exact' })
+    let query = supabase.from('bom').select('id, product_code, product_name, note, material_code, material_name, quantity, unit', { count: 'exact' })
     if (search.trim()) {
       query = query.ilike('product_code', `%${search.trim()}%`)
     }
@@ -306,7 +307,7 @@ export default function MaterialsBomPage() {
       while (true) {
         const { data, error } = await supabase
           .from('bom')
-          .select('product_code, product_name, material_code, material_name, quantity, unit')
+          .select('product_code, product_name, note, material_code, material_name, quantity, unit')
           .order('product_code', { ascending: true })
           .order('id', { ascending: true })
           .range(from, from + PAGE - 1)
@@ -316,11 +317,11 @@ export default function MaterialsBomPage() {
         if (chunk.length < PAGE) break
         from += PAGE
       }
-      const header = '生產品項編碼,生產品項名稱,消耗品項編碼,消耗品項名稱,消耗數量,單位'
+      const header = '生產品項編碼,生產品項名稱,備註,消耗品項編碼,消耗品項名稱,消耗數量,單位'
       const csvContent = [
         header,
         ...allRows.map(r =>
-          [r.product_code, r.product_name, r.material_code, r.material_name, r.quantity, r.unit]
+          [r.product_code, r.product_name, r.note ?? '', r.material_code, r.material_name, r.quantity, r.unit]
             .map(v => `"${String(v ?? '').replace(/"/g, '""')}"`)
             .join(',')
         ),
@@ -434,27 +435,28 @@ export default function MaterialsBomPage() {
             <div className="text-slate-400">載入中...</div>
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <table className="min-w-full border border-slate-700 text-sm">
+              <div className="overflow-x-auto w-full">
+                <table className="w-full border border-slate-700 text-sm">
                   <thead>
                     <tr className="bg-slate-800 text-slate-200">
-                      <th className="border border-slate-700 px-2 py-1">生產品項編碼</th>
-                      <th className="border border-slate-700 px-2 py-1">生產品項名稱</th>
-                      <th className="border border-slate-700 px-2 py-1">原料編碼</th>
-                      <th className="border border-slate-700 px-2 py-1">原料名稱</th>
-                      <th className="border border-slate-700 px-2 py-1">數量</th>
-                      <th className="border border-slate-700 px-2 py-1">單位</th>
-                      <th className="border border-slate-700 px-2 py-1">庫存</th>
-                      <th className="border border-slate-700 px-2 py-1">替代料號/庫存</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">生產品項編碼</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">生產品項名稱</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">備註</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">消耗品項編碼</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">消耗品項名稱</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">數量</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">單位</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">庫存</th>
+                      <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">替代料號/庫存</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(() => {
                       if (bomData.length === 0) {
-                        return <tr><td colSpan={3} className="text-center py-4 text-slate-500">尚無資料</td></tr>;
+                        return <tr><td colSpan={9} className="text-center py-4 text-slate-500">尚無資料</td></tr>;
                       }
                       // 合併相同生產品項編碼
-                      const grouped: Record<string, { product_name: string; materials: { material_code: string; material_name: string; quantity: number; unit: string }[] }> = {};
+                      const grouped: Record<string, { product_name: string; materials: { material_code: string; material_name: string; note?: string; quantity: number; unit: string }[] }> = {};
                       bomData.forEach(row => {
                         if (!grouped[row.product_code]) {
                           grouped[row.product_code] = {
@@ -465,6 +467,7 @@ export default function MaterialsBomPage() {
                         grouped[row.product_code].materials.push({
                           material_code: row.material_code,
                           material_name: row.material_name,
+                          note: row.note,
                           quantity: row.quantity,
                           unit: row.unit
                         });
@@ -475,10 +478,10 @@ export default function MaterialsBomPage() {
                         return info.materials.map((mat, idx: number) => {
                           const stock = materialMap[mat.material_code] ?? '-';
                           return (
-                            <tr key={product_code + '-' + idx} className="odd:bg-slate-900 even:bg-slate-800 align-top">
+                            <tr key={product_code + '-' + idx} className="odd:bg-slate-900 even:bg-slate-800">
                               {idx === 0 && (
                                 <td
-                                  className="border border-slate-700 px-2 py-1 font-mono whitespace-nowrap bg-slate-950/80 text-lg align-middle text-center"
+                                  className="border border-slate-700 px-2 py-0.5 font-mono whitespace-nowrap bg-slate-950/80 text-base align-middle text-center"
                                   rowSpan={rowSpan}
                                   style={{ verticalAlign: 'middle', fontWeight: 700, borderRightWidth: 3 }}
                                 >
@@ -487,18 +490,27 @@ export default function MaterialsBomPage() {
                               )}
                               {idx === 0 && (
                                 <td
-                                  className="border border-slate-700 px-2 py-1 bg-slate-950/80 align-middle text-center"
+                                  className="border border-slate-700 px-2 py-0.5 bg-slate-950/80 align-middle text-center whitespace-nowrap"
                                   rowSpan={rowSpan}
                                   style={{ verticalAlign: 'middle', fontWeight: 500, borderRightWidth: 3 }}
                                 >
                                   {info.product_name}
                                 </td>
                               )}
-                              <td className="border border-slate-700 px-2 py-1 font-mono text-cyan-300">{mat.material_code}</td>
-                              <td className="border border-slate-700 px-2 py-1">{mat.material_name}</td>
-                              <td className="border border-slate-700 px-2 py-1 text-orange-300">{mat.quantity}</td>
-                              <td className="border border-slate-700 px-2 py-1 text-slate-400">{mat.unit}</td>
-                              <td className="border border-slate-700 px-2 py-1 font-mono text-green-400">{stock}</td>
+                              {idx === 0 && (
+                                <td
+                                  className="border border-slate-700 px-2 py-0.5 bg-slate-950/80 align-middle text-center text-slate-400 text-xs"
+                                  rowSpan={rowSpan}
+                                  style={{ verticalAlign: 'middle', borderRightWidth: 3 }}
+                                >
+                                  {mat.note || ''}
+                                </td>
+                              )}
+                              <td className="border border-slate-700 px-2 py-0.5 font-mono whitespace-nowrap text-cyan-300">{mat.material_code}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 whitespace-nowrap">{mat.material_name}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 whitespace-nowrap text-orange-300 text-right">{mat.quantity}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 whitespace-nowrap text-slate-400">{mat.unit}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 whitespace-nowrap font-mono text-green-400 text-right">{stock}</td>
                               {/* 替代料號及庫存顯示 */}
                               <td className="border border-slate-700 px-2 py-1">
                                 {substituteMap[mat.material_code]?.length ? (
