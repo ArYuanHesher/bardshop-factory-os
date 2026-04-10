@@ -91,6 +91,7 @@ export default function MaterialsBomPage() {
     }
   const fileInput = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [downloadingCsv, setDownloadingCsv] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [bomData, setBomData] = useState<BomRow[]>([])
   const [loadingBom, setLoadingBom] = useState(false)
@@ -295,6 +296,50 @@ export default function MaterialsBomPage() {
     }
   }
 
+  // 下載全部BOM資料為CSV
+  async function downloadBomCsv() {
+    setDownloadingCsv(true)
+    try {
+      const PAGE = 1000
+      let allRows: BomRow[] = []
+      let from = 0
+      while (true) {
+        const { data, error } = await supabase
+          .from('bom')
+          .select('product_code, product_name, material_code, material_name, quantity, unit')
+          .order('product_code', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (error) throw new Error(error.message)
+        const chunk = (data ?? []) as BomRow[]
+        allRows = allRows.concat(chunk)
+        if (chunk.length < PAGE) break
+        from += PAGE
+      }
+      const header = '生產品項編碼,生產品項名稱,消耗品項編碼,消耗品項名稱,消耗數量,單位'
+      const csvContent = [
+        header,
+        ...allRows.map(r =>
+          [r.product_code, r.product_name, r.material_code, r.material_name, r.quantity, r.unit]
+            .map(v => `"${String(v ?? '').replace(/"/g, '""')}"`)
+            .join(',')
+        ),
+      ].join('\n')
+      const bom = '\uFEFF'
+      const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `BOM表_${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      alert(`下載失敗：${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setDownloadingCsv(false)
+    }
+  }
+
   // 清空BOM資料表
   async function handleClearBom() {
     if (!window.confirm('確定要清空所有BOM資料嗎？此動作無法復原！')) return;
@@ -328,6 +373,14 @@ export default function MaterialsBomPage() {
           >
             返回物料清單
           </Link>
+          <button
+            type="button"
+            className="px-4 py-2 rounded border border-green-700 text-green-300 hover:bg-green-900/30 text-sm font-bold disabled:opacity-50"
+            disabled={downloadingCsv}
+            onClick={downloadBomCsv}
+          >
+            {downloadingCsv ? '下載中...' : '下載CSV'}
+          </button>
           <button
             type="button"
             className="px-4 py-2 rounded border border-rose-700 text-rose-300 hover:bg-rose-900/30 text-sm font-bold disabled:opacity-50"
