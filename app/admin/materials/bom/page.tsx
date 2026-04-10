@@ -436,7 +436,7 @@ export default function MaterialsBomPage() {
           ) : (
             <>
               <div className="overflow-x-auto w-full">
-                <table className="w-full border border-slate-700 text-sm">
+                <table className="min-w-max border border-slate-700 text-sm">
                   <thead>
                     <tr className="bg-slate-800 text-slate-200">
                       <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">生產品項編碼</th>
@@ -490,9 +490,9 @@ export default function MaterialsBomPage() {
                               )}
                               {idx === 0 && (
                                 <td
-                                  className="border border-slate-700 px-2 py-0.5 bg-slate-950/80 align-middle text-center whitespace-nowrap"
+                                  className="border border-slate-700 px-2 py-0.5 bg-slate-950/80 align-middle text-center"
                                   rowSpan={rowSpan}
-                                  style={{ verticalAlign: 'middle', fontWeight: 500, borderRightWidth: 3 }}
+                                  style={{ verticalAlign: 'middle', fontWeight: 500, borderRightWidth: 3, maxWidth: 320 }}
                                 >
                                   {info.product_name}
                                 </td>
