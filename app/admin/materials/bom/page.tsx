@@ -361,7 +361,7 @@ export default function MaterialsBomPage() {
   }
 
   return (
-    <div className="p-4 md:p-8 max-w-[1200px] mx-auto min-h-screen text-slate-300 space-y-6">
+    <div className="p-4 md:p-8 mx-auto min-h-screen text-slate-300 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl md:text-3xl font-bold text-white tracking-tight">BOM表</h1>
