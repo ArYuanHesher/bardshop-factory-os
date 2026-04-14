@@ -366,10 +366,11 @@ export default function MaterialsBomPage() {
     }
   }
 
-  // 下載全部BOM資料為CSV
+  // 下載全部BOM資料為CSV（含替代料號）
   async function downloadBomCsv() {
     setDownloadingCsv(true)
     try {
+      // 1. 撈取全部 BOM 資料
       const PAGE = 1000
       let allRows: BomRow[] = []
       let from = 0
@@ -386,15 +387,66 @@ export default function MaterialsBomPage() {
         if (chunk.length < PAGE) break
         from += PAGE
       }
-      const header = '生產品項編碼,生產品項名稱,備註,消耗品項編碼,消耗品項名稱,消耗數量,單位'
+
+      // 2. 撈取替代料號規則
+      const { data: subData, error: subError } = await supabase
+        .from('material_substitute_rules')
+        .select('source_item_code, substitute_item_code, priority')
+        .order('source_item_code', { ascending: true })
+        .order('priority', { ascending: true })
+      if (subError) throw new Error(subError.message)
+      // group by source_item_code, sorted by priority
+      const subMap: Record<string, string[]> = {}
+      ;(subData ?? []).forEach((r: { source_item_code: string; substitute_item_code: string; priority: number }) => {
+        if (!subMap[r.source_item_code]) subMap[r.source_item_code] = []
+        subMap[r.source_item_code].push(r.substitute_item_code)
+      })
+
+      // 3. 收集所有替代料號編碼，查詢中文名稱
+      const allSubCodes = Array.from(new Set(Object.values(subMap).flat()))
+      const nameMap: Record<string, string> = {}
+      if (allSubCodes.length > 0) {
+        // 分批查詢避免超過 URL 長度限制
+        for (let i = 0; i < allSubCodes.length; i += 500) {
+          const batch = allSubCodes.slice(i, i + 500)
+          const { data: nameData } = await supabase
+            .from('material_inventory_list')
+            .select('item_code, item_name')
+            .in('item_code', batch)
+          ;(nameData ?? []).forEach((r: { item_code: string; item_name: string }) => {
+            nameMap[r.item_code] = r.item_name
+          })
+        }
+      }
+
+      // 4. 計算最大替代料號順位數
+      const maxSub = Math.max(0, ...Object.values(subMap).map(arr => arr.length))
+
+      // 5. 組合 CSV
+      const baseHeaders = ['生產品項編碼','生產品項名稱','備註','消耗品項編碼','消耗品項名稱','消耗數量','單位']
+      const subHeaders: string[] = []
+      for (let i = 1; i <= maxSub; i++) {
+        subHeaders.push(`替代料號第${i}順位編碼`, `替代料號第${i}順位名稱`)
+      }
+      const header = [...baseHeaders, ...subHeaders].join(',')
+
       const csvContent = [
         header,
-        ...allRows.map(r =>
-          [r.product_code, r.product_name, r.note ?? '', r.material_code, r.material_name, r.quantity, r.unit]
+        ...allRows.map(r => {
+          const baseCols = [r.product_code, r.product_name, r.note ?? '', r.material_code, r.material_name, r.quantity, r.unit]
+          const subs = subMap[r.material_code] || []
+          const subCols: string[] = []
+          for (let i = 0; i < maxSub; i++) {
+            const code = subs[i] || ''
+            const name = code ? (nameMap[code] || '') : ''
+            subCols.push(code, name)
+          }
+          return [...baseCols, ...subCols]
             .map(v => `"${String(v ?? '').replace(/"/g, '""')}"`)
             .join(',')
-        ),
+        }),
       ].join('\n')
+
       const bom = '\uFEFF'
       const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' })
       const url = URL.createObjectURL(blob)
