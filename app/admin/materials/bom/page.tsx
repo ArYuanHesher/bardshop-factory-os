@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { supabase } from '../../../../lib/supabaseClient'
 import Papa from 'papaparse'
+import * as XLSX from 'xlsx'
 
 
 
@@ -195,15 +196,31 @@ export default function MaterialsBomPage() {
     setMessage(null)
     setUploading(true)
     try {
-      const text = await file.text()
-      const lines = text.trim().split(/\r?\n/)
-      const headers = lines[0].split(',').map(h => h.trim())
-      const rows = parseCSV(text)
+      const isXlsx = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
+      let rows: Record<string, string>[]
+      if (isXlsx) {
+        const buffer = await file.arrayBuffer()
+        const workbook = XLSX.read(buffer, { type: 'array' })
+        const sheetName = workbook.SheetNames[0]
+        const sheet = workbook.Sheets[sheetName]
+        rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { defval: '' })
+        // trim header keys
+        rows = rows.map(row => {
+          const trimmed: Record<string, string> = {}
+          for (const [k, v] of Object.entries(row)) {
+            trimmed[k.trim()] = String(v ?? '').trim()
+          }
+          return trimmed
+        })
+      } else {
+        const text = await file.text()
+        rows = parseCSV(text)
+      }
+      const headers = rows.length > 0 ? Object.keys(rows[0]) : []
       // 顯示實際解析到的 header
       if (rows.length > 0) {
-        const headers = Object.keys(rows[0])
         setMessage('解析到的欄位：' + headers.join(' , '))
-        console.log('CSV headers:', headers)
+        console.log('解析 headers:', headers)
       }
       // 欄位自動對應
       // 支援兩種格式：
@@ -213,6 +230,7 @@ export default function MaterialsBomPage() {
       let col = {
         product_code: '',
         product_name: '',
+        note: '',
         material_code: '',
         material_name: '',
         quantity: '',
@@ -222,15 +240,17 @@ export default function MaterialsBomPage() {
         col = {
           product_code: '生產品項編碼',
           product_name: '生產品項名稱',
+          note: '備註',
           material_code: '消耗品項編碼',
           material_name: '消耗品項名稱',
           quantity: '消耗數量',
-          unit: ''
+          unit: '單位'
         }
       } else if (headers.includes('成品編號')) {
         col = {
           product_code: '成品編號',
           product_name: '成品名稱',
+          note: '備註',
           material_code: '原料編碼',
           material_name: '原料名稱',
           quantity: '數量',
@@ -241,7 +261,7 @@ export default function MaterialsBomPage() {
       const required = [col.product_code, col.material_code, col.quantity]
       const missing = required.filter(x => !x)
       if (missing.length > 0) {
-        setMessage('❌ 上傳失敗：找不到必要欄位，請檢查標題。\n必須包含：生產品項編碼/成品編號、消耗品項編碼/原料編碼、消耗數量/數量')
+        setMessage('❌ 上傳失敗：找不到必要欄位，請檢查標題。\n必須包含：生產品項編碼、生產品項名稱、備註、消耗品項編碼、消耗品項名稱、消耗數量、單位\n（或：成品編號、成品名稱、備註、原料編碼、原料名稱、數量、單位）')
         setUploading(false)
         if (fileInput.current) fileInput.current.value = ''
         return
@@ -271,6 +291,7 @@ export default function MaterialsBomPage() {
           bomRows.push({
             product_code,
             product_name: row[col.product_name],
+            note: col.note ? (row[col.note]?.trim() || '') : '',
             material_code,
             material_name,
             quantity: Number(quantity),
@@ -389,6 +410,34 @@ export default function MaterialsBomPage() {
     }
   }
 
+  // 下載範例檔（XLSX）
+  function downloadTemplate() {
+    const templateData = [
+      {
+        '生產品項編碼': 'PROD-001',
+        '生產品項名稱': '範例產品A',
+        '備註': '',
+        '消耗品項編碼': 'MAT-001',
+        '消耗品項名稱': '範例原料A',
+        '消耗數量': 1,
+        '單位': '個'
+      },
+      {
+        '生產品項編碼': 'PROD-001',
+        '生產品項名稱': '範例產品A',
+        '備註': '測試備註',
+        '消耗品項編碼': 'MAT-002',
+        '消耗品項名稱': '範例原料B',
+        '消耗數量': 2,
+        '單位': 'kg'
+      }
+    ]
+    const ws = XLSX.utils.json_to_sheet(templateData)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'BOM範例')
+    XLSX.writeFile(wb, 'BOM範例檔.xlsx')
+  }
+
   // 清空BOM資料表
   async function handleClearBom() {
     if (!window.confirm('確定要清空所有BOM資料嗎？此動作無法復原！')) return;
@@ -432,6 +481,13 @@ export default function MaterialsBomPage() {
           </button>
           <button
             type="button"
+            className="px-4 py-2 rounded border border-amber-700 text-amber-300 hover:bg-amber-900/30 text-sm font-bold"
+            onClick={downloadTemplate}
+          >
+            下載範例檔
+          </button>
+          <button
+            type="button"
             className="px-4 py-2 rounded border border-rose-700 text-rose-300 hover:bg-rose-900/30 text-sm font-bold disabled:opacity-50"
             disabled={uploading}
             onClick={handleClearBom}
@@ -443,10 +499,10 @@ export default function MaterialsBomPage() {
 
       <div className="bg-slate-900/60 border border-slate-700 rounded-xl p-4 md:p-8 text-slate-400 space-y-4">
         <div className="space-y-2">
-          <label className="block font-bold">上傳BOM CSV檔案：</label>
+          <label className="block font-bold">上傳BOM檔案（CSV / XLSX）：</label>
           <input
             type="file"
-            accept=".csv"
+            accept=".csv,.xlsx,.xls"
             ref={fileInput}
             className="hidden"
             onChange={handleFileChange}
