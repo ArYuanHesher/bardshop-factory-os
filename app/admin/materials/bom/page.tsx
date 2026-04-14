@@ -99,9 +99,9 @@ export default function MaterialsBomPage() {
   const [message, setMessage] = useState<string | null>(null)
 
   // === 欄寬調整 ===
-  const COL_KEYS = ['prod_code','prod_name','prod_qty','prod_unit','mat_code','mat_name','qty','unit','note','stock','substitute'] as const
-  const COL_LABELS = ['生產品項編碼','生產品項名稱','生產數量','單位','消耗品項編碼','消耗品項名稱','消耗數量','單位','備註','庫存','替代料號/庫存']
-  const DEFAULT_WIDTHS: Record<string, number> = { prod_code: 160, prod_name: 260, prod_qty: 70, prod_unit: 50, mat_code: 160, mat_name: 200, qty: 60, unit: 50, note: 80, stock: 70, substitute: 180 }
+  const COL_KEYS = ['prod_code','prod_name','prod_qty','prod_unit','mat_code','mat_name','qty','mat_unit','note','stock','substitute'] as const
+  const COL_LABELS = ['生產品項編碼','生產品項名稱','生產數量','生產單位','消耗品項編碼','消耗品項名稱','消耗數量','消耗單位','備註','庫存','替代料號/庫存']
+  const DEFAULT_WIDTHS: Record<string, number> = { prod_code: 160, prod_name: 260, prod_qty: 70, prod_unit: 60, mat_code: 160, mat_name: 200, qty: 60, mat_unit: 60, note: 80, stock: 70, substitute: 180 }
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -245,31 +245,31 @@ export default function MaterialsBomPage() {
           product_code: '生產品項編碼',
           product_name: '生產品項名稱',
           production_quantity: '生產數量',
-          production_unit: headers.indexOf('單位') < headers.indexOf('消耗品項編碼') ? '單位' : '',
+          production_unit: '生產單位',
           note: '備註',
           material_code: '消耗品項編碼',
           material_name: '消耗品項名稱',
           quantity: '消耗數量',
-          unit: '單位'
+          unit: '消耗單位'
         }
       } else if (headers.includes('成品編號')) {
         col = {
           product_code: '成品編號',
           product_name: '成品名稱',
           production_quantity: '生產數量',
-          production_unit: '',
+          production_unit: '生產單位',
           note: '備註',
           material_code: '原料編碼',
           material_name: '原料名稱',
           quantity: '數量',
-          unit: '單位'
+          unit: '消耗單位'
         }
       }
       // 必要欄位檢查
       const required = [col.product_code, col.material_code, col.quantity]
       const missing = required.filter(x => !x)
       if (missing.length > 0) {
-        setMessage('❌ 上傳失敗：找不到必要欄位，請檢查標題。\n必須包含：生產品項編碼、生產品項名稱、生產數量、單位、消耗品項編碼、消耗品項名稱、消耗數量、單位、備註\n（或：成品編號、成品名稱、生產數量、原料編碼、原料名稱、數量、單位、備註）')
+        setMessage('❌ 上傳失敗：找不到必要欄位，請檢查標題。\n必須包含：生產品項編碼、生產品項名稱、生產數量、生產單位、消耗品項編碼、消耗品項名稱、消耗數量、消耗單位、備註\n（或：成品編號、成品名稱、生產數量、生產單位、原料編碼、原料名稱、數量、消耗單位、備註）')
         setUploading(false)
         if (fileInput.current) fileInput.current.value = ''
         return
@@ -433,7 +433,7 @@ export default function MaterialsBomPage() {
       const maxSub = Math.max(0, ...Object.values(subMap).map(arr => arr.length))
 
       // 5. 組合 CSV
-      const baseHeaders = ['生產品項編碼','生產品項名稱','生產數量','單位','消耗品項編碼','消耗品項名稱','消耗數量','單位','備註']
+      const baseHeaders = ['生產品項編碼','生產品項名稱','生產數量','生產單位','消耗品項編碼','消耗品項名稱','消耗數量','消耗單位','備註']
       const subHeaders: string[] = []
       for (let i = 1; i <= maxSub; i++) {
         subHeaders.push(`替代料號第${i}順位編碼`, `替代料號第${i}順位名稱`)
@@ -479,7 +479,7 @@ export default function MaterialsBomPage() {
         '生產品項編碼': 'PROD-001',
         '生產品項名稱': '範例產品A',
         '生產數量': 1,
-        '單位': '組',
+        '生產單位': '組',
         '消耗品項編碼': 'MAT-001',
         '消耗品項名稱': '範例原料A',
         '消耗數量': 1,
@@ -490,7 +490,7 @@ export default function MaterialsBomPage() {
         '生產品項編碼': 'PROD-001',
         '生產品項名稱': '範例產品A',
         '生產數量': 1,
-        '單位': '組',
+        '生產單位': '組',
         '消耗品項編碼': 'MAT-002',
         '消耗品項名稱': '範例原料B',
         '消耗數量': 2,
