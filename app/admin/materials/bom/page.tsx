@@ -18,6 +18,8 @@ interface BomRow {
   id?: number
   product_code: string
   product_name: string
+  production_quantity?: number
+  production_unit?: string
   note?: string
   material_code: string
   material_name: string
@@ -97,9 +99,9 @@ export default function MaterialsBomPage() {
   const [message, setMessage] = useState<string | null>(null)
 
   // === 欄寬調整 ===
-  const COL_KEYS = ['prod_code','prod_name','note','mat_code','mat_name','qty','unit','stock','substitute'] as const
-  const COL_LABELS = ['生產品項編碼','生產品項名稱','備註','消耗品項編碼','消耗品項名稱','數量','單位','庫存','替代料號/庫存']
-  const DEFAULT_WIDTHS: Record<string, number> = { prod_code: 160, prod_name: 260, note: 80, mat_code: 160, mat_name: 200, qty: 60, unit: 50, stock: 70, substitute: 180 }
+  const COL_KEYS = ['prod_code','prod_name','prod_qty','prod_unit','mat_code','mat_name','qty','unit','note','stock','substitute'] as const
+  const COL_LABELS = ['生產品項編碼','生產品項名稱','生產數量','單位','消耗品項編碼','消耗品項名稱','消耗數量','單位','備註','庫存','替代料號/庫存']
+  const DEFAULT_WIDTHS: Record<string, number> = { prod_code: 160, prod_name: 260, prod_qty: 70, prod_unit: 50, mat_code: 160, mat_name: 200, qty: 60, unit: 50, note: 80, stock: 70, substitute: 180 }
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -154,7 +156,7 @@ export default function MaterialsBomPage() {
   async function fetchBomData() {
     setLoadingBom(true)
     // 查詢條件
-    let query = supabase.from('bom').select('id, product_code, product_name, note, material_code, material_name, quantity, unit', { count: 'exact' })
+    let query = supabase.from('bom').select('id, product_code, product_name, production_quantity, production_unit, note, material_code, material_name, quantity, unit', { count: 'exact' })
     if (search.trim()) {
       query = query.ilike('product_code', `%${search.trim()}%`)
     }
@@ -230,6 +232,8 @@ export default function MaterialsBomPage() {
       let col = {
         product_code: '',
         product_name: '',
+        production_quantity: '',
+        production_unit: '',
         note: '',
         material_code: '',
         material_name: '',
@@ -240,6 +244,8 @@ export default function MaterialsBomPage() {
         col = {
           product_code: '生產品項編碼',
           product_name: '生產品項名稱',
+          production_quantity: '生產數量',
+          production_unit: headers.indexOf('單位') < headers.indexOf('消耗品項編碼') ? '單位' : '',
           note: '備註',
           material_code: '消耗品項編碼',
           material_name: '消耗品項名稱',
@@ -250,6 +256,8 @@ export default function MaterialsBomPage() {
         col = {
           product_code: '成品編號',
           product_name: '成品名稱',
+          production_quantity: '生產數量',
+          production_unit: '',
           note: '備註',
           material_code: '原料編碼',
           material_name: '原料名稱',
@@ -261,7 +269,7 @@ export default function MaterialsBomPage() {
       const required = [col.product_code, col.material_code, col.quantity]
       const missing = required.filter(x => !x)
       if (missing.length > 0) {
-        setMessage('❌ 上傳失敗：找不到必要欄位，請檢查標題。\n必須包含：生產品項編碼、生產品項名稱、備註、消耗品項編碼、消耗品項名稱、消耗數量、單位\n（或：成品編號、成品名稱、備註、原料編碼、原料名稱、數量、單位）')
+        setMessage('❌ 上傳失敗：找不到必要欄位，請檢查標題。\n必須包含：生產品項編碼、生產品項名稱、生產數量、單位、消耗品項編碼、消耗品項名稱、消耗數量、單位、備註\n（或：成品編號、成品名稱、生產數量、原料編碼、原料名稱、數量、單位、備註）')
         setUploading(false)
         if (fileInput.current) fileInput.current.value = ''
         return
@@ -291,6 +299,8 @@ export default function MaterialsBomPage() {
           bomRows.push({
             product_code,
             product_name: row[col.product_name],
+            production_quantity: col.production_quantity ? Number(row[col.production_quantity]) || 1 : 1,
+            production_unit: col.production_unit ? (row[col.production_unit]?.trim() || '') : '',
             note: col.note ? (row[col.note]?.trim() || '') : '',
             material_code,
             material_name,
@@ -377,7 +387,7 @@ export default function MaterialsBomPage() {
       while (true) {
         const { data, error } = await supabase
           .from('bom')
-          .select('product_code, product_name, note, material_code, material_name, quantity, unit')
+          .select('product_code, product_name, production_quantity, production_unit, note, material_code, material_name, quantity, unit')
           .order('product_code', { ascending: true })
           .order('id', { ascending: true })
           .range(from, from + PAGE - 1)
@@ -423,7 +433,7 @@ export default function MaterialsBomPage() {
       const maxSub = Math.max(0, ...Object.values(subMap).map(arr => arr.length))
 
       // 5. 組合 CSV
-      const baseHeaders = ['生產品項編碼','生產品項名稱','備註','消耗品項編碼','消耗品項名稱','消耗數量','單位']
+      const baseHeaders = ['生產品項編碼','生產品項名稱','生產數量','單位','消耗品項編碼','消耗品項名稱','消耗數量','單位','備註']
       const subHeaders: string[] = []
       for (let i = 1; i <= maxSub; i++) {
         subHeaders.push(`替代料號第${i}順位編碼`, `替代料號第${i}順位名稱`)
@@ -433,7 +443,7 @@ export default function MaterialsBomPage() {
       const csvContent = [
         header,
         ...allRows.map(r => {
-          const baseCols = [r.product_code, r.product_name, r.note ?? '', r.material_code, r.material_name, r.quantity, r.unit]
+          const baseCols = [r.product_code, r.product_name, r.production_quantity ?? 1, r.production_unit ?? '', r.material_code, r.material_name, r.quantity, r.unit, r.note ?? '']
           const subs = subMap[r.material_code] || []
           const subCols: string[] = []
           for (let i = 0; i < maxSub; i++) {
@@ -468,20 +478,24 @@ export default function MaterialsBomPage() {
       {
         '生產品項編碼': 'PROD-001',
         '生產品項名稱': '範例產品A',
-        '備註': '',
+        '生產數量': 1,
+        '單位': '組',
         '消耗品項編碼': 'MAT-001',
         '消耗品項名稱': '範例原料A',
         '消耗數量': 1,
-        '單位': '個'
+        '消耗單位': '個',
+        '備註': ''
       },
       {
         '生產品項編碼': 'PROD-001',
         '生產品項名稱': '範例產品A',
-        '備註': '測試備註',
+        '生產數量': 1,
+        '單位': '組',
         '消耗品項編碼': 'MAT-002',
         '消耗品項名稱': '範例原料B',
         '消耗數量': 2,
-        '單位': 'kg'
+        '消耗單位': 'kg',
+        '備註': '測試備註'
       }
     ]
     const ws = XLSX.utils.json_to_sheet(templateData)
@@ -644,14 +658,16 @@ export default function MaterialsBomPage() {
                   <tbody>
                     {(() => {
                       if (bomData.length === 0) {
-                        return <tr><td colSpan={9} className="text-center py-4 text-slate-500">尚無資料</td></tr>;
+                        return <tr><td colSpan={11} className="text-center py-4 text-slate-500">尚無資料</td></tr>;
                       }
                       // 合併相同生產品項編碼
-                      const grouped: Record<string, { product_name: string; materials: { material_code: string; material_name: string; note?: string; quantity: number; unit: string }[] }> = {};
+                      const grouped: Record<string, { product_name: string; production_quantity?: number; production_unit?: string; materials: { material_code: string; material_name: string; note?: string; quantity: number; unit: string }[] }> = {};
                       bomData.forEach(row => {
                         if (!grouped[row.product_code]) {
                           grouped[row.product_code] = {
                             product_name: row.product_name,
+                            production_quantity: row.production_quantity,
+                            production_unit: row.production_unit,
                             materials: []
                           };
                         }
@@ -690,17 +706,27 @@ export default function MaterialsBomPage() {
                               )}
                               {idx === 0 && (
                                 <td
+                                  className="border border-slate-700 px-2 py-0.5 bg-slate-950/80 align-middle text-center text-orange-300"
+                                  rowSpan={rowSpan}
+                                  style={{ verticalAlign: 'middle', borderRightWidth: 1 }}
+                                >
+                                  {info.production_quantity ?? 1}
+                                </td>
+                              )}
+                              {idx === 0 && (
+                                <td
                                   className="border border-slate-700 px-2 py-0.5 bg-slate-950/80 align-middle text-center text-slate-400 text-xs"
                                   rowSpan={rowSpan}
                                   style={{ verticalAlign: 'middle', borderRightWidth: 3 }}
                                 >
-                                  {mat.note || ''}
+                                  {info.production_unit || ''}
                                 </td>
                               )}
                               <td className="border border-slate-700 px-2 py-0.5 font-mono text-cyan-300 break-all">{mat.material_code}</td>
                               <td className="border border-slate-700 px-2 py-0.5 break-words">{mat.material_name}</td>
                               <td className="border border-slate-700 px-2 py-0.5 text-orange-300 text-right">{mat.quantity}</td>
                               <td className="border border-slate-700 px-2 py-0.5 text-slate-400">{mat.unit}</td>
+                              <td className="border border-slate-700 px-2 py-0.5 text-slate-400 text-xs">{mat.note || ''}</td>
                               <td className="border border-slate-700 px-2 py-0.5 font-mono text-green-400 text-right">{stock}</td>
                               {/* 替代料號及庫存顯示 */}
                               <td className="border border-slate-700 px-2 py-1">
