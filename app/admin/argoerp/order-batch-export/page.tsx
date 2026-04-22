@@ -3,7 +3,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../../../../lib/supabaseClient'
-import InventorySyncPanel from '../../../../components/InventorySyncPanel'
 
 // ==================== 來源欄位（貼上的格式） ====================
 const INPUT_COLUMNS = [
@@ -175,47 +174,6 @@ interface FailedImportItem {
   attemptedAt: string
 }
 
-interface BomRow {
-  product_code: string
-  product_name: string | null
-  production_quantity: number | null
-  production_unit: string | null
-  note: string | null
-  material_code: string
-  material_name: string | null
-  quantity: number
-  unit: string | null
-}
-
-interface SubstituteRuleRow {
-  source_item_code: string
-  substitute_item_code: string
-  priority: number
-}
-
-interface MaterialPrepRow {
-  row_key: string
-  mo_number: string
-  source_order: string
-  product_code: string
-  source_material_code: string
-  source_material_name: string
-  required_qty: number
-  unit: string
-  stock_qty: number
-  substitute_options: Array<{
-    code: string
-    name: string
-    stock_qty: number
-    label: string
-  }>
-  selected_material_code: string
-  selected_material_name: string
-  selected_material_stock_qty: number
-  status: '可直接備料' | '建議替代' | '缺料' | '無BOM'
-  note: string
-}
-
 // ==================== 工具函式 ====================
 function formatDate(d: Date): string {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
@@ -231,32 +189,11 @@ function getNextBusinessDay(from: Date): Date {
   return d
 }
 
-// 依位元組長度截斷字串（中文=3 bytes, 英文=1 byte）
-function truncateByByteLength(str: string, maxBytes: number): string {
-  let bytes = 0
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i)
-    const charBytes = code > 0x7F ? 3 : 1
-    if (bytes + charBytes > maxBytes) return str.slice(0, i)
-    bytes += charBytes
-  }
-  return str
-}
-
-function formatQty(value: number): string {
-  if (!Number.isFinite(value)) return '0'
-  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.00$/, '')
-}
-
 function getImportConfig(factory: 'T' | 'C' | 'O') {
   if (factory === 'T') {
     return { interfaceId: 'IFAF028', targetLabel: '製令', shortLabel: 'MOT' }
   }
   return { interfaceId: 'IFAF044', targetLabel: '採購單', shortLabel: factory === 'C' ? 'MOC' : 'MOO' }
-}
-
-function getMaterialPrepStorageKey() {
-  return 'argoerp_material_prep_interface_id'
 }
 
 // ==================== 批次映射（需要一次處理全部來計算流水號）====================
@@ -355,7 +292,9 @@ function mapAllToExport(srcRows: SourceRow[]): ExportRow[] {
     row.seq_number = '1'                               // 編號
     row.product_code = src.item_code                   // 生產貨號：品項編碼
     row.version = '1'                                  // 版本
-    row.lot_number = truncateByByteLength(src.customer, 30) // 批號：客戶名稱（最多30 bytes）
+    // 批號保留空白；客戶名稱改寫到「自定義欄位1」(PDL01C, 文字200) → 不再受 32 bytes 限制
+    row.lot_number = ''
+    row.custom_1 = src.customer                        // 自定義欄位1：客戶名稱（完整保留，不截字）
     row.planned_qty = src.quantity                     // 預訂產出量：數量
     row.bom_level = '99'                               // BOM製造批料階數
     row.product_cost_ratio = '1'                       // 成品工費分攤約當比例
@@ -465,7 +404,8 @@ function buildSummaryRecords(sourceRows: SourceRow[], savedAt: string) {
     mo_status: row.mo_status,
     department: row.department,
     product_code: row.product_code,
-    lot_number: row.lot_number,
+    // lot_number 欄位保留作為顯示用（存客戶名稱），ERP 端則寫入 custom_1
+    lot_number: row.custom_1 || row.lot_number,
     planned_qty: row.planned_qty,
     source_order: row.source_order,
     mo_note: row.mo_note,
@@ -603,15 +543,6 @@ export default function OrderBatchExportPage() {
   const [saveMsg, setSaveMsg] = useState('')
   const [importingFactory, setImportingFactory] = useState<'T' | 'C' | 'O' | null>(null)
   const [failedImports, setFailedImports] = useState<FailedImportItem[]>([])
-  const [bomRows, setBomRows] = useState<BomRow[]>([])
-  const [inventoryMap, setInventoryMap] = useState<Record<string, number>>({})
-  const [substituteMap, setSubstituteMap] = useState<Record<string, SubstituteRuleRow[]>>({})
-  const [bomLoading, setBomLoading] = useState(false)
-  const [bomError, setBomError] = useState('')
-  const [materialOverrides, setMaterialOverrides] = useState<Record<string, string>>({})
-  const [materialPrepInterfaceId, setMaterialPrepInterfaceId] = useState('')
-  const [materialPrepImporting, setMaterialPrepImporting] = useState(false)
-  const [materialPrepMessage, setMaterialPrepMessage] = useState('')
 
   // 還原暫存
   useEffect(() => {
@@ -634,100 +565,6 @@ export default function OrderBatchExportPage() {
   useEffect(() => {
     saveFailedImports(failedImports)
   }, [failedImports])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      const saved = localStorage.getItem(getMaterialPrepStorageKey())
-      if (saved) setMaterialPrepInterfaceId(saved)
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      if (materialPrepInterfaceId.trim()) localStorage.setItem(getMaterialPrepStorageKey(), materialPrepInterfaceId.trim())
-      else localStorage.removeItem(getMaterialPrepStorageKey())
-    } catch {}
-  }, [materialPrepInterfaceId])
-
-  const loadBomContext = useCallback(async () => {
-    const productCodes = Array.from(new Set(sourceRows.map(row => row.item_code.trim()).filter(Boolean)))
-    if (productCodes.length === 0) {
-      setBomRows([])
-      setInventoryMap({})
-      setSubstituteMap({})
-      setBomError('')
-      return
-    }
-
-    setBomLoading(true)
-    setBomError('')
-
-    try {
-      const { data: bomData, error: bomDataError } = await supabase
-        .from('bom')
-        .select('product_code, product_name, production_quantity, production_unit, note, material_code, material_name, quantity, unit')
-        .in('product_code', productCodes)
-
-      if (bomDataError) throw bomDataError
-
-      const rows = (bomData as BomRow[] | null) || []
-      const materialCodes = Array.from(new Set(rows.map(row => row.material_code).filter(Boolean)))
-
-      const { data: substituteData, error: substituteError } = await supabase
-        .from('material_substitute_rules')
-        .select('source_item_code, substitute_item_code, priority')
-        .in('source_item_code', materialCodes)
-
-      if (substituteError) throw substituteError
-
-      const groupedSubstitutes: Record<string, SubstituteRuleRow[]> = {}
-      ;((substituteData as SubstituteRuleRow[] | null) || []).forEach(rule => {
-        if (!groupedSubstitutes[rule.source_item_code]) groupedSubstitutes[rule.source_item_code] = []
-        groupedSubstitutes[rule.source_item_code].push(rule)
-      })
-
-      Object.values(groupedSubstitutes).forEach(list => list.sort((a, b) => a.priority - b.priority))
-
-      const allInventoryCodes = Array.from(new Set([
-        ...materialCodes,
-        ...(((substituteData as SubstituteRuleRow[] | null) || []).map(row => row.substitute_item_code).filter(Boolean)),
-      ]))
-
-      let nextInventoryMap: Record<string, number> = {}
-      if (allInventoryCodes.length > 0) {
-        const { data: inventoryData, error: inventoryError } = await supabase
-          .from('material_inventory_list')
-          .select('item_code, book_count')
-          .in('item_code', allInventoryCodes)
-
-        if (inventoryError) throw inventoryError
-
-        nextInventoryMap = ((inventoryData as Array<{ item_code: string; book_count: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
-          acc[item.item_code] = Number(item.book_count) || 0
-          return acc
-        }, {})
-      }
-
-      setBomRows(rows)
-      setSubstituteMap(groupedSubstitutes)
-      setInventoryMap(nextInventoryMap)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '讀取 BOM / 庫存資料失敗'
-      setBomError(message)
-    } finally {
-      setBomLoading(false)
-    }
-  }, [sourceRows])
-
-  useEffect(() => {
-    void loadBomContext()
-  }, [loadBomContext])
-
-  const handleInventorySynced = useCallback(async () => {
-    await loadBomContext()
-  }, [loadBomContext])
 
   // ---- 解析來源資料 ----
   const handleParse = useCallback(() => {
@@ -1056,212 +893,6 @@ export default function OrderBatchExportPage() {
   const EXPORT_PREVIEW_COLS = EXPORT_COLUMNS.filter(col =>
     MAPPED_KEYS.has(col.key) || exportPreviewRows.some(r => r[col.key]?.trim())
   )
-  const materialPrepRows = useMemo<MaterialPrepRow[]>(() => {
-    if (sourceRows.length === 0) return []
-
-    return sourceRows.flatMap((sourceRow, index): MaterialPrepRow[] => {
-      const exportRow = exportPreviewRows[index]
-      const matchedBomRows = bomRows.filter(row => row.product_code === sourceRow.item_code)
-      if (matchedBomRows.length === 0) {
-        const rowKey = `${exportRow?.mo_number || '-'}::${sourceRow.order_number}::${sourceRow.item_code}::NO_BOM`
-        return [{
-          row_key: rowKey,
-          mo_number: exportRow?.mo_number || '-',
-          source_order: sourceRow.order_number,
-          product_code: sourceRow.item_code,
-          source_material_code: '-',
-          source_material_name: '查無 BOM',
-          required_qty: 0,
-          unit: '-',
-          stock_qty: 0,
-          substitute_options: [],
-          selected_material_code: '',
-          selected_material_name: '',
-          selected_material_stock_qty: 0,
-          status: '無BOM',
-          note: '此生產貨號尚未在系統 BOM 表建立對應',
-        }]
-      }
-
-      return matchedBomRows.map((bom): MaterialPrepRow => {
-        const rowKey = `${exportRow?.mo_number || '-'}::${sourceRow.order_number}::${sourceRow.item_code}::${bom.material_code}`
-        const sourceQty = Number(sourceRow.quantity) || 0
-        const bomBaseQty = Number(bom.quantity) || 0
-        const productionQty = Number(bom.production_quantity) || 0
-        const requiredQty = productionQty > 0 ? (sourceQty * bomBaseQty) / productionQty : sourceQty * bomBaseQty
-        const stockQty = inventoryMap[bom.material_code] ?? 0
-        const substitutes = substituteMap[bom.material_code] || []
-        const substituteOptions = [
-          {
-            code: bom.material_code,
-            name: bom.material_name || '-',
-            stock_qty: stockQty,
-            label: `${bom.material_code}｜原料｜庫存 ${formatQty(stockQty)}`,
-          },
-          ...substitutes.map(rule => {
-            const substituteBomRow = bomRows.find(item => item.material_code === rule.substitute_item_code)
-            const substituteName = substituteBomRow?.material_name || rule.substitute_item_code
-            const substituteStockQty = inventoryMap[rule.substitute_item_code] ?? 0
-            return {
-              code: rule.substitute_item_code,
-              name: substituteName,
-              stock_qty: substituteStockQty,
-              label: `${rule.substitute_item_code}｜替代料 P${rule.priority}｜庫存 ${formatQty(substituteStockQty)}`,
-            }
-          }),
-        ]
-        const matchedSubstitute = substitutes.find(rule => (inventoryMap[rule.substitute_item_code] ?? 0) >= requiredQty)
-        const defaultSelectedCode = stockQty >= requiredQty ? bom.material_code : (matchedSubstitute?.substitute_item_code || bom.material_code)
-        const selectedCode = materialOverrides[rowKey] || defaultSelectedCode
-        const selectedOption = substituteOptions.find(option => option.code === selectedCode) || substituteOptions[0]
-        const selectedStockQty = selectedOption?.stock_qty ?? 0
-        const selectedName = selectedOption?.name ?? '-'
-
-        if (selectedCode === bom.material_code && stockQty >= requiredQty) {
-          return {
-            row_key: rowKey,
-            mo_number: exportRow?.mo_number || '-',
-            source_order: sourceRow.order_number,
-            product_code: sourceRow.item_code,
-            source_material_code: bom.material_code,
-            source_material_name: bom.material_name || '-',
-            required_qty: requiredQty,
-            unit: bom.unit || '-',
-            stock_qty: stockQty,
-            substitute_options: substituteOptions,
-            selected_material_code: selectedCode,
-            selected_material_name: selectedName,
-            selected_material_stock_qty: selectedStockQty,
-            status: '可直接備料',
-            note: '庫存足夠，可直接匯入生產批備料',
-          }
-        }
-
-        if (selectedCode !== bom.material_code && selectedStockQty >= requiredQty) {
-          return {
-            row_key: rowKey,
-            mo_number: exportRow?.mo_number || '-',
-            source_order: sourceRow.order_number,
-            product_code: sourceRow.item_code,
-            source_material_code: bom.material_code,
-            source_material_name: bom.material_name || '-',
-            required_qty: requiredQty,
-            unit: bom.unit || '-',
-            stock_qty: stockQty,
-            substitute_options: substituteOptions,
-            selected_material_code: selectedCode,
-            selected_material_name: selectedName,
-            selected_material_stock_qty: selectedStockQty,
-            status: '建議替代',
-            note: `原料庫存不足，改用 ${selectedCode} 可支應需求量`,
-          }
-        }
-
-        return {
-          row_key: rowKey,
-          mo_number: exportRow?.mo_number || '-',
-          source_order: sourceRow.order_number,
-          product_code: sourceRow.item_code,
-          source_material_code: bom.material_code,
-          source_material_name: bom.material_name || '-',
-          required_qty: requiredQty,
-          unit: bom.unit || '-',
-          stock_qty: stockQty,
-          substitute_options: substituteOptions,
-          selected_material_code: selectedCode,
-          selected_material_name: selectedName,
-          selected_material_stock_qty: selectedStockQty,
-          status: '缺料',
-          note: selectedCode === bom.material_code
-            ? '原料與替代料庫存都不足，匯入批備料前需先補料或調整 BOM'
-            : `已改選 ${selectedCode}，但庫存仍不足`,
-        }
-      })
-    })
-  }, [bomRows, exportPreviewRows, inventoryMap, materialOverrides, sourceRows, substituteMap])
-
-  const materialPrepSummary = useMemo(() => {
-    return materialPrepRows.reduce<Record<MaterialPrepRow['status'], number>>((acc, row) => {
-      acc[row.status] = (acc[row.status] ?? 0) + 1
-      return acc
-    }, {
-      可直接備料: 0,
-      建議替代: 0,
-      缺料: 0,
-      無BOM: 0,
-    })
-  }, [materialPrepRows])
-
-  const materialPrepImportRows = useMemo(() => {
-    return materialPrepRows
-      .filter(row => row.status !== '無BOM')
-      .filter(row => row.selected_material_code && row.selected_material_stock_qty >= row.required_qty)
-      .map(row => ({
-        mo_number: row.mo_number,
-        product_code: row.product_code,
-        source_order: row.source_order,
-        material_code: row.selected_material_code,
-        required_qty: formatQty(row.required_qty),
-        unit: row.unit,
-        note: row.source_material_code === row.selected_material_code
-          ? '依原 BOM 備料'
-          : `替代料：${row.source_material_code} -> ${row.selected_material_code}`,
-      }))
-  }, [materialPrepRows])
-
-  const handleSelectMaterialOverride = useCallback((rowKey: string, materialCode: string) => {
-    setMaterialOverrides(prev => ({
-      ...prev,
-      [rowKey]: materialCode,
-    }))
-  }, [])
-
-  const handleImportMaterialPrep = useCallback(async () => {
-    if (!materialPrepInterfaceId.trim()) {
-      setMaterialPrepMessage('❌ 請先輸入批備料匯入的 ARGO 介面編號')
-      return
-    }
-
-    if (materialPrepImportRows.length === 0) {
-      setMaterialPrepMessage('❌ 目前沒有可匯入的批備料資料，請先處理缺料或 BOM 問題')
-      return
-    }
-
-    setMaterialPrepImporting(true)
-    setMaterialPrepMessage('')
-
-    try {
-      const response = await fetch('/api/argoerp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'import',
-          interfaceId: materialPrepInterfaceId.trim(),
-          data: materialPrepImportRows,
-        }),
-      })
-
-      const result = await response.json()
-      const errorMessage =
-        result?.error ||
-        result?.message ||
-        result?.apiResult?.ERROR ||
-        result?.apiResult?.error ||
-        result?.rawText
-      const isSuccess = response.ok && result?.success === true
-
-      if (!isSuccess) {
-        throw new Error(errorMessage || '生產批備料匯入失敗')
-      }
-
-      setMaterialPrepMessage(`✅ 已送出 ${materialPrepImportRows.length} 筆生產批備料資料到 ARGO`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '生產批備料匯入失敗'
-      setMaterialPrepMessage(`❌ ${message}`)
-    } finally {
-      setMaterialPrepImporting(false)
-    }
-  }, [materialPrepImportRows, materialPrepInterfaceId])
 
   return (
     <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
@@ -1342,15 +973,9 @@ export default function OrderBatchExportPage() {
               <span className="text-cyan-300 font-semibold">{sourceRows.length} 筆</span>
             </div>
             <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-              <span className="text-slate-400">BOM 比對</span>
-              <span className="text-cyan-300 font-semibold">{bomLoading ? '讀取中' : `${materialPrepRows.length} 筆`}</span>
+              <span className="text-slate-400">批備料作業</span>
+              <span className="text-emerald-300 font-medium text-xs">請前往「生產批備料」頁面處理</span>
             </div>
-          </div>
-          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-            <div className="rounded-lg bg-emerald-950/30 border border-emerald-800/30 px-3 py-2 text-emerald-300">可直接備料 {materialPrepSummary['可直接備料']}</div>
-            <div className="rounded-lg bg-amber-950/30 border border-amber-800/30 px-3 py-2 text-amber-300">建議替代 {materialPrepSummary['建議替代']}</div>
-            <div className="rounded-lg bg-red-950/30 border border-red-800/30 px-3 py-2 text-red-300">缺料 {materialPrepSummary['缺料']}</div>
-            <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2 text-slate-300">無 BOM {materialPrepSummary['無BOM']}</div>
           </div>
         </div>
 
@@ -1646,138 +1271,6 @@ export default function OrderBatchExportPage() {
           </div>
         )}
 
-        {sourceRows.length > 0 && (
-          <div className="mt-6 bg-slate-900/60 border border-slate-800 rounded-lg overflow-hidden">
-            <div className="px-4 py-4 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-white">BOM / 替代料 / 生產批備料檢查</h3>
-                <p className="text-sm text-slate-400 mt-1">依製令單號對應系統 BOM，並比對現有庫存與替代料規則，先把第 5、6 步需要確認的內容整理成清單。</p>
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs">
-                <span className="px-2.5 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/40 text-emerald-300">可直接備料 {materialPrepSummary['可直接備料']}</span>
-                <span className="px-2.5 py-1 rounded-full bg-amber-950/40 border border-amber-800/40 text-amber-300">建議替代 {materialPrepSummary['建議替代']}</span>
-                <span className="px-2.5 py-1 rounded-full bg-red-950/40 border border-red-800/40 text-red-300">缺料 {materialPrepSummary['缺料']}</span>
-                <span className="px-2.5 py-1 rounded-full bg-slate-950 border border-slate-700 text-slate-300">無 BOM {materialPrepSummary['無BOM']}</span>
-              </div>
-            </div>
-            <div className="px-4 py-4 border-b border-slate-800 bg-slate-950/40">
-              <InventorySyncPanel
-                title="同步 ARGO 庫存後再跑備料判斷"
-                description="同步後會立即重抓 material_inventory_list，讓這一頁的 BOM / 替代料 / 批備料判斷使用最新庫存。"
-                className="mb-4"
-                onSynced={handleInventorySynced}
-              />
-              <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-3 items-end">
-                <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-3">
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">批備料介面編號</label>
-                    <input
-                      value={materialPrepInterfaceId}
-                      onChange={e => setMaterialPrepInterfaceId(e.target.value)}
-                      placeholder="例如 IFAF0XX"
-                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">批備料匯入說明</label>
-                    <div className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-400 leading-relaxed min-h-[42px] flex items-center">
-                      目前 repo 內沒有既有的批備料 interface 定義，所以這裡改成可直接輸入 ARGO 介面編號。頁面會用已選料號與需求量組成 payload 後送出。
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300">
-                    可匯入 {materialPrepImportRows.length} 筆
-                  </span>
-                  <button
-                    onClick={() => void handleImportMaterialPrep()}
-                    disabled={materialPrepImporting}
-                    className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium transition-colors text-sm"
-                  >
-                    {materialPrepImporting ? '批備料匯入中...' : '匯入 ARGO 生產批備料'}
-                  </button>
-                </div>
-              </div>
-              {materialPrepMessage && (
-                <p className={`mt-3 text-sm ${materialPrepMessage.startsWith('❌') ? 'text-red-300' : 'text-emerald-300'}`}>
-                  {materialPrepMessage}
-                </p>
-              )}
-            </div>
-            {bomLoading ? (
-              <div className="px-4 py-10 text-center text-slate-400 text-sm">BOM / 替代料 / 庫存資料讀取中...</div>
-            ) : bomError ? (
-              <div className="px-4 py-10 text-center text-red-300 text-sm">{bomError}</div>
-            ) : materialPrepRows.length === 0 ? (
-              <div className="px-4 py-10 text-center text-slate-500 text-sm">尚無可檢查的批備料資料</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-800/80 border-b border-slate-700">
-                      <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">製令單號</th>
-                      <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">來源單號</th>
-                      <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">生產貨號</th>
-                      <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">原料料號</th>
-                      <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">原料名稱</th>
-                      <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">需求量</th>
-                      <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">現有庫存</th>
-                      <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">使用料號</th>
-                      <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">選用庫存</th>
-                      <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">狀態</th>
-                      <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">說明</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {materialPrepRows.map((row, index) => (
-                      <tr key={`${row.row_key}-${index}`} className={`border-b border-slate-800/50 ${index % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-900/20'} hover:bg-slate-800/40`}>
-                        <td className="px-3 py-2 text-cyan-300 font-mono text-xs whitespace-nowrap">{row.mo_number}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.source_order}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.product_code}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.source_material_code}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs max-w-[220px] truncate" title={row.source_material_name}>{row.source_material_name}</td>
-                        <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">{formatQty(row.required_qty)} {row.unit}</td>
-                        <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">{formatQty(row.stock_qty)}</td>
-                        <td className="px-3 py-2 text-xs min-w-[240px]">
-                          {row.status === '無BOM' ? (
-                            <span className="text-slate-500">—</span>
-                          ) : (
-                            <select
-                              value={row.selected_material_code}
-                              onChange={e => handleSelectMaterialOverride(row.row_key, e.target.value)}
-                              className="w-full px-2.5 py-1.5 rounded-md bg-slate-950 border border-slate-700 text-slate-200 text-xs focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
-                            >
-                              {row.substitute_options.map(option => (
-                                <option key={option.code} value={option.code}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">
-                          {row.selected_material_code ? formatQty(row.selected_material_stock_qty) : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-xs whitespace-nowrap">
-                          <span className={`px-2 py-0.5 rounded-full ${
-                            row.status === '可直接備料' ? 'bg-emerald-950/50 text-emerald-300 border border-emerald-800/40' :
-                            row.status === '建議替代' ? 'bg-amber-950/50 text-amber-300 border border-amber-800/40' :
-                            row.status === '缺料' ? 'bg-red-950/50 text-red-300 border border-red-800/40' :
-                            'bg-slate-950 text-slate-300 border border-slate-700'
-                          }`}>
-                            {row.status}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-slate-400 text-xs max-w-[320px]" title={row.note}>{row.note}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* 欄位對應說明 */}
         {sourceRows.length > 0 && (
           <div className="mt-6 bg-slate-900/50 border border-slate-800/50 rounded-lg p-4">
@@ -1793,7 +1286,7 @@ export default function OrderBatchExportPage() {
                 ['預設 1', '編號', ''],
                 ['品項編碼', '生產貨號', ''],
                 ['預設 1', '版本', ''],
-                ['客戶名稱', '批號', '最多30 bytes'],
+                ['客戶名稱', '自定義欄位1', 'PDL01C 文字(200)，無字元限制'],
                 ['數量', '預訂產出量', ''],
                 ['預設 99', 'BOM製造批料階數', ''],
                 ['預設 1', '成品工費分攤約當比例', ''],

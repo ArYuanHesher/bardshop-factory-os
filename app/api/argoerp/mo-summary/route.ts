@@ -18,6 +18,7 @@ interface MoRecord {
   mo_note?: string
   create_date?: string
   saved_at?: string
+  prep_status?: '未備料' | '已備料' | '無需備料'
 }
 
 const TABLE = 'argoerp_mo_summary'
@@ -28,6 +29,7 @@ const ALLOWED_FIELDS = [
   'planned_start_date', 'planned_end_date', 'mo_status',
   'department', 'product_code', 'lot_number', 'planned_qty',
   'source_order', 'mo_note', 'create_date', 'saved_at',
+  'prep_status',
 ] as const
 
 function pickAllowed(rec: Record<string, unknown>): Record<string, unknown> {
@@ -46,12 +48,14 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url)
     const date = url.searchParams.get('date')        // 例: 20260422
     const factory = url.searchParams.get('factory')  // 例: T / C / O
+    const prepStatus = url.searchParams.get('prep_status')  // 未備料 / 已備料 / 無需備料
 
     const supabase = getSupabaseAdminClient()
     let query = supabase.from(TABLE).select('*').order('created_at', { ascending: false })
 
     if (factory) query = query.eq('factory', factory)
     if (date) query = query.eq('create_date', date)
+    if (prepStatus) query = query.eq('prep_status', prepStatus)
 
     const { data, error } = await query
 
@@ -150,6 +154,48 @@ export async function DELETE(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, deleted: count ?? 0 })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ success: false, error: formatSupabaseAdminError(msg) }, { status: 500 })
+  }
+}
+
+// ============================================================
+// PATCH：批次更新製令的 prep_status
+// body: { mo_numbers: string[], prep_status: '未備料' | '已備料' | '無需備料' }
+// ============================================================
+const VALID_PREP_STATUS = new Set(['未備料', '已備料', '無需備料'])
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const moNumbers: string[] = Array.isArray(body?.mo_numbers) ? body.mo_numbers : []
+    const prepStatus: string = body?.prep_status
+
+    if (moNumbers.length === 0) {
+      return NextResponse.json({ success: false, error: 'mo_numbers 不可為空' }, { status: 400 })
+    }
+    if (!VALID_PREP_STATUS.has(prepStatus)) {
+      return NextResponse.json(
+        { success: false, error: `prep_status 必須是 未備料 / 已備料 / 無需備料 之一，實際收到：${prepStatus}` },
+        { status: 400 }
+      )
+    }
+
+    const supabase = getSupabaseAdminClient()
+    const { error, count } = await supabase
+      .from(TABLE)
+      .update({ prep_status: prepStatus }, { count: 'exact' })
+      .in('mo_number', moNumbers)
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: formatSupabaseAdminError(error.message) },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ success: true, updated: count ?? 0 })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ success: false, error: formatSupabaseAdminError(msg) }, { status: 500 })
