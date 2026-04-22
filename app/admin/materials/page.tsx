@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as XLSX from 'xlsx'
 import Link from 'next/link'
 import { supabase } from '../../../lib/supabaseClient'
+import InventorySyncPanel, { type InventorySyncResult } from '../../../components/InventorySyncPanel'
 
 interface MaterialItem {
   id: number
@@ -97,6 +98,12 @@ export default function MaterialsPage() {
     setLoading(false)
   }, [PAGE_SIZE, currentPage, keyword])
 
+  const handleInventorySynced = useCallback(async (result: InventorySyncResult) => {
+    addLog(`🔄 已從 ARGO 同步 ${result.syncedCount} 筆庫存資料（來源：${result.table}）`)
+    setCurrentPage(1)
+    await fetchList(1, keyword)
+  }, [fetchList, keyword])
+
   useEffect(() => {
     void fetchList(currentPage, keyword)
   }, [currentPage, keyword, fetchList])
@@ -126,45 +133,101 @@ export default function MaterialsPage() {
         throw new Error('Excel 列數不足，至少需包含前兩列與資料列')
       }
 
-      addLog('✅ 已套用規則：跳過第 1 列，第 2 列為標題，從第 3 列開始匯入')
+      // 自動偵測格式：ERP 格式（含 MBP_PART）或自訂格式
+      const row0Headers = (allRows[0] || []).map((v) => String(v || '').trim().toUpperCase())
+      const row1Headers = (allRows[1] || []).map((v) => String(v || '').trim().toUpperCase())
+      const isErpFormat = row0Headers.includes('MBP_PART') || row1Headers.includes('MBP_PART')
 
-      const headerRow = (allRows[1] || []).map((value) => normalizeHeader(String(value || '')))
-      const headerIndex = {
-        sequence_no: headerRow.findIndex((value) => value === '序號'),
-        item_code: headerRow.findIndex((value) => value === '品項編碼'),
-        item_name: headerRow.findIndex((value) => value === '品項名稱'),
-        spec: headerRow.findIndex((value) => value === '規格'),
-        physical_count: headerRow.findIndex((value) => value === '盤點數量'),
-        book_count: headerRow.findIndex((value) => value === '帳上數量'),
-        qisheng_sichuan_total: headerRow.findIndex((value) => value === '啟盛【四川總倉】'),
+      let payload: Array<{
+        sequence_no: number
+        item_code: string
+        item_name: string
+        spec: string
+        physical_count: number
+        book_count: number
+        qisheng_sichuan_total: number
+        updated_at: string
+      }>
+
+      if (isErpFormat) {
+        // ---- ERP 庫存余額匯出格式（IVCF001 Excel Dump）----
+        // Header 在第 1 列（index 0），資料從第 2 列開始
+        const headerRow = row0Headers
+        const idx = {
+          mbp_part: headerRow.indexOf('MBP_PART'),
+          qty: headerRow.indexOf('QTY'),
+          unit: headerRow.indexOf('UNIT_OF_MEAS'),
+          lot_no: headerRow.indexOf('LOT_NO'),
+          mbp_ver: headerRow.indexOf('MBP_VER'),
+        }
+
+        if (idx.mbp_part < 0) throw new Error('ERP 格式缺少 MBP_PART 欄位')
+        if (idx.qty < 0) throw new Error('ERP 格式缺少 QTY 欄位')
+
+        addLog('✅ 偵測到 ArgoERP IVCF001 格式，從第 2 列開始匯入')
+
+        // 同一料號可能有多倉多批，加總 QTY
+        const aggregated = new Map<string, number>()
+        for (const row of allRows.slice(1)) {
+          const partRaw = String(row[idx.mbp_part] || '').trim()
+          if (!partRaw) continue
+          const qty = parseNumeric(row[idx.qty])
+          aggregated.set(partRaw, (aggregated.get(partRaw) ?? 0) + qty)
+        }
+
+        addLog(`📦 料號去重後共 ${aggregated.size} 筆（多倉/批次已加總）`)
+
+        let seq = 1
+        payload = Array.from(aggregated.entries()).map(([itemCode, totalQty]) => ({
+          sequence_no: seq++,
+          item_code: itemCode,
+          item_name: '',
+          spec: '',
+          physical_count: 0,
+          book_count: totalQty,
+          qisheng_sichuan_total: 0,
+          updated_at: new Date().toISOString(),
+        }))
+      } else {
+        // ---- 原有自訂格式（序號 / 品項編碼 / 帳上數量 …）----
+        addLog('✅ 已套用規則：跳過第 1 列，第 2 列為標題，從第 3 列開始匯入')
+
+        const headerRow = (allRows[1] || []).map((value) => normalizeHeader(String(value || '')))
+        const headerIndex = {
+          sequence_no: headerRow.findIndex((value) => value === '序號'),
+          item_code: headerRow.findIndex((value) => value === '品項編碼'),
+          item_name: headerRow.findIndex((value) => value === '品項名稱'),
+          spec: headerRow.findIndex((value) => value === '規格'),
+          physical_count: headerRow.findIndex((value) => value === '盤點數量'),
+          book_count: headerRow.findIndex((value) => value === '帳上數量'),
+          qisheng_sichuan_total: headerRow.findIndex((value) => value === '啟盛【四川總倉】'),
+        }
+
+        const missingHeaders = Object.entries(headerIndex)
+          .filter(([, index]) => index < 0)
+          .map(([key]) => key)
+
+        if (missingHeaders.length > 0) {
+          throw new Error(`缺少必要欄位：${missingHeaders.join(', ')}。若要上傳 ERP 匯出請確認含有 MBP_PART 欄位。`)
+        }
+
+        payload = allRows.slice(2)
+          .map((row) => {
+            const itemCode = String(row[headerIndex.item_code] || '').trim()
+            if (!itemCode) return null
+            return {
+              sequence_no: parseNumeric(row[headerIndex.sequence_no]),
+              item_code: itemCode,
+              item_name: String(row[headerIndex.item_name] || '').trim(),
+              spec: String(row[headerIndex.spec] || '').trim(),
+              physical_count: parseNumeric(row[headerIndex.physical_count]),
+              book_count: parseNumeric(row[headerIndex.book_count]),
+              qisheng_sichuan_total: parseNumeric(row[headerIndex.qisheng_sichuan_total]),
+              updated_at: new Date().toISOString(),
+            }
+          })
+          .filter((row): row is NonNullable<typeof row> => Boolean(row))
       }
-
-      const missingHeaders = Object.entries(headerIndex)
-        .filter(([, index]) => index < 0)
-        .map(([key]) => key)
-
-      if (missingHeaders.length > 0) {
-        throw new Error(`缺少必要欄位：${missingHeaders.join(', ')}`)
-      }
-
-      const dataRows = allRows.slice(2)
-      const payload = dataRows
-        .map((row) => {
-          const itemCode = String(row[headerIndex.item_code] || '').trim()
-          if (!itemCode) return null
-
-          return {
-            sequence_no: parseNumeric(row[headerIndex.sequence_no]),
-            item_code: itemCode,
-            item_name: String(row[headerIndex.item_name] || '').trim(),
-            spec: String(row[headerIndex.spec] || '').trim(),
-            physical_count: parseNumeric(row[headerIndex.physical_count]),
-            book_count: parseNumeric(row[headerIndex.book_count]),
-            qisheng_sichuan_total: parseNumeric(row[headerIndex.qisheng_sichuan_total]),
-            updated_at: new Date().toISOString(),
-          }
-        })
-        .filter((row): row is NonNullable<typeof row> => Boolean(row))
 
       if (payload.length === 0) {
         throw new Error('沒有可匯入資料（品項編碼不可為空）')
@@ -222,6 +285,12 @@ export default function MaterialsPage() {
       </div>
 
       <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 space-y-4">
+        <InventorySyncPanel
+          title="同步 ARGO 庫存到物料清單"
+          description="同步成功後會直接更新 material_inventory_list。Excel 匯入仍可保留做手動覆寫或備援。"
+          onSynced={handleInventorySynced}
+        />
+
         <div className="flex flex-col md:flex-row md:items-center gap-3">
           <input
             type="file"

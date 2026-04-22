@@ -1,0 +1,157 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getSupabaseAdminClient, formatSupabaseAdminError } from '@/lib/supabaseAdmin'
+
+export const dynamic = 'force-dynamic'
+
+// 與前端 MoRecord 介面對齊
+interface MoRecord {
+  mo_number: string
+  factory: string
+  planned_start_date?: string
+  planned_end_date?: string
+  mo_status?: string
+  department?: string
+  product_code?: string
+  lot_number?: string
+  planned_qty?: string
+  source_order?: string
+  mo_note?: string
+  create_date?: string
+  saved_at?: string
+}
+
+const TABLE = 'argoerp_mo_summary'
+
+// 允許寫入的欄位白名單（避免前端塞奇怪欄位）
+const ALLOWED_FIELDS = [
+  'mo_number', 'factory',
+  'planned_start_date', 'planned_end_date', 'mo_status',
+  'department', 'product_code', 'lot_number', 'planned_qty',
+  'source_order', 'mo_note', 'create_date', 'saved_at',
+] as const
+
+function pickAllowed(rec: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of ALLOWED_FIELDS) {
+    if (rec[k] !== undefined) out[k] = rec[k]
+  }
+  return out
+}
+
+// ============================================================
+// GET：列出所有製令；可用 ?date=YYYYMMDD&factory=T 篩選
+// ============================================================
+export async function GET(request: NextRequest) {
+  try {
+    const url = new URL(request.url)
+    const date = url.searchParams.get('date')        // 例: 20260422
+    const factory = url.searchParams.get('factory')  // 例: T / C / O
+
+    const supabase = getSupabaseAdminClient()
+    let query = supabase.from(TABLE).select('*').order('created_at', { ascending: false })
+
+    if (factory) query = query.eq('factory', factory)
+    if (date) query = query.eq('create_date', date)
+
+    const { data, error } = await query
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: formatSupabaseAdminError(error.message) },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ success: true, records: data ?? [] })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ success: false, error: formatSupabaseAdminError(msg) }, { status: 500 })
+  }
+}
+
+// ============================================================
+// POST：批次寫入製令
+// body: { records: MoRecord[] }
+// 衝突策略：mo_number 已存在則直接報錯（不覆蓋），由前端決定如何處理
+// ============================================================
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const records: MoRecord[] = Array.isArray(body?.records) ? body.records : []
+
+    if (records.length === 0) {
+      return NextResponse.json({ success: false, error: 'records 不可為空' }, { status: 400 })
+    }
+
+    // 驗證每筆都有必要欄位
+    for (const r of records) {
+      if (!r?.mo_number || !r?.factory) {
+        return NextResponse.json(
+          { success: false, error: `記錄缺少 mo_number 或 factory: ${JSON.stringify(r)}` },
+          { status: 400 }
+        )
+      }
+    }
+
+    const cleaned = records.map(r => pickAllowed(r as unknown as Record<string, unknown>))
+
+    const supabase = getSupabaseAdminClient()
+    const { data, error } = await supabase
+      .from(TABLE)
+      .insert(cleaned)
+      .select('mo_number')
+
+    if (error) {
+      // 23505 = unique_violation：表示有重複的 mo_number
+      const isDup = error.code === '23505' || /duplicate key|already exists/i.test(error.message)
+      return NextResponse.json(
+        {
+          success: false,
+          error: isDup
+            ? `製令單號重複，可能有人同時操作或本地流水號未同步：${error.message}`
+            : formatSupabaseAdminError(error.message),
+          duplicate: isDup,
+        },
+        { status: isDup ? 409 : 500 }
+      )
+    }
+
+    return NextResponse.json({ success: true, inserted: data?.length ?? 0 })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ success: false, error: formatSupabaseAdminError(msg) }, { status: 500 })
+  }
+}
+
+// ============================================================
+// DELETE：依 mo_number 列表批次刪除
+// body: { mo_numbers: string[] }
+// ============================================================
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const moNumbers: string[] = Array.isArray(body?.mo_numbers) ? body.mo_numbers : []
+
+    if (moNumbers.length === 0) {
+      return NextResponse.json({ success: false, error: 'mo_numbers 不可為空' }, { status: 400 })
+    }
+
+    const supabase = getSupabaseAdminClient()
+    const { error, count } = await supabase
+      .from(TABLE)
+      .delete({ count: 'exact' })
+      .in('mo_number', moNumbers)
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: formatSupabaseAdminError(error.message) },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ success: true, deleted: count ?? 0 })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ success: false, error: formatSupabaseAdminError(msg) }, { status: 500 })
+  }
+}
