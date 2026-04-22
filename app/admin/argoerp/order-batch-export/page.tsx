@@ -1059,7 +1059,7 @@ export default function OrderBatchExportPage() {
   const materialPrepRows = useMemo<MaterialPrepRow[]>(() => {
     if (sourceRows.length === 0) return []
 
-    return sourceRows.flatMap((sourceRow, index) => {
+    return sourceRows.flatMap((sourceRow, index): MaterialPrepRow[] => {
       const exportRow = exportPreviewRows[index]
       const matchedBomRows = bomRows.filter(row => row.product_code === sourceRow.item_code)
       if (matchedBomRows.length === 0) {
@@ -1083,7 +1083,7 @@ export default function OrderBatchExportPage() {
         }]
       }
 
-      return matchedBomRows.map(bom => {
+      return matchedBomRows.map((bom): MaterialPrepRow => {
         const rowKey = `${exportRow?.mo_number || '-'}::${sourceRow.order_number}::${sourceRow.item_code}::${bom.material_code}`
         const sourceQty = Number(sourceRow.quantity) || 0
         const bomBaseQty = Number(bom.quantity) || 0
