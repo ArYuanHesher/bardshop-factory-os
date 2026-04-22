@@ -175,21 +175,6 @@ interface FailedImportItem {
   attemptedAt: string
 }
 
-interface LookupOrderRow {
-  id: number
-  order_number: string
-  doc_type: string
-  item_code: string
-  item_name: string
-  quantity: number | string
-  plate_count: string | null
-  delivery_date: string | null
-  designer: string | null
-  customer: string | null
-  handler: string | null
-  issuer: string | null
-}
-
 interface BomRow {
   product_code: string
   product_name: string | null
@@ -256,36 +241,6 @@ function truncateByByteLength(str: string, maxBytes: number): string {
     bytes += charBytes
   }
   return str
-}
-
-function normalizeLookupRow(row: LookupOrderRow): SourceRow {
-  const docType = row.doc_type || ''
-  return {
-    order_number: row.order_number || '',
-    doc_type: docType,
-    factory: detectFactory(docType),
-    receiver: '',
-    is_sample: '',
-    has_material: '',
-    designer: row.designer || '',
-    customer: row.customer || '',
-    line_nickname: '',
-    handler: row.handler || '',
-    issuer: row.issuer || '',
-    item_code: row.item_code || '',
-    item_name: row.item_name || '',
-    note: '',
-    quantity: String(row.quantity ?? ''),
-    delivery_date: row.delivery_date || '',
-    plate_count: row.plate_count || '',
-    upload_ro: '',
-    order_status: '',
-    pm_note: '',
-  }
-}
-
-function createLookupRowKey(row: LookupOrderRow): string {
-  return `${row.id}::${row.order_number}::${row.item_code}`
 }
 
 function formatQty(value: number): string {
@@ -648,12 +603,6 @@ export default function OrderBatchExportPage() {
   const [saveMsg, setSaveMsg] = useState('')
   const [importingFactory, setImportingFactory] = useState<'T' | 'C' | 'O' | null>(null)
   const [failedImports, setFailedImports] = useState<FailedImportItem[]>([])
-  const [lookupOrderNumber, setLookupOrderNumber] = useState('')
-  const [lookupItemCode, setLookupItemCode] = useState('')
-  const [lookupResults, setLookupResults] = useState<LookupOrderRow[]>([])
-  const [lookupSelectedKeys, setLookupSelectedKeys] = useState<Set<string>>(new Set())
-  const [lookupLoading, setLookupLoading] = useState(false)
-  const [lookupError, setLookupError] = useState('')
   const [bomRows, setBomRows] = useState<BomRow[]>([])
   const [inventoryMap, setInventoryMap] = useState<Record<string, number>>({})
   const [substituteMap, setSubstituteMap] = useState<Record<string, SubstituteRuleRow[]>>({})
@@ -851,80 +800,6 @@ export default function OrderBatchExportPage() {
     setPasteText('')
     setShowPasteArea(false)
   }, [pasteText])
-
-  const handleLookupSourceOrders = useCallback(async () => {
-    const orderNumber = lookupOrderNumber.trim()
-    const itemCode = lookupItemCode.trim()
-
-    if (!orderNumber && !itemCode) {
-      setLookupError('請至少輸入來源單號或生產貨號其中一個條件')
-      return
-    }
-
-    setLookupLoading(true)
-    setLookupError('')
-
-    try {
-      let query = supabase
-        .from('daily_orders')
-        .select('id, order_number, doc_type, item_code, item_name, quantity, plate_count, delivery_date, designer, customer, handler, issuer')
-        .order('created_at', { ascending: false })
-        .limit(200)
-
-      if (orderNumber) query = query.ilike('order_number', `%${orderNumber}%`)
-      if (itemCode) query = query.ilike('item_code', `%${itemCode}%`)
-
-      const { data, error } = await query
-      if (error) throw error
-
-      const rows = (data as LookupOrderRow[] | null) || []
-      setLookupResults(rows)
-      setLookupSelectedKeys(new Set())
-      if (rows.length === 0) {
-        setLookupError('查無符合條件的來源單資料')
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '來源單查詢失敗'
-      setLookupError(message)
-    } finally {
-      setLookupLoading(false)
-    }
-  }, [lookupOrderNumber, lookupItemCode])
-
-  const toggleLookupSelectAll = useCallback(() => {
-    if (lookupSelectedKeys.size === lookupResults.length) {
-      setLookupSelectedKeys(new Set())
-      return
-    }
-    setLookupSelectedKeys(new Set(lookupResults.map(createLookupRowKey)))
-  }, [lookupResults, lookupSelectedKeys])
-
-  const toggleLookupRow = useCallback((key: string) => {
-    setLookupSelectedKeys(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }, [])
-
-  const handleLoadLookupResults = useCallback(() => {
-    const selectedRows = lookupSelectedKeys.size > 0
-      ? lookupResults.filter(row => lookupSelectedKeys.has(createLookupRowKey(row)))
-      : lookupResults
-
-    if (selectedRows.length === 0) {
-      setLookupError('目前沒有可載入的查詢結果')
-      return
-    }
-
-    const normalizedRows = selectedRows.map(normalizeLookupRow)
-    setSourceRows(prev => mergeSourceRows(prev, normalizedRows))
-    setShowPasteArea(false)
-    setViewMode('source')
-    setSaveMsg(`✅ 已載入 ${normalizedRows.length} 筆來源單資料，可直接轉成 ARGO 格式`)
-    setTimeout(() => setSaveMsg(''), 4000)
-  }, [lookupResults, lookupSelectedKeys])
 
   // ---- 切換選取列的廠別 ----
   const handleToggleFactory = useCallback((target: 'T' | 'C' | 'O') => {
@@ -1181,11 +1056,6 @@ export default function OrderBatchExportPage() {
   const EXPORT_PREVIEW_COLS = EXPORT_COLUMNS.filter(col =>
     MAPPED_KEYS.has(col.key) || exportPreviewRows.some(r => r[col.key]?.trim())
   )
-  const lookupSelectedRows = useMemo(() => {
-    if (lookupSelectedKeys.size === 0) return lookupResults
-    return lookupResults.filter(row => lookupSelectedKeys.has(createLookupRowKey(row)))
-  }, [lookupResults, lookupSelectedKeys])
-
   const materialPrepRows = useMemo<MaterialPrepRow[]>(() => {
     if (sourceRows.length === 0) return []
 
@@ -1464,142 +1334,25 @@ export default function OrderBatchExportPage() {
           </div>
         </div>
 
-        <div className="mb-6 grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 flex items-center justify-center text-sm font-bold">1</div>
-              <div>
-                <h2 className="text-lg font-semibold text-white">來源單查詢入口</h2>
-                <p className="text-xs text-slate-400 mt-0.5">輸入來源單號與生產貨號，先從系統內 daily_orders 抓出符合資料，再帶入後續流程。</p>
-              </div>
+        <div className="mb-6 bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h2 className="text-lg font-semibold text-white mb-3">流程狀態</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
+              <span className="text-slate-400">已帶入流程</span>
+              <span className="text-cyan-300 font-semibold">{sourceRows.length} 筆</span>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <input
-                value={lookupOrderNumber}
-                onChange={e => setLookupOrderNumber(e.target.value)}
-                placeholder="來源單號，例如 RO26041316"
-                className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
-              />
-              <input
-                value={lookupItemCode}
-                onChange={e => setLookupItemCode(e.target.value)}
-                placeholder="生產貨號，例如 A001-XYZ"
-                className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
-              />
-              <button
-                onClick={() => void handleLookupSourceOrders()}
-                disabled={lookupLoading}
-                className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium transition-colors text-sm"
-              >
-                {lookupLoading ? '查詢中...' : '查詢來源單'}
-              </button>
-            </div>
-            {lookupError && <p className="mt-3 text-sm text-amber-300">{lookupError}</p>}
-            <div className="mt-4 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
-              {[
-                ['1', '輸入來源單號 + 生產貨號'],
-                ['2', '帶出所有符合來源資訊'],
-                ['3', '轉成 ARGO 格式'],
-                ['4', 'MOT 匯製令 / MOC、MOO 匯採購'],
-                ['5', '依製令對 BOM 與替代料'],
-                ['6', '產生生產批備料清單'],
-              ].map(([step, text]) => (
-                <div key={step} className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
-                  <div className="text-cyan-400 font-semibold">STEP {step}</div>
-                  <div className="text-slate-400 mt-1 leading-relaxed">{text}</div>
-                </div>
-              ))}
+            <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
+              <span className="text-slate-400">BOM 比對</span>
+              <span className="text-cyan-300 font-semibold">{bomLoading ? '讀取中' : `${materialPrepRows.length} 筆`}</span>
             </div>
           </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-            <h2 className="text-lg font-semibold text-white mb-3">流程狀態</h2>
-            <div className="space-y-3 text-sm">
-              <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-                <span className="text-slate-400">查詢結果</span>
-                <span className="text-cyan-300 font-semibold">{lookupResults.length} 筆</span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-                <span className="text-slate-400">已帶入流程</span>
-                <span className="text-cyan-300 font-semibold">{sourceRows.length} 筆</span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-                <span className="text-slate-400">BOM 比對</span>
-                <span className="text-cyan-300 font-semibold">{bomLoading ? '讀取中' : `${materialPrepRows.length} 筆`}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-lg bg-emerald-950/30 border border-emerald-800/30 px-3 py-2 text-emerald-300">可直接備料 {materialPrepSummary['可直接備料']}</div>
-                <div className="rounded-lg bg-amber-950/30 border border-amber-800/30 px-3 py-2 text-amber-300">建議替代 {materialPrepSummary['建議替代']}</div>
-                <div className="rounded-lg bg-red-950/30 border border-red-800/30 px-3 py-2 text-red-300">缺料 {materialPrepSummary['缺料']}</div>
-                <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2 text-slate-300">無 BOM {materialPrepSummary['無BOM']}</div>
-              </div>
-            </div>
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div className="rounded-lg bg-emerald-950/30 border border-emerald-800/30 px-3 py-2 text-emerald-300">可直接備料 {materialPrepSummary['可直接備料']}</div>
+            <div className="rounded-lg bg-amber-950/30 border border-amber-800/30 px-3 py-2 text-amber-300">建議替代 {materialPrepSummary['建議替代']}</div>
+            <div className="rounded-lg bg-red-950/30 border border-red-800/30 px-3 py-2 text-red-300">缺料 {materialPrepSummary['缺料']}</div>
+            <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2 text-slate-300">無 BOM {materialPrepSummary['無BOM']}</div>
           </div>
         </div>
-
-        {lookupResults.length > 0 && (
-          <div className="mb-6 bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-white">來源單查詢結果</h3>
-                <p className="text-xs text-slate-400 mt-1">如果有多筆符合條件，會全部列出。可勾選部分資料，或直接全部帶入下方轉換流程。</p>
-              </div>
-              <button
-                onClick={handleLoadLookupResults}
-                className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-medium transition-colors text-sm"
-              >
-                帶入流程清單 ({lookupSelectedKeys.size > 0 ? lookupSelectedRows.length : lookupResults.length} 筆)
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-800/80 border-b border-slate-700">
-                    <th className="px-3 py-3 text-center w-10">
-                      <input
-                        type="checkbox"
-                        checked={lookupResults.length > 0 && lookupSelectedKeys.size === lookupResults.length}
-                        onChange={toggleLookupSelectAll}
-                        className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500/30"
-                      />
-                    </th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">工單編號</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">單據種類</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">生產貨號</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">品名/規格</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">數量</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">交期</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">客戶</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lookupResults.map(row => {
-                    const key = createLookupRowKey(row)
-                    return (
-                      <tr key={key} className={`border-b border-slate-800/50 ${lookupSelectedKeys.has(key) ? 'bg-cyan-950/25' : 'bg-slate-900/20'} hover:bg-slate-800/50`}>
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={lookupSelectedKeys.has(key)}
-                            onChange={() => toggleLookupRow(key)}
-                            className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500/30"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-cyan-300 font-mono text-xs whitespace-nowrap">{row.order_number}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.doc_type || '—'}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.item_code || '—'}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs max-w-[260px] truncate" title={row.item_name || ''}>{row.item_name || '—'}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.quantity || '—'}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.delivery_date || '—'}</td>
-                        <td className="px-3 py-2 text-slate-400 text-xs max-w-[220px] truncate" title={row.customer || ''}>{row.customer || '—'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
 
         {/* 貼上區域 */}
         {showPasteArea && (
