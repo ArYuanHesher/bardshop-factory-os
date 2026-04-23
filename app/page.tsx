@@ -41,7 +41,7 @@ export default function HomePage() {
   const [showModal, setShowModal] = useState(false);
   const [showQaModal, setShowQaModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
-  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'estimation' | 'qa' | 'admin' | 'settings' | 'notice' | 'finance' | 'product_dev'>('none');
+  const [isHovered, setIsHovered] = useState<'none' | 'production' | 'estimation' | 'qa' | 'admin' | 'settings' | 'notice' | 'finance' | 'product_dev' | 'design'>('none');
   const [showProductDevModal, setShowProductDevModal] = useState(false);
   const [downloadingBom, setDownloadingBom] = useState(false);
   const [downloadingProducts, setDownloadingProducts] = useState(false);
@@ -630,13 +630,43 @@ export default function HomePage() {
             </span>
           </Link>
 
-          {/* 9. 商品開發 (Green) */}
+          {/* 9. 美編天地 (Pink) — CRM × 訂單交叉比對 */}
+          <Link
+            href="/design-studio"
+            onMouseEnter={() => setIsHovered('design')}
+            onMouseLeave={() => setIsHovered('none')}
+            className={`
+              group relative order-9 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
+              hover:border-pink-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(236,72,153,0.15)]
+              ${isHovered !== 'none' && isHovered !== 'design' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}
+            `}
+          >
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-1 bg-pink-500/10 rounded border border-pink-500/20">
+              <span className="text-[10px] text-pink-400 font-bold uppercase tracking-wider">Design</span>
+            </div>
+
+            <div className="mb-3 md:mb-6 p-3 md:p-4 rounded-full bg-slate-800 group-hover:bg-pink-900/50 text-slate-400 group-hover:text-pink-400 transition-colors">
+              <svg className="w-7 h-7 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </div>
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-pink-400 transition-colors">美編天地</h2>
+            <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
+              CRM × 訂單交叉比對，依品項編碼批次整理。<br/>(Design Studio)
+            </p>
+            <span className="hidden md:inline-block px-4 py-2 rounded border border-slate-600 text-slate-300 text-xs font-mono group-hover:bg-pink-600 group-hover:border-pink-600 group-hover:text-white transition-all">
+              OPEN STUDIO &rarr;
+            </span>
+          </Link>
+
+          {/* 10. 商品開發 (Green) */}
           <div
             onClick={() => setShowProductDevModal(true)}
             onMouseEnter={() => setIsHovered('product_dev')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative order-9 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              group relative order-10 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
               flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-green-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(34,197,94,0.15)]
               ${isHovered !== 'none' && isHovered !== 'product_dev' ? 'opacity-50 scale-95 blur-[2px]' : 'opacity-100'}

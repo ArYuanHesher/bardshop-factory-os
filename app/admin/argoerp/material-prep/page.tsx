@@ -92,6 +92,7 @@ export default function MaterialPrepPage() {
   const [selectedMos, setSelectedMos] = useState<Set<string>>(new Set())
   const [actionMessage, setActionMessage] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<MaterialPrepRow['status'] | null>(null)
 
   // ---- 批備料介面 ----
   const [materialPrepInterfaceId, setMaterialPrepInterfaceId] = useState('')
@@ -324,6 +325,12 @@ export default function MaterialPrepPage() {
     }, { 可直接備料: 0, 建議替代: 0, 缺料: 0, 無BOM: 0 })
   }, [materialPrepRows])
 
+  // 篩選後的表格資料
+  const filteredPrepRows = useMemo(() => {
+    if (!statusFilter) return materialPrepRows
+    return materialPrepRows.filter(row => row.status === statusFilter)
+  }, [materialPrepRows, statusFilter])
+
   // 將「選取的製令」轉為可送 ARGO 的批備料行
   const selectedImportRows = useMemo(() => {
     return materialPrepRows
@@ -492,10 +499,25 @@ export default function MaterialPrepPage() {
             </div>
           </div>
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-            <div className="rounded-lg bg-emerald-950/30 border border-emerald-800/30 px-3 py-2 text-emerald-300">可直接備料 {materialPrepSummary['可直接備料']}</div>
-            <div className="rounded-lg bg-amber-950/30 border border-amber-800/30 px-3 py-2 text-amber-300">建議替代 {materialPrepSummary['建議替代']}</div>
-            <div className="rounded-lg bg-red-950/30 border border-red-800/30 px-3 py-2 text-red-300">缺料 {materialPrepSummary['缺料']}</div>
-            <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2 text-slate-300">無 BOM {materialPrepSummary['無BOM']}</div>
+            {([
+              { status: '可直接備料' as const, bg: 'bg-emerald-950/30', border: 'border-emerald-800/30', text: 'text-emerald-300', activeBg: 'bg-emerald-800/60', activeBorder: 'border-emerald-500/60' },
+              { status: '建議替代' as const, bg: 'bg-amber-950/30', border: 'border-amber-800/30', text: 'text-amber-300', activeBg: 'bg-amber-800/60', activeBorder: 'border-amber-500/60' },
+              { status: '缺料' as const, bg: 'bg-red-950/30', border: 'border-red-800/30', text: 'text-red-300', activeBg: 'bg-red-800/60', activeBorder: 'border-red-500/60' },
+              { status: '無BOM' as const, bg: 'bg-slate-950/60', border: 'border-slate-800', text: 'text-slate-300', activeBg: 'bg-slate-700/60', activeBorder: 'border-slate-500/60' },
+            ]).map(({ status, bg, border, text, activeBg, activeBorder }) => {
+              const active = statusFilter === status
+              return (
+                <button
+                  key={status}
+                  onClick={() => setStatusFilter(active ? null : status)}
+                  className={`rounded-lg px-3 py-2 text-left transition-all border ${active ? `${activeBg} ${activeBorder}` : `${bg} ${border}`} ${text} hover:brightness-125`}
+                >
+                  <span className="font-medium">{status === '無BOM' ? '查無 BOM' : status}</span>
+                  <span className="ml-2 font-mono">{materialPrepSummary[status]}</span>
+                  {active && <span className="ml-2 text-[10px] opacity-70">✕ 清除</span>}
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -562,8 +584,14 @@ export default function MaterialPrepPage() {
           ) : bomError ? (
             <div className="px-4 py-10 text-center text-red-300 text-sm">{bomError}</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto">              {statusFilter && (
+                <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-700/50 flex items-center gap-2 text-xs text-slate-400">
+                  <span>篩選中：</span>
+                  <span className="px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">{statusFilter === '無BOM' ? '查無 BOM' : statusFilter}</span>
+                  <span>共 {filteredPrepRows.length} 筆</span>
+                  <button onClick={() => setStatusFilter(null)} className="ml-auto text-slate-500 hover:text-white transition-colors">✕ 取消篩選</button>
+                </div>
+              )}              <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-800/80 border-b border-slate-700">
                     <th className="px-2 py-3 text-center sticky left-0 bg-slate-800/80 z-10 w-10">
@@ -589,7 +617,7 @@ export default function MaterialPrepPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {materialPrepRows.map((row, index) => {
+                  {filteredPrepRows.map((row, index) => {
                     const checked = selectedMos.has(row.mo_number)
                     return (
                       <tr key={`${row.row_key}-${index}`} className={`border-b border-slate-800/50 ${checked ? 'bg-cyan-950/30' : index % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-900/20'} hover:bg-slate-800/40`}>

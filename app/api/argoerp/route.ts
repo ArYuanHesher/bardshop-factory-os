@@ -15,6 +15,20 @@ interface ApiKeyResponse {
   }
 }
 
+interface PjSyncMapping {
+  docNoField: string
+  subNoField?: string
+  itemCodeField?: string
+  descriptionField?: string
+  qtyField?: string
+  unitField?: string
+  statusField?: string
+  startDateField?: string
+  endDateField?: string
+  customerVendorField?: string
+  remarkField?: string
+}
+
 interface InventorySyncMapping {
   sequenceNoField?: string
   itemCodeField: string
@@ -23,6 +37,8 @@ interface InventorySyncMapping {
   physicalCountField?: string
   bookCountField: string
   warehouseTotalField?: string
+  // 啟用時會將相同 itemCode 的 bookCountField 在 server 端累加（用於 iv_inventoryboh 等明細表）
+  groupByItemCode?: boolean
 }
 
 function getRecordValue(record: Record<string, unknown>, fieldName?: string) {
@@ -81,6 +97,47 @@ function findObjectRows(value: unknown, seen = new Set<unknown>()): Record<strin
 
 function normalizeInventoryRows(rows: Record<string, unknown>[], mapping: InventorySyncMapping) {
   const normalizedAt = new Date().toISOString()
+
+  if (mapping.groupByItemCode) {
+    // 明細表模式：將相同 itemCode 的 bookCountField 累加（等效 GROUP BY mbp_part SUM(qty)）
+    const grouped = new Map<string, {
+      item_code: string
+      item_name: string
+      spec: string
+      book_count: number
+      physical_count: number
+      qisheng_sichuan_total: number
+    }>()
+
+    for (const row of rows) {
+      const itemCode = String(getRecordValue(row, mapping.itemCodeField) ?? '').trim()
+      if (!itemCode) continue
+      const existing = grouped.get(itemCode)
+      const bookQty = toNumber(getRecordValue(row, mapping.bookCountField))
+      if (existing) {
+        existing.book_count += bookQty
+        existing.physical_count += toNumber(getRecordValue(row, mapping.physicalCountField))
+        existing.qisheng_sichuan_total += toNumber(getRecordValue(row, mapping.warehouseTotalField))
+      } else {
+        grouped.set(itemCode, {
+          item_code: itemCode,
+          item_name: String(getRecordValue(row, mapping.itemNameField) ?? '').trim(),
+          spec: String(getRecordValue(row, mapping.specField) ?? '').trim(),
+          book_count: bookQty,
+          physical_count: toNumber(getRecordValue(row, mapping.physicalCountField)),
+          qisheng_sichuan_total: toNumber(getRecordValue(row, mapping.warehouseTotalField)),
+        })
+      }
+    }
+
+    return [...grouped.values()].map((entry, index) => ({
+      sequence_no: index + 1,
+      ...entry,
+      updated_at: normalizedAt,
+    }))
+  }
+
+  // 一般模式：一資料一筆
   const normalizedRows = rows
     .map((row, index) => {
       const itemCode = String(getRecordValue(row, mapping.itemCodeField) ?? '').trim()
@@ -113,7 +170,7 @@ function tryParseJson(text: string): unknown {
 function extractApiError(result: unknown): string | null {
   if (!result) return null
   if (typeof result === 'string') {
-    return /(error|exception|invalid|ora-)/i.test(result) ? result : null
+    return /(error|exception|invalid|ora-|未授權|授權失敗|授權錯誤|無權|驗證失敗|webservice未|失敗)/i.test(result) ? result : null
   }
   if (typeof result !== 'object') return null
 
@@ -129,7 +186,7 @@ function extractApiError(result: unknown): string | null {
 function isArgoSuccess(result: unknown): boolean {
   if (!result) return false
   if (typeof result === 'string') {
-    return !/(error|exception|invalid|ora-)/i.test(result)
+    return !/(error|exception|invalid|ora-|未授權|授權失敗|授權錯誤|無權|驗證失敗|webservice未|失敗)/i.test(result)
   }
   if (typeof result !== 'object') return true
 
@@ -357,9 +414,169 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    if (action === 'sync_pj') {
+      const { table, filters, customColumn, docType, mapping } = body as {
+        table: string
+        filters?: Record<string, string>
+        customColumn?: string
+        docType: string
+        mapping: PjSyncMapping
+      }
+
+      if (!table?.trim()) {
+        return NextResponse.json({ status: 'error', error: 'Missing PJ table' }, { status: 400 })
+      }
+      if (!docType?.trim()) {
+        return NextResponse.json({ status: 'error', error: 'Missing docType' }, { status: 400 })
+      }
+      if (!mapping?.docNoField?.trim()) {
+        return NextResponse.json({ status: 'error', error: 'Missing docNoField in mapping' }, { status: 400 })
+      }
+
+      // ARGO S_QUERY 將 filter 組成 WHERE key value（無 = 符號），
+      // 因此 value 必須包含完整算符，例如 "= 'SO'" 或 ">= 100"。
+      // 此處若 value 尚未以算符開頭，自動補上 = 並對字串補引號。
+      const quotedFilters: Record<string, string> = {}
+      for (const [k, v] of Object.entries(filters || {})) {
+        if (v !== undefined && v !== null) {
+          const s = String(v).trim()
+          // 已含算符（=, !=, <, >, LIKE, IN, BETWEEN, IS …）則原樣送出
+          const hasOperator = /^(=|!=|<>|<=|>=|<|>|like|in\s*\(|between|is\s)/i.test(s)
+          if (hasOperator) {
+            quotedFilters[k] = s
+          } else {
+            // 數字直接加 =，字串加 = 並補單引號
+            const isNumeric = /^\d+(\.\d+)?$/.test(s)
+            quotedFilters[k] = isNumeric ? `= ${s}` : `= '${s.replace(/'/g, "''")}'`
+          }
+        }
+      }
+
+      const sparam = JSON.stringify({
+        APIKEY1: keys.APIKEY1,
+        APIKEY2: keys.APIKEY2,
+        APIKEY3: keys.APIKEY3,
+        SEGMENT,
+        TABLE: table,
+        SHOWNULLCOLUMN: 'N',
+        ...(customColumn ? { CUSTOMCOLUMN: customColumn } : {}),
+        ...quotedFilters,
+      })
+
+      const res = await fetch(`${API_BASE}/S_QUERY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sparam }),
+      })
+
+      const { rawText, parsed } = await readApiResponse(res)
+      const error = extractApiError(parsed)
+      const success = res.ok && isArgoSuccess(parsed)
+
+      if (!success) {
+        return NextResponse.json({
+          status: 'error',
+          error: error || 'ARGO PJ query failed',
+          rawText,
+          debugSparam: JSON.parse(sparam) as Record<string, unknown>,
+        }, { status: 502 })
+      }
+
+      const queryRows = findObjectRows(parsed)
+      if (queryRows.length === 0) {
+        return NextResponse.json({
+          status: 'error',
+          error: 'ARGO 查詢成功，但找不到可映射的資料列。請確認 TABLE / CUSTOMCOLUMN 設定。',
+          rawText,
+        }, { status: 422 })
+      }
+
+      const normalizedRows = normalizePjRows(queryRows, docType, mapping)
+
+      // 第一筆 raw 資料回給前端供欄位對照用
+      const rawSample = queryRows[0] ?? null
+
+      if (normalizedRows.length === 0) {
+        return NextResponse.json({
+          status: 'error',
+          error: `找到 ${queryRows.length.toString()} 筆原始資料，但 docNoField="${mapping.docNoField}" 欄位全為空，請調整欄位映射。`,
+          rawSample,
+          rawText,
+        }, { status: 422 })
+      }
+
+      try {
+        const supabaseAdmin = getSupabaseAdminClient()
+        // 刪除同類型舊資料後重寫
+        const { error: clearError } = await supabaseAdmin
+          .from('erp_pj_sync')
+          .delete()
+          .eq('doc_type', docType)
+        if (clearError) throw clearError
+
+        const batchSize = 500
+        for (let index = 0; index < normalizedRows.length; index += batchSize) {
+          const chunk = normalizedRows.slice(index, index + batchSize)
+          const { error: insertError } = await supabaseAdmin.from('erp_pj_sync').insert(chunk)
+          if (insertError) throw insertError
+        }
+      } catch (err) {
+        const message = err instanceof Error ? formatSupabaseAdminError(err.message) : '寫入 erp_pj_sync 失敗'
+        return NextResponse.json({ status: 'error', error: message }, { status: 500 })
+      }
+
+      return NextResponse.json({
+        status: 'ok',
+        syncedCount: normalizedRows.length,
+        skippedCount: Math.max(0, queryRows.length - normalizedRows.length),
+        docType,
+        table,
+        rawSample,
+      })
+    }
+
     return NextResponse.json({ status: 'error', error: `Unknown action: ${action}` }, { status: 400 })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ status: 'error', error: message }, { status: 500 })
   }
+}
+
+function normalizePjRows(
+  rows: Record<string, unknown>[],
+  docType: string,
+  mapping: PjSyncMapping,
+) {
+  const syncedAt = new Date().toISOString()
+  const knownFields = new Set(Object.values(mapping).filter(Boolean))
+
+  return rows
+    .map((row) => {
+      const docNo = String(getRecordValue(row, mapping.docNoField) ?? '').trim()
+      if (!docNo) return null
+
+      // 非映射欄位全部塞進 extra JSON
+      const extra: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(row)) {
+        if (!knownFields.has(k)) extra[k] = v
+      }
+
+      return {
+        doc_type: docType,
+        doc_no: docNo,
+        sub_no: String(getRecordValue(row, mapping.subNoField) ?? '').trim(),
+        item_code: String(getRecordValue(row, mapping.itemCodeField) ?? '').trim() || null,
+        description: String(getRecordValue(row, mapping.descriptionField) ?? '').trim() || null,
+        qty: toNumber(getRecordValue(row, mapping.qtyField)),
+        unit: String(getRecordValue(row, mapping.unitField) ?? '').trim() || null,
+        status: String(getRecordValue(row, mapping.statusField) ?? '').trim() || null,
+        start_date: String(getRecordValue(row, mapping.startDateField) ?? '').trim() || null,
+        end_date: String(getRecordValue(row, mapping.endDateField) ?? '').trim() || null,
+        customer_vendor: String(getRecordValue(row, mapping.customerVendorField) ?? '').trim() || null,
+        remark: String(getRecordValue(row, mapping.remarkField) ?? '').trim() || null,
+        extra: Object.keys(extra).length > 0 ? extra : null,
+        synced_at: syncedAt,
+      }
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
 }

@@ -18,12 +18,14 @@ interface InventorySyncConfig {
   physicalCountField: string
   bookCountField: string
   warehouseTotalField: string
+  groupByItemCode: boolean
 }
 
 interface InventorySyncPanelProps {
   title?: string
   description?: string
   className?: string
+  initialConfig?: Partial<InventorySyncConfig>
   onSynced?: (result: InventorySyncResult) => Promise<void> | void
 }
 
@@ -39,12 +41,14 @@ const DEFAULT_CONFIG: InventorySyncConfig = {
   physicalCountField: 'PHYSICAL_COUNT',
   bookCountField: 'BOOK_COUNT',
   warehouseTotalField: 'QISHENG_SICHUAN_TOTAL',
+  groupByItemCode: false,
 }
 
 export default function InventorySyncPanel({
   title = 'ARGO 庫存同步',
   description = '會把 ARGO 查詢結果覆寫到本地 material_inventory_list，供 BOM / 替代料與物料頁面共用。',
   className = '',
+  initialConfig,
   onSynced,
 }: InventorySyncPanelProps) {
   const [config, setConfig] = useState<InventorySyncConfig>(DEFAULT_CONFIG)
@@ -58,20 +62,27 @@ export default function InventorySyncPanel({
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (!raw) {
-        setShowSettings(true)
+        // 無本地設定時，以 initialConfig 預填
+        const seed: InventorySyncConfig = { ...DEFAULT_CONFIG, ...(initialConfig ?? {}) }
+        setConfig(seed)
+        setShowSettings(!seed.table.trim())
         return
       }
 
       const parsed = JSON.parse(raw) as Partial<InventorySyncConfig>
       const nextConfig = {
         ...DEFAULT_CONFIG,
+        ...(initialConfig ?? {}),
         ...parsed,
       }
       setConfig(nextConfig)
       if (!nextConfig.table.trim()) setShowSettings(true)
     } catch {
+      const seed: InventorySyncConfig = { ...DEFAULT_CONFIG, ...(initialConfig ?? {}) }
+      setConfig(seed)
       setShowSettings(true)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -120,6 +131,7 @@ export default function InventorySyncPanel({
             physicalCountField: config.physicalCountField.trim() || undefined,
             bookCountField: config.bookCountField.trim(),
             warehouseTotalField: config.warehouseTotalField.trim() || undefined,
+            groupByItemCode: config.groupByItemCode,
           },
         }),
       })
@@ -260,6 +272,21 @@ export default function InventorySyncPanel({
               placeholder="QISHENG_SICHUAN_TOTAL"
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
             />
+          </div>
+          <div className="md:col-span-2 xl:col-span-3 flex items-start gap-3">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={config.groupByItemCode}
+                onChange={(event) =>
+                  setConfig((prev) => ({ ...prev, groupByItemCode: event.target.checked }))
+                }
+                className="h-4 w-4 rounded border-slate-600 accent-cyan-500"
+              />
+              <span className="text-xs text-slate-300">
+                合併相同料號數量（iv_inventoryboh 明細表用）
+              </span>
+            </label>
           </div>
           <div className="md:col-span-2 xl:col-span-3">
             <p className="text-xs leading-relaxed text-slate-500">

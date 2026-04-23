@@ -179,6 +179,19 @@ function formatDate(d: Date): string {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
 }
 
+// 以 byte 長度截斷字串（UTF-8）——中文一字 3 bytes、英數 1 byte
+function truncateByByteLength(text: string, maxBytes: number): string {
+  if (!text) return ''
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder('utf-8')
+  const bytes = encoder.encode(text)
+  if (bytes.length <= maxBytes) return text
+  // 從 maxBytes 位置往前品找不會切斷多字节字符的位置
+  let cut = maxBytes
+  while (cut > 0 && (bytes[cut] & 0xc0) === 0x80) cut--
+  return decoder.decode(bytes.slice(0, cut))
+}
+
 // 取得下一個工作日（跳過六日）
 function getNextBusinessDay(from: Date): Date {
   const d = new Date(from)
@@ -292,9 +305,10 @@ function mapAllToExport(srcRows: SourceRow[]): ExportRow[] {
     row.seq_number = '1'                               // 編號
     row.product_code = src.item_code                   // 生產貨號：品項編碼
     row.version = '1'                                  // 版本
-    // 批號保留空白；客戶名稱改寫到「自定義欄位1」(PDL01C, 文字200) → 不再受 32 bytes 限制
-    row.lot_number = ''
-    row.custom_1 = src.customer                        // 自定義欄位1：客戶名稱（完整保留，不截字）
+    // 批號(MBP_LOT_NO)：客戶名稱截斷 30 bytes（ERP 欄位限制 32 bytes，留餘裕）
+    // 這是昨日驗證可正常匯入的設計
+    row.lot_number = truncateByByteLength(src.customer, 30)
+    row.custom_1 = ''                                  // 自定義欄位1：暫不送出
     row.planned_qty = src.quantity                     // 預訂產出量：數量
     row.bom_level = '99'                               // BOM製造批料階數
     row.product_cost_ratio = '1'                       // 成品工費分攤約當比例
@@ -404,8 +418,8 @@ function buildSummaryRecords(sourceRows: SourceRow[], savedAt: string) {
     mo_status: row.mo_status,
     department: row.department,
     product_code: row.product_code,
-    // lot_number 欄位保留作為顯示用（存客戶名稱），ERP 端則寫入 custom_1
-    lot_number: row.custom_1 || row.lot_number,
+    // lot_number 顯示客戶名稱（已在 mapAllToExport 截斷 30 bytes）
+    lot_number: row.lot_number,
     planned_qty: row.planned_qty,
     source_order: row.source_order,
     mo_note: row.mo_note,
@@ -543,6 +557,11 @@ export default function OrderBatchExportPage() {
   const [saveMsg, setSaveMsg] = useState('')
   const [importingFactory, setImportingFactory] = useState<'T' | 'C' | 'O' | null>(null)
   const [failedImports, setFailedImports] = useState<FailedImportItem[]>([])
+  const [importPreview, setImportPreview] = useState<{
+    factory: 'T' | 'C' | 'O'
+    dbMax: number
+    rows: Array<{ mo_number: string; product_code: string; source_order: string; planned_qty: string; custom_1: string; planned_end_date: string }>
+  } | null>(null)
 
   // 還原暫存
   useEffect(() => {
@@ -733,8 +752,8 @@ export default function OrderBatchExportPage() {
 
     const { interfaceId, targetLabel } = getImportConfig(factory)
     const exportRows = mapAllToExport(filteredRows)
-    // IFAF028（製令）需轉換為 ERP 欄位代碼；其他介面（如 IFAF044 採購單）暫維持原樣
-    const payload = interfaceId === 'IFAF028' ? toErpPayload(exportRows) : exportRows
+    // 所有介面一律轉換為 ERP 欄位代碼（IFAF028 製令、IFAF044 採購單皆使用相同欄位代碼）
+    const payload = toErpPayload(exportRows)
 
     setImportingFactory(factory)
     setSaveMsg('')
@@ -785,7 +804,13 @@ export default function OrderBatchExportPage() {
 
       const successMsg = `✅ ${factoryLabel(factory)} ${records.length} 筆已匯入 ERP ${targetLabel}並儲存至製令總表`
       setSaveMsg(successMsg)
-      alert(successMsg)
+      // 顯示首筆製令號 + ERP 原始回應，確認資料有進 ERP（DEBUG 用，確認後可移除）
+      const firstMo = records[0]?.mo_number ?? '?'
+      const erpRaw = typeof result?.rawText === 'string'
+        ? result.rawText.slice(0, 400)
+        : JSON.stringify(result?.apiResult ?? '').slice(0, 400)
+      alert(`${successMsg}\n\n首筆製令號：${firstMo}\n\n【ERP 原始回應（前400字）】\n${erpRaw}`)
+
       setTimeout(() => setSaveMsg(''), 6000)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'ArgoERP 匯入失敗'
@@ -799,6 +824,34 @@ export default function OrderBatchExportPage() {
     } finally {
       setImportingFactory(null)
     }
+  }, [sourceRows])
+
+  // ---- 匯入前預覽：先跑 prefetch 取得最新 seq，再呈現將產生的製令單號讓使用者確認 ----
+  const handleShowPreview = useCallback(async (factory: 'T' | 'C' | 'O') => {
+    const filtered = sourceRows.filter(r => r.factory === factory)
+    if (filtered.length === 0) return
+    const today = new Date()
+    const dateDigits = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+    try {
+      await prefetchSeqFromDb(dateDigits)
+    } catch {
+      alert('⚠️ 無法連線 Supabase 查詢已用流水號，將使用本機暫存作為備援。\n如 dev server 剛重啟，請確認 SUPABASE_SERVICE_ROLE 已設定。')
+    }
+    const prefix = factory === 'O' ? 'MOO' : `MO${factory}`
+    const dbMax = (seqCacheFromDb as Map<string, number>).get(`${prefix}${dateDigits}`) ?? 0
+    const exportRows = mapAllToExport(filtered)
+    setImportPreview({
+      factory,
+      dbMax,
+      rows: exportRows.map(r => ({
+        mo_number: r.mo_number,
+        product_code: r.product_code,
+        source_order: r.source_order,
+        planned_qty: r.planned_qty,
+        custom_1: r.custom_1,
+        planned_end_date: r.planned_end_date,
+      })),
+    })
   }, [sourceRows])
 
   const handleRestoreFailedToSource = useCallback((mode: 'append' | 'replace') => {
@@ -1138,7 +1191,7 @@ export default function OrderBatchExportPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleImportToErp(group.type)}
+                              onClick={() => handleShowPreview(group.type)}
                               disabled={importingFactory !== null}
                               className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-400 text-white text-sm font-medium transition-colors flex items-center gap-1.5"
                             >
@@ -1310,6 +1363,70 @@ export default function OrderBatchExportPage() {
           </div>
         )}
       </div>
+
+      {/* ---- 匯入預覽 Modal ---- */}
+      {importPreview && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setImportPreview(null)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-3xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-white">匯入預覽 — {factoryLabel(importPreview.factory)} ({importPreview.rows.length} 筆)</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  以下為將產生的製令單號，請確認無誤後再匯入
+                  <span className={`ml-3 px-2 py-0.5 rounded text-[11px] font-mono ${importPreview.dbMax > 0 ? 'bg-emerald-900/60 text-emerald-300' : 'bg-yellow-900/60 text-yellow-300'}`}>
+                    DB 已用最大號：{importPreview.dbMax > 0 ? String(importPreview.dbMax).padStart(3, '0') : '未抓到（server 可能需重啟）'}
+                  </span>
+                </p>
+              </div>
+              <button onClick={() => setImportPreview(null)} className="text-slate-400 hover:text-white text-lg leading-none">✕</button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-slate-800">
+                  <tr className="text-slate-400 text-xs border-b border-slate-700">
+                    <th className="px-3 py-2.5 text-left font-medium">#</th>
+                    <th className="px-3 py-2.5 text-left font-medium">製令單號</th>
+                    <th className="px-3 py-2.5 text-left font-medium">生產貨號</th>
+                    <th className="px-3 py-2.5 text-left font-medium">來源訂單</th>
+                    <th className="px-3 py-2.5 text-right font-medium">數量</th>
+                    <th className="px-3 py-2.5 text-left font-medium">客戶</th>
+                    <th className="px-3 py-2.5 text-left font-medium">結案日</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importPreview.rows.map((row, i) => (
+                    <tr key={i} className={`border-b border-slate-800/50 ${i % 2 === 0 ? 'bg-slate-900/60' : 'bg-slate-900/20'}`}>
+                      <td className="px-3 py-2 text-slate-500 text-xs">{i + 1}</td>
+                      <td className="px-3 py-2 font-mono text-cyan-300 text-xs whitespace-nowrap">{row.mo_number}</td>
+                      <td className="px-3 py-2 text-white text-xs whitespace-nowrap">{row.product_code}</td>
+                      <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.source_order}</td>
+                      <td className="px-3 py-2 text-right text-slate-300 text-xs">{row.planned_qty}</td>
+                      <td className="px-3 py-2 text-slate-400 text-xs max-w-[150px] truncate" title={row.custom_1}>{row.custom_1}</td>
+                      <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">{row.planned_end_date}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-5 py-4 border-t border-slate-700 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setImportPreview(null)}
+                className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => { setImportPreview(null); handleImportToErp(importPreview.factory) }}
+                disabled={importingFactory !== null}
+                className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-400 text-white text-sm font-medium transition-colors flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                確認匯入 ERP
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -288,6 +288,18 @@ export default function MaterialsPage() {
         <InventorySyncPanel
           title="同步 ARGO 庫存到物料清單"
           description="同步成功後會直接更新 material_inventory_list。Excel 匯入仍可保留做手動覆寫或備援。"
+          initialConfig={{
+            table: 'IVCF013',
+            customColumn: '',
+            sequenceNoField: '',
+            itemCodeField: 'ITEM_CODE',
+            itemNameField: 'ITEM_NAME',
+            specField: 'SPEC',
+            physicalCountField: '',
+            bookCountField: 'BOOK_QTY',
+            warehouseTotalField: '',
+            groupByItemCode: false,
+          }}
           onSynced={handleInventorySynced}
         />
 
