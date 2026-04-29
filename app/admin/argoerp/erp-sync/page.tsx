@@ -590,6 +590,7 @@ function SyncCard({ docKey }: SyncCardProps) {
         detailTotal?: number
         detailAuthorized?: boolean
         detailError?: string
+        totalRows?: number
         rawSample?: Record<string, unknown>
         rawText?: string
         debugSparam?: Record<string, unknown>
