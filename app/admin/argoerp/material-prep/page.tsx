@@ -58,6 +58,7 @@ interface MaterialPrepRow {
   selected_material_code: string
   selected_material_name: string
   selected_material_stock_qty: number
+  planned_qty: number
   status: '可直接備料' | '建議替代' | '缺料' | '無BOM'
   note: string
 }
@@ -89,8 +90,16 @@ export default function MaterialPrepPage() {
   const [bomError, setBomError] = useState('')
   const [materialOverrides, setMaterialOverrides] = useState<Record<string, string>>({})
 
+  // ---- 來源訂單→客戶 map（從 erp_pj_sync 查詢）----
+  const [sourceOrderCustomerMap, setSourceOrderCustomerMap] = useState<Record<string, string>>({})
+
+  // ---- 需求量覆寫 / 自訂料號 ----
+  const [qtyOverrides, setQtyOverrides] = useState<Record<string, string>>({})
+  const [customCodeInputs, setCustomCodeInputs] = useState<Record<string, string>>({})
+  const [customCodeStocks, setCustomCodeStocks] = useState<Record<string, number | null>>({})
+
   // ---- 選取 / 操作 ----
-  const [selectedMos, setSelectedMos] = useState<Set<string>>(new Set())
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set())
   const [actionMessage, setActionMessage] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
   const [statusFilter, setStatusFilter] = useState<MaterialPrepRow['status'] | null>(null)
@@ -129,10 +138,10 @@ export default function MaterialPrepPage() {
       }
       const records: MoRecord[] = json.records ?? []
       setMoRecords(records)
-      // 重置選取（保留仍存在的）
-      setSelectedMos(prev => {
-        const stillThere = new Set(records.map(r => r.mo_number))
-        return new Set([...prev].filter(mo => stillThere.has(mo)))
+      // 重置選取（保留仍存在的製令的行）
+      setSelectedRowKeys(prev => {
+        const stillMoNumbers = new Set(records.map(r => r.mo_number))
+        return new Set([...prev].filter(key => stillMoNumbers.has(key.split('::')[0])))
       })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -193,14 +202,15 @@ export default function MaterialPrepPage() {
       let nextInventoryMap: Record<string, number> = {}
       if (allInventoryCodes.length > 0) {
         const { data: inventoryData, error: inventoryError } = await supabase
-          .from('material_inventory_list')
-          .select('item_code, book_count')
-          .in('item_code', allInventoryCodes)
+          .from('erp_pj_sync')
+          .select('doc_no, qty')
+          .eq('doc_type', '倉庫庫存')
+          .in('doc_no', allInventoryCodes)
 
         if (inventoryError) throw inventoryError
 
-        nextInventoryMap = ((inventoryData as Array<{ item_code: string; book_count: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
-          acc[item.item_code] = Number(item.book_count) || 0
+        nextInventoryMap = ((inventoryData as Array<{ doc_no: string; qty: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
+          acc[item.doc_no] = Number(item.qty) || 0
           return acc
         }, {})
       }
@@ -208,6 +218,22 @@ export default function MaterialPrepPage() {
       setBomRows(rows)
       setSubstituteMap(groupedSubstitutes)
       setInventoryMap(nextInventoryMap)
+
+      // ---- 查詢來源訂單的客戶名稱（從 erp_so_lines 取 partner_name）----
+      const sourceOrders = Array.from(new Set(moRecords.map(r => (r.source_order ?? '').trim()).filter(Boolean)))
+      if (sourceOrders.length > 0) {
+        const { data: soData } = await supabase
+          .from('erp_so_lines')
+          .select('project_id, partner_name')
+          .in('project_id', sourceOrders)
+        const soMap: Record<string, string> = {}
+        ;((soData as Array<{ project_id: string; partner_name: string | null }> | null) || []).forEach(row => {
+          if (row.partner_name && !soMap[row.project_id]) soMap[row.project_id] = row.partner_name
+        })
+        setSourceOrderCustomerMap(soMap)
+      } else {
+        setSourceOrderCustomerMap({})
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '讀取 BOM / 庫存資料失敗'
       setBomError(message)
@@ -226,14 +252,39 @@ export default function MaterialPrepPage() {
     return moRecords.flatMap((mo): MaterialPrepRow[] => {
       const productCode = (mo.product_code ?? '').trim()
       const matchedBom = bomRows.filter(row => row.product_code === productCode)
-      if (matchedBom.length === 0) {
+    if (matchedBom.length === 0) {
         const rowKey = `${mo.mo_number}::${productCode}::NO_BOM`
+        const customCode = materialOverrides[rowKey]
+        const customStock = customCode ? (inventoryMap[customCode] ?? 0) : 0
+        const displayQty = qtyOverrides[rowKey] !== undefined && qtyOverrides[rowKey] !== '' ? Number(qtyOverrides[rowKey]) : 0
+        if (customCode) {
+          return [{
+            row_key: rowKey,
+            mo_number: mo.mo_number,
+            customer: sourceOrderCustomerMap[mo.source_order ?? ''] || '-',
+            source_order: mo.source_order || '-',
+            product_code: productCode || '-',
+            planned_qty: Number(mo.planned_qty ?? 0),
+            source_material_code: '-',
+            source_material_name: '自訂原料',
+            required_qty: displayQty,
+            unit: '-',
+            stock_qty: customStock,
+            substitute_options: [{ code: customCode, name: customCode, stock_qty: customStock, label: `${customCode}｜自訂｜庫存 ${formatQty(customStock)}` }],
+            selected_material_code: customCode,
+            selected_material_name: customCode,
+            selected_material_stock_qty: customStock,
+            status: displayQty > 0 && customStock >= displayQty ? '可直接備料' : '缺料',
+            note: displayQty === 0 ? '自訂原料，請填寫需求量' : customStock >= displayQty ? '自訂原料，庫存足夠' : '自訂原料，庫存不足',
+          }]
+        }
         return [{
           row_key: rowKey,
           mo_number: mo.mo_number,
-          customer: mo.lot_number || '-',
+          customer: sourceOrderCustomerMap[mo.source_order ?? ''] || '-',
           source_order: mo.source_order || '-',
           product_code: productCode || '-',
+          planned_qty: Number(mo.planned_qty ?? 0),
           source_material_code: '-',
           source_material_name: '查無 BOM',
           required_qty: 0,
@@ -250,13 +301,14 @@ export default function MaterialPrepPage() {
 
       return matchedBom.map((bom): MaterialPrepRow => {
         const rowKey = `${mo.mo_number}::${productCode}::${bom.material_code}`
-        const planQty = Number(mo.planned_qty) || 0
-        const bomBaseQty = Number(bom.quantity) || 0
-        const productionQty = Number(bom.production_quantity) || 0
-        const requiredQty = productionQty > 0 ? (planQty * bomBaseQty) / productionQty : planQty * bomBaseQty
+        const planQty = Number(mo.planned_qty ?? 0)
+        const productionQty = bom.production_quantity ?? 0
+        const bomBaseQty = bom.quantity ?? 0
+        const computedQty = productionQty > 0 ? (planQty * bomBaseQty) / productionQty : planQty * bomBaseQty
+        const requiredQty = qtyOverrides[rowKey] !== undefined && qtyOverrides[rowKey] !== '' ? Number(qtyOverrides[rowKey]) : computedQty
         const stockQty = inventoryMap[bom.material_code] ?? 0
         const substitutes = substituteMap[bom.material_code] || []
-        const substituteOptions = [
+        const substituteOptions: MaterialPrepRow['substitute_options'] = [
           {
             code: bom.material_code,
             name: bom.material_name || '-',
@@ -275,6 +327,12 @@ export default function MaterialPrepPage() {
             }
           }),
         ]
+        // 若有自訂料號覆寫但不在選項中，加入下拉
+        const customOverrideCode = materialOverrides[rowKey]
+        if (customOverrideCode && !substituteOptions.find(o => o.code === customOverrideCode)) {
+          const customStock = inventoryMap[customOverrideCode] ?? 0
+          substituteOptions.push({ code: customOverrideCode, name: customOverrideCode, stock_qty: customStock, label: `${customOverrideCode}｜自訂｜庫存 ${formatQty(customStock)}` })
+        }
         const matchedSubstitute = substitutes.find(rule => (inventoryMap[rule.substitute_item_code] ?? 0) >= requiredQty)
         const defaultSelectedCode = stockQty >= requiredQty ? bom.material_code : (matchedSubstitute?.substitute_item_code || bom.material_code)
         const selectedCode = materialOverrides[rowKey] || defaultSelectedCode
@@ -300,9 +358,10 @@ export default function MaterialPrepPage() {
         return {
           row_key: rowKey,
           mo_number: mo.mo_number,
-          customer: mo.lot_number || '-',
+          customer: sourceOrderCustomerMap[mo.source_order ?? ''] || '-',
           source_order: mo.source_order || '-',
           product_code: productCode,
+          planned_qty: planQty,
           source_material_code: bom.material_code,
           source_material_name: bom.material_name || '-',
           required_qty: requiredQty,
@@ -317,7 +376,7 @@ export default function MaterialPrepPage() {
         }
       })
     })
-  }, [moRecords, bomRows, inventoryMap, substituteMap, materialOverrides])
+  }, [moRecords, bomRows, inventoryMap, substituteMap, materialOverrides, qtyOverrides, sourceOrderCustomerMap])
 
   const materialPrepSummary = useMemo(() => {
     return materialPrepRows.reduce<Record<MaterialPrepRow['status'], number>>((acc, row) => {
@@ -332,10 +391,10 @@ export default function MaterialPrepPage() {
     return materialPrepRows.filter(row => row.status === statusFilter)
   }, [materialPrepRows, statusFilter])
 
-  // 將「選取的製令」轉為可送 ARGO 的批備料行
+  // 將「選取的料號行」轉為可送 ARGO 的批備料行
   const selectedImportRows = useMemo(() => {
     return materialPrepRows
-      .filter(row => selectedMos.has(row.mo_number))
+      .filter(row => selectedRowKeys.has(row.row_key))
       .filter(row => row.status !== '無BOM')
       .filter(row => row.selected_material_code && row.selected_material_stock_qty >= row.required_qty)
       .map(row => ({
@@ -349,31 +408,53 @@ export default function MaterialPrepPage() {
           ? '依原 BOM 備料'
           : `替代料：${row.source_material_code} -> ${row.selected_material_code}`,
       }))
-  }, [materialPrepRows, selectedMos])
+  }, [materialPrepRows, selectedRowKeys])
 
   // ---- 操作：勾選 ----
   const handleSelectMaterialOverride = useCallback((rowKey: string, materialCode: string) => {
     setMaterialOverrides(prev => ({ ...prev, [rowKey]: materialCode }))
   }, [])
 
-  const toggleMo = useCallback((moNumber: string) => {
-    setSelectedMos(prev => {
+  const toggleRow = useCallback((rowKey: string) => {
+    setSelectedRowKeys(prev => {
       const next = new Set(prev)
-      if (next.has(moNumber)) next.delete(moNumber)
-      else next.add(moNumber)
+      if (next.has(rowKey)) next.delete(rowKey)
+      else next.add(rowKey)
       return next
     })
   }, [])
 
-  const toggleSelectAll = useCallback(() => {
-    if (selectedMos.size === moRecords.length) setSelectedMos(new Set())
-    else setSelectedMos(new Set(moRecords.map(r => r.mo_number)))
-  }, [moRecords, selectedMos])
+  const handleQtyChange = useCallback((rowKey: string, val: string) => {
+    setQtyOverrides(prev => ({ ...prev, [rowKey]: val }))
+  }, [])
+
+  const handleLookupCustomCode = useCallback(async (rowKey: string) => {
+    const code = (customCodeInputs[rowKey] ?? '').trim()
+    if (!code) return
+    try {
+      const { data } = await supabase
+        .from('erp_pj_sync')
+        .select('doc_no, qty')
+        .eq('doc_type', '倉庫庫存')
+        .eq('doc_no', code)
+        .limit(1)
+      if (data && data.length > 0) {
+        const qty = Number((data[0] as { doc_no: string; qty: number }).qty) || 0
+        setInventoryMap(prev => ({ ...prev, [code]: qty }))
+        setCustomCodeStocks(prev => ({ ...prev, [rowKey]: qty }))
+        setMaterialOverrides(prev => ({ ...prev, [rowKey]: code }))
+      } else {
+        setCustomCodeStocks(prev => ({ ...prev, [rowKey]: null }))
+      }
+    } catch {
+      setCustomCodeStocks(prev => ({ ...prev, [rowKey]: null }))
+    }
+  }, [customCodeInputs])
 
   // ---- 操作：標記為「無需備料」----
   const handleMarkNoNeed = useCallback(async () => {
-    if (selectedMos.size === 0) return
-    const moNumbers = [...selectedMos]
+    if (selectedRowKeys.size === 0) return
+    const moNumbers = [...new Set(materialPrepRows.filter(r => selectedRowKeys.has(r.row_key)).map(r => r.mo_number))]
     if (!window.confirm(`確定將 ${moNumbers.length} 筆製令標記為「無需備料」？\n（總表狀態會改為已備料但實際不執行批備料）`)) return
 
     setActionBusy(true)
@@ -395,11 +476,11 @@ export default function MaterialPrepPage() {
       setActionBusy(false)
       setTimeout(() => setActionMessage(''), 6000)
     }
-  }, [selectedMos, loadMoRecords])
+  }, [selectedRowKeys, materialPrepRows, loadMoRecords])
 
   // ---- 操作：送 ARGO 批備料 + 標記為「已備料」----
   const handleImportAndMarkDone = useCallback(async () => {
-    if (selectedMos.size === 0) return
+    if (selectedRowKeys.size === 0) return
 
     if (!materialPrepInterfaceId.trim()) {
       setMaterialPrepMessage('❌ 請先輸入批備料匯入的 ARGO 介面編號')
@@ -456,7 +537,7 @@ export default function MaterialPrepPage() {
     } finally {
       setMaterialPrepImporting(false)
     }
-  }, [selectedMos, selectedImportRows, materialPrepInterfaceId, loadMoRecords])
+  }, [selectedRowKeys, selectedImportRows, materialPrepRows, materialPrepInterfaceId, loadMoRecords])
 
   // ============================================================
   // Render
@@ -496,7 +577,7 @@ export default function MaterialPrepPage() {
             </div>
             <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
               <span className="text-slate-400">已選取</span>
-              <span className="text-orange-300 font-semibold">{selectedMos.size} 筆製令</span>
+              <span className="text-orange-300 font-semibold">{selectedRowKeys.size} 筆</span>
             </div>
           </div>
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -543,18 +624,18 @@ export default function MaterialPrepPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300">
-              選取 {selectedMos.size} 筆製令｜可送批備料 {selectedImportRows.length} 筆料號
+              選取 {selectedRowKeys.size} 筆｜可送批備料 {selectedImportRows.length} 筆料號
             </span>
             <button
               onClick={() => void handleImportAndMarkDone()}
-              disabled={materialPrepImporting || actionBusy || selectedMos.size === 0}
+              disabled={materialPrepImporting || actionBusy || selectedRowKeys.size === 0}
               className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium transition-colors text-sm"
             >
               {materialPrepImporting ? '匯入中...' : '送 ARGO 批備料 + 標為已備料'}
             </button>
             <button
               onClick={() => void handleMarkNoNeed()}
-              disabled={actionBusy || materialPrepImporting || selectedMos.size === 0}
+              disabled={actionBusy || materialPrepImporting || selectedRowKeys.size === 0}
               className="px-4 py-2 rounded-lg bg-amber-700 hover:bg-amber-600 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium transition-colors text-sm"
             >
               {actionBusy ? '處理中...' : '標記為「無需備料」'}
@@ -598,17 +679,22 @@ export default function MaterialPrepPage() {
                     <th className="px-2 py-3 text-center sticky left-0 bg-slate-800/80 z-10 w-10">
                       <input
                         type="checkbox"
-                        checked={moRecords.length > 0 && selectedMos.size === moRecords.length}
-                        onChange={toggleSelectAll}
+                        checked={filteredPrepRows.length > 0 && filteredPrepRows.every(r => selectedRowKeys.has(r.row_key))}
+                        onChange={() => {
+                          const allSelected = filteredPrepRows.every(r => selectedRowKeys.has(r.row_key))
+                          setSelectedRowKeys(prev => {
+                            const next = new Set(prev)
+                            if (allSelected) filteredPrepRows.forEach(r => next.delete(r.row_key))
+                            else filteredPrepRows.forEach(r => next.add(r.row_key))
+                            return next
+                          })
+                        }}
                         className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500/30"
                       />
                     </th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">製令單號</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">客戶</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">來源訂單</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">生產貨號</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">原料料號</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">原料名稱</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">製令單號 / 客戶</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">生產貨號 / 預定產出量</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">原料料號 / 原料名稱</th>
                     <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">需求量</th>
                     <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">現有庫存</th>
                     <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">使用料號</th>
@@ -619,29 +705,47 @@ export default function MaterialPrepPage() {
                 </thead>
                 <tbody>
                   {filteredPrepRows.map((row, index) => {
-                    const checked = selectedMos.has(row.mo_number)
+                    const checked = selectedRowKeys.has(row.row_key)
                     return (
                       <tr key={`${row.row_key}-${index}`} className={`border-b border-slate-800/50 ${checked ? 'bg-cyan-950/30' : index % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-900/20'} hover:bg-slate-800/40`}>
                         <td className="px-2 py-2 text-center sticky left-0 bg-inherit z-10">
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => toggleMo(row.mo_number)}
+                            onChange={() => toggleRow(row.row_key)}
                             className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500/30"
                           />
                         </td>
-                        <td className="px-3 py-2 text-cyan-300 font-mono text-xs whitespace-nowrap">{row.mo_number}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs max-w-[180px] truncate" title={row.customer}>{row.customer}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.source_order}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.product_code}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.source_material_code}</td>
-                        <td className="px-3 py-2 text-slate-300 text-xs max-w-[220px] truncate" title={row.source_material_name}>{row.source_material_name}</td>
-                        <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">{formatQty(row.required_qty)} {row.unit}</td>
+                        <td className="px-3 py-2 text-xs whitespace-nowrap">
+                          <div className="text-cyan-300 font-mono">{row.mo_number}</div>
+                          <div className="text-slate-400 truncate max-w-[180px]" title={row.customer}>
+                            {row.customer !== '-' ? row.customer : <span className="text-slate-600 italic">查無客戶</span>}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-xs whitespace-nowrap">
+                          <div className="text-slate-300">{row.product_code}</div>
+                          <div className="text-slate-400 font-mono">{formatQty(row.planned_qty)}</div>
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          <div className="text-slate-300 whitespace-nowrap">{row.source_material_code}</div>
+                          <div className="text-slate-400 truncate max-w-[200px]" title={row.source_material_name}>{row.source_material_name}</div>
+                        </td>
+                        <td className="px-3 py-2 text-right text-xs whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={qtyOverrides[row.row_key] !== undefined ? qtyOverrides[row.row_key] : formatQty(row.required_qty)}
+                              onChange={e => handleQtyChange(row.row_key, e.target.value)}
+                              className="w-20 text-right bg-slate-950/60 border border-slate-700/60 rounded px-1 py-0.5 text-slate-300 focus:outline-none focus:border-cyan-500/50 text-xs"
+                            />
+                            <span className="text-slate-500 text-xs">{row.unit}</span>
+                          </div>
+                        </td>
                         <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">{formatQty(row.stock_qty)}</td>
-                        <td className="px-3 py-2 text-xs min-w-[240px]">
-                          {row.status === '無BOM' ? (
-                            <span className="text-slate-500">—</span>
-                          ) : (
+                        <td className="px-3 py-2 text-xs min-w-[260px]">
+                          {row.status !== '無BOM' && (
                             <select
                               value={row.selected_material_code}
                               onChange={e => handleSelectMaterialOverride(row.row_key, e.target.value)}
@@ -653,6 +757,31 @@ export default function MaterialPrepPage() {
                                 </option>
                               ))}
                             </select>
+                          )}
+                          {(row.status === '缺料' || row.status === '無BOM') && (
+                            <div className={`flex items-center gap-1 ${row.status !== '無BOM' ? 'mt-1' : ''}`}>
+                              <span className="text-slate-500 text-[10px] shrink-0">自訂:</span>
+                              <input
+                                value={customCodeInputs[row.row_key] ?? ''}
+                                onChange={e => setCustomCodeInputs(prev => ({ ...prev, [row.row_key]: e.target.value }))}
+                                onKeyDown={e => { if (e.key === 'Enter') void handleLookupCustomCode(row.row_key) }}
+                                placeholder="輸入料號"
+                                className="flex-1 min-w-0 px-2 py-0.5 text-xs rounded bg-slate-800 border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500/50"
+                              />
+                              <button
+                                onClick={() => void handleLookupCustomCode(row.row_key)}
+                                className="px-2 py-0.5 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-300 shrink-0"
+                              >
+                                查
+                              </button>
+                              {customCodeStocks[row.row_key] !== undefined && (
+                                <span className={`text-[10px] whitespace-nowrap shrink-0 ${
+                                  customCodeStocks[row.row_key] === null ? 'text-red-400' : 'text-emerald-300'
+                                }`}>
+                                  {customCodeStocks[row.row_key] === null ? '找不到' : `庫存:${customCodeStocks[row.row_key]}`}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">

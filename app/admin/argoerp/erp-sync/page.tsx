@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 
 // ─── 型別 ─────────────────────────────────────────────
-type DocTypeKey = 'sales' | 'mo' | 'po' | 'subcontract'
+type DocTypeKey = 'sales' | 'mo' | 'po' | 'subcontract' | 'inventory'
 
 interface PjSyncMapping {
   docNoField: string
@@ -111,6 +111,8 @@ const DOC_TYPES: Record<DocTypeKey, {
   label: string
   description: string
   defaultConfig: SyncConfig
+  mappingLabels?: { key: keyof PjSyncMapping; label: string; required?: boolean }[]
+  locked?: { table?: boolean; filters?: boolean; mappingKeys?: (keyof PjSyncMapping)[] }
 }> = {
   sales: {
     label: '銷售訂單',
@@ -188,6 +190,35 @@ const DOC_TYPES: Record<DocTypeKey, {
       },
     },
   },
+  inventory: {
+    label: '倉庫庫存',
+    description: '倉庫庫存餘額，查詢 ArgoERP MM_BOM_BOH_V 視圖。',
+    locked: {
+      table: true,
+      filters: true,
+      mappingKeys: ['docNoField', 'descriptionField', 'qtyField', 'customerVendorField'],
+    },
+    mappingLabels: [
+      { key: 'docNoField',          label: '料號 PART',            required: true },
+      { key: 'descriptionField',    label: '品名/規格 PART_DESC' },
+      { key: 'qtyField',            label: '庫存數量 BOH' },
+      { key: 'customerVendorField', label: '在途數量 PO_ON_ROAD' },
+      { key: 'statusField',         label: '自定義欄位1' },
+      { key: 'remarkField',         label: '自定義欄位2' },
+    ],
+    defaultConfig: {
+      table: 'MM_BOM_BOH_V',
+      customColumn: '',
+      filters: [{ key: 'ROWNUM', value: '<= 10000' }],
+      mapping: {
+        ...EMPTY_MAPPING,
+        docNoField: 'PART',
+        descriptionField: 'PART_DESC',
+        qtyField: 'BOH',
+        customerVendorField: 'PO_ON_ROAD',
+      },
+    },
+  },
 }
 
 const MAPPING_LABELS: { key: keyof PjSyncMapping; label: string; required?: boolean }[] = [
@@ -236,6 +267,8 @@ function SyncCard({ docKey }: SyncCardProps) {
   const meta = DOC_TYPES[docKey]
   const isSoTab = docKey === 'sales'
   const isMoTab = docKey === 'mo'
+  const isInventoryTab = docKey === 'inventory'
+  const activeMappingLabels = meta.mappingLabels ?? MAPPING_LABELS
   const [config, setConfig] = useState<SyncConfig>(() => loadConfig(docKey))
   const [showConfig, setShowConfig] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -721,9 +754,14 @@ function SyncCard({ docKey }: SyncCardProps) {
               <label className="mb-1 block text-xs text-slate-400">TABLE <span className="text-red-400">*</span></label>
               <input
                 value={config.table}
-                onChange={(e) => setConfig((p) => ({ ...p, table: e.target.value }))}
+                onChange={(e) => !meta.locked?.table && setConfig((p) => ({ ...p, table: e.target.value }))}
+                readOnly={!!meta.locked?.table}
                 placeholder="PJ_PROJECT 或 PJ_PROJECTDETAIL"
-                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+                className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none ${
+                  meta.locked?.table
+                    ? 'border-slate-700/50 bg-slate-800/50 text-slate-400 cursor-not-allowed'
+                    : 'border-slate-700 bg-slate-900 text-slate-200 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30'
+                }`}
               />
             </div>
             <div>
@@ -741,6 +779,7 @@ function SyncCard({ docKey }: SyncCardProps) {
           <div>
             <div className="mb-1 flex items-center gap-2">
               <span className="text-xs text-slate-400">ARGO 過濾條件（篩選此類型資料用）</span>
+              {!meta.locked?.filters && (
               <button
                 type="button"
                 onClick={addFilter}
@@ -748,6 +787,7 @@ function SyncCard({ docKey }: SyncCardProps) {
               >
                 + 新增條件
               </button>
+              )}
             </div>
             {config.filters.length === 0 && (
               <p className="text-xs text-slate-600">（無過濾條件，查全部資料）</p>
@@ -756,16 +796,27 @@ function SyncCard({ docKey }: SyncCardProps) {
               <div key={i} className="mb-2 flex gap-2">
                 <input
                   value={f.key}
-                  onChange={(e) => updateFilter(i, 'key', e.target.value)}
+                  onChange={(e) => !meta.locked?.filters && updateFilter(i, 'key', e.target.value)}
+                  readOnly={!!meta.locked?.filters}
                   placeholder="欄位名稱 例如 DOC_TYPE"
-                  className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 focus:border-cyan-500/50 focus:outline-none"
+                  className={`flex-1 rounded-lg border px-3 py-1.5 text-xs focus:outline-none ${
+                    meta.locked?.filters
+                      ? 'border-slate-700/50 bg-slate-800/50 text-slate-400 cursor-not-allowed'
+                      : 'border-slate-700 bg-slate-900 text-slate-200 focus:border-cyan-500/50'
+                  }`}
                 />
                 <input
                   value={f.value}
-                  onChange={(e) => updateFilter(i, 'value', e.target.value)}
+                  onChange={(e) => !meta.locked?.filters && updateFilter(i, 'value', e.target.value)}
+                  readOnly={!!meta.locked?.filters}
                   placeholder="值 例如 SO"
-                  className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 focus:border-cyan-500/50 focus:outline-none"
+                  className={`flex-1 rounded-lg border px-3 py-1.5 text-xs focus:outline-none ${
+                    meta.locked?.filters
+                      ? 'border-slate-700/50 bg-slate-800/50 text-slate-400 cursor-not-allowed'
+                      : 'border-slate-700 bg-slate-900 text-slate-200 focus:border-cyan-500/50'
+                  }`}
                 />
+                {!meta.locked?.filters && (
                 <button
                   type="button"
                   onClick={() => removeFilter(i)}
@@ -773,6 +824,7 @@ function SyncCard({ docKey }: SyncCardProps) {
                 >
                   刪
                 </button>
+                )}
               </div>
             ))}
           </div>
@@ -781,19 +833,28 @@ function SyncCard({ docKey }: SyncCardProps) {
           <div>
             <p className="mb-2 text-xs text-slate-400">欄位映射（填 ARGO 實際回傳的欄位名稱）</p>
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {MAPPING_LABELS.map(({ key, label, required }) => (
-                <div key={key}>
-                  <label className="mb-1 block text-xs text-slate-500">
-                    {label} {required && <span className="text-red-400">*</span>}
-                  </label>
-                  <input
-                    value={config.mapping[key]}
-                    onChange={(e) => updateMapping(key, e.target.value)}
-                    placeholder={required ? '必填' : '可留空'}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
-                  />
-                </div>
-              ))}
+              {activeMappingLabels.map(({ key, label, required }) => {
+                const isLocked = meta.locked?.mappingKeys?.includes(key) ?? false
+                return (
+                  <div key={key}>
+                    <label className="mb-1 block text-xs text-slate-500">
+                      {label} {required && <span className="text-red-400">*</span>}
+                      {isLocked && <span className="ml-1 text-slate-600">🔒</span>}
+                    </label>
+                    <input
+                      value={config.mapping[key]}
+                      onChange={(e) => !isLocked && updateMapping(key, e.target.value)}
+                      readOnly={isLocked}
+                      placeholder={required ? '必填' : '可留空'}
+                      className={`w-full rounded-lg border px-3 py-1.5 text-xs focus:outline-none ${
+                        isLocked
+                          ? 'border-slate-700/50 bg-slate-800/50 text-slate-400 cursor-not-allowed'
+                          : 'border-slate-700 bg-slate-900 text-slate-200 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30'
+                      }`}
+                    />
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -1136,6 +1197,14 @@ function SyncCard({ docKey }: SyncCardProps) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-800 bg-slate-900/50">
+                  {isInventoryTab ? (<>
+                    <th className="px-3 py-2 text-left text-slate-400 font-medium">料號</th>
+                    <th className="px-3 py-2 text-left text-slate-400 font-medium">品名/規格</th>
+                    <th className="px-3 py-2 text-right text-slate-400 font-medium">庫存數量</th>
+                    <th className="px-3 py-2 text-right text-slate-400 font-medium">在途數量</th>
+                    <th className="px-3 py-2 text-left text-slate-400 font-medium">自定義1</th>
+                    <th className="px-3 py-2 text-left text-slate-400 font-medium">自定義2</th>
+                  </>) : (<>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">主單號</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">子序號</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">料號</th>
@@ -1147,11 +1216,20 @@ function SyncCard({ docKey }: SyncCardProps) {
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">結束日</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">客戶/廠商</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">備註</th>
+                  </>)}
                 </tr>
               </thead>
               <tbody>
                 {records.map((r) => (
                   <tr key={r.id} className="border-b border-slate-800/50 hover:bg-slate-900/40">
+                    {isInventoryTab ? (<>
+                      <td className="px-3 py-2 font-mono text-cyan-300">{r.doc_no}</td>
+                      <td className="px-3 py-2 text-slate-300 max-w-[200px] truncate">{r.description ?? '—'}</td>
+                      <td className="px-3 py-2 text-right text-emerald-300 font-medium">{r.qty > 0 ? r.qty.toLocaleString() : '0'}</td>
+                      <td className="px-3 py-2 text-right text-amber-300">{r.customer_vendor ?? '—'}</td>
+                      <td className="px-3 py-2 text-slate-400">{r.status ?? '—'}</td>
+                      <td className="px-3 py-2 text-slate-400">{r.remark ?? '—'}</td>
+                    </>) : (<>
                     <td className="px-3 py-2 font-mono text-cyan-300">{r.doc_no}</td>
                     <td className="px-3 py-2 text-slate-400">{r.sub_no || '—'}</td>
                     <td className="px-3 py-2 font-mono text-slate-300">{r.item_code ?? '—'}</td>
@@ -1167,6 +1245,7 @@ function SyncCard({ docKey }: SyncCardProps) {
                     <td className="px-3 py-2 text-slate-400">{r.end_date ?? '—'}</td>
                     <td className="px-3 py-2 text-slate-300 max-w-[120px] truncate">{r.customer_vendor ?? '—'}</td>
                     <td className="px-3 py-2 text-slate-400 max-w-[120px] truncate">{r.remark ?? '—'}</td>
+                    </>)}
                   </tr>
                 ))}
               </tbody>
@@ -1184,23 +1263,155 @@ const TABS: { key: DocTypeKey; label: string }[] = [
   { key: 'mo', label: '製令單號' },
   { key: 'po', label: '採購單號' },
   { key: 'subcontract', label: '委外製令' },
+  { key: 'inventory', label: '倉庫庫存' },
 ]
 
 export default function ErpSyncPage() {
   const [activeTab, setActiveTab] = useState<DocTypeKey>('sales')
 
+  // ---- 全表同步 ----
+  type SyncStep = { key: DocTypeKey; label: string; status: 'pending' | 'running' | 'done' | 'error'; message: string }
+  const [syncAllOpen, setSyncAllOpen] = useState(false)
+  const [syncAllSteps, setSyncAllSteps] = useState<SyncStep[]>([])
+  const [syncAllRunning, setSyncAllRunning] = useState(false)
+  const [syncAllLastTime, setSyncAllLastTime] = useState<Date | null>(null)
+
+  const handleSyncAll = async () => {
+    const steps: SyncStep[] = TABS.map(t => ({ key: t.key, label: t.label, status: 'pending', message: '' }))
+    setSyncAllSteps(steps)
+    setSyncAllOpen(true)
+    setSyncAllRunning(true)
+
+    const updateStep = (index: number, patch: Partial<SyncStep>) => {
+      setSyncAllSteps(prev => prev.map((s, i) => i === index ? { ...s, ...patch } : s))
+    }
+
+    for (let i = 0; i < TABS.length; i++) {
+      const tab = TABS[i]
+      updateStep(i, { status: 'running' })
+      try {
+        let res: Response
+        if (tab.key === 'sales') {
+          res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync_so' }) })
+        } else if (tab.key === 'mo') {
+          res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync_mo' }) })
+        } else {
+          const cfg = loadConfig(tab.key)
+          const filtersObj: Record<string, string> = {}
+          for (const { key, value } of cfg.filters) { if (key.trim()) filtersObj[key.trim()] = value }
+          res = await fetch('/api/argoerp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'sync_pj',
+              table: cfg.table.trim(),
+              customColumn: cfg.customColumn.trim() || undefined,
+              filters: Object.keys(filtersObj).length > 0 ? filtersObj : undefined,
+              docType: DOC_TYPES[tab.key].label,
+              mapping: cfg.mapping,
+            }),
+          })
+        }
+        const result = await res.json() as { status: string; error?: string; syncedCount?: number; totalRows?: number; headerCount?: number; detailTotal?: number; detailAuthorized?: boolean }
+        if (result.status !== 'ok') {
+          updateStep(i, { status: 'error', message: result.error ?? '同步失敗' })
+        } else {
+          let msg = ''
+          if (tab.key === 'sales') msg = `已同步 ${result.syncedCount ?? 0} 筆（ARGO ${result.totalRows ?? 0} 筆）`
+          else if (tab.key === 'mo') msg = `已同步 ${result.syncedCount ?? 0} 筆（表頭 ${result.headerCount ?? 0}，明細 ${result.detailTotal ?? 0}）`
+          else msg = `已同步 ${result.syncedCount ?? 0} 筆`
+          updateStep(i, { status: 'done', message: msg })
+        }
+      } catch (e) {
+        updateStep(i, { status: 'error', message: e instanceof Error ? e.message : '同步失敗' })
+      }
+    }
+    setSyncAllRunning(false)
+    setSyncAllLastTime(new Date())
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-8 text-white md:px-8">
       {/* 頁頭 */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">ERP 同步區</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          從 ARGO ERP PJ 系列端口同步四類單據資料到 Supabase，供後續頁面自動引用。
-        </p>
-        <div className="mt-3 rounded-lg border border-amber-700/40 bg-amber-950/20 px-4 py-2 text-xs text-amber-300">
-          💡 首次使用：點「展開設定」→ 按「同步」→ 點「查看原始欄位」→ 填入正確欄位名稱後再次同步。
+      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">ERP 同步區</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            從 ARGO ERP PJ 系列端口同步四類單據資料到 Supabase，供後續頁面自動引用。
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={() => void handleSyncAll()}
+          disabled={syncAllRunning}
+          className="shrink-0 rounded-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-slate-700 disabled:text-slate-500 px-10 py-5 text-2xl font-black text-white shadow-xl transition-colors"
+        >
+          {syncAllRunning ? '⏳ 同步中...' : '🔄 啟動全表同步'}
+        </button>
+        {syncAllLastTime && (
+          <p className="mt-2 text-right text-xs text-slate-400">
+            上次執行：{syncAllLastTime.toLocaleString('zh-TW', { hour12: false })}
+          </p>
+        )}
       </div>
+
+      {/* 全表同步 Modal */}
+      {syncAllOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <h2 className="mb-4 text-lg font-bold text-white">全表同步進度</h2>
+            <div className="space-y-3">
+              {syncAllSteps.map((step, i) => (
+                <div key={step.key} className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-200">{step.label}</span>
+                    {step.status === 'pending' && <span className="text-xs text-slate-500">等待中</span>}
+                    {step.status === 'running' && <span className="text-xs text-cyan-400 animate-pulse">同步中...</span>}
+                    {step.status === 'done' && <span className="text-xs text-emerald-400">✓ 完成</span>}
+                    {step.status === 'error' && <span className="text-xs text-red-400">✗ 失敗</span>}
+                  </div>
+                  {/* 進度條 */}
+                  <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                    <div className={`h-full rounded-full transition-all duration-500 ${
+                      step.status === 'pending' ? 'w-0' :
+                      step.status === 'running' ? 'w-1/2 bg-cyan-500' :
+                      step.status === 'done' ? 'w-full bg-emerald-500' :
+                      'w-full bg-red-500'
+                    }`} />
+                  </div>
+                  {step.message && (
+                    <p className={`text-xs ${step.status === 'error' ? 'text-red-300' : 'text-slate-400'}`}>{step.message}</p>
+                  )}
+                  {/* 分隔線（最後一項不加）*/}
+                  {i < syncAllSteps.length - 1 && <div className="mt-1 border-b border-slate-800" />}
+                </div>
+              ))}
+            </div>
+            {/* 整體進度 */}
+            <div className="mt-4">
+              <div className="mb-1 flex justify-between text-xs text-slate-400">
+                <span>整體進度</span>
+                <span>{syncAllSteps.filter(s => s.status === 'done' || s.status === 'error').length} / {syncAllSteps.length}</span>
+              </div>
+              <div className="h-3 w-full rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-emerald-600 transition-all duration-500"
+                  style={{ width: `${(syncAllSteps.filter(s => s.status === 'done' || s.status === 'error').length / (syncAllSteps.length || 1)) * 100}%` }}
+                />
+              </div>
+            </div>
+            {!syncAllRunning && (
+              <button
+                type="button"
+                onClick={() => setSyncAllOpen(false)}
+                className="mt-5 w-full rounded-lg bg-slate-700 hover:bg-slate-600 py-2 text-sm font-medium text-white transition-colors"
+              >
+                關閉
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 rounded-xl border border-slate-800 bg-slate-900/50 p-1 w-fit">

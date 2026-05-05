@@ -59,6 +59,11 @@ export const NAV_GROUPS = [
         path: '/admin/argoerp/erp-sync',
         icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
       },
+      {
+        name: '物料清單',
+        path: '/admin/materials',
+        icon: 'M20 7H4a2 2 0 00-2 2v8a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2zM7 11h10M7 15h6'
+      },
     ]
   },
   {
@@ -121,11 +126,6 @@ export const NAV_GROUPS = [
     title: '物料管理',
     theme: 'cyan',
     items: [
-      {
-        name: '物料清單',
-        path: '/admin/materials',
-        icon: 'M20 7H4a2 2 0 00-2 2v8a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2zM7 11h10M7 15h6'
-      },
       {
         name: 'BOM表',
         path: '/admin/materials/bom',

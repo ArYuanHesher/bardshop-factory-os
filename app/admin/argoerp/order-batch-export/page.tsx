@@ -259,7 +259,7 @@ function getMaxUsedSeqFromLocal(prefix: string, dateDigits: string): number {
     let max = 0
     for (const r of records) {
       const mo = r?.mo_number ?? ''
-      if (mo.length !== headLen + 3) continue
+      if (mo.length !== headLen + 2) continue
       if (!mo.startsWith(prefix + dateDigits)) continue
       const seq = Number(mo.slice(headLen))
       if (Number.isFinite(seq) && seq > max) max = seq
@@ -298,13 +298,13 @@ function mapAllToExport(srcRows: SourceRow[], matchResults?: SoMatchResult[]): E
     const row: ExportRow = {}
     EXPORT_COLUMNS.forEach(col => { row[col.key] = '' })
 
-    // 製令單號：MO + 廠別(T/C/O) + 來源單號日期(YYYYMMDD) + 三碼序號
-    // 末三碼直接取 source_order_line（來源訂單項號 LINE_NO），例 LINE_NO=5 → 005
+    // 製令單號：MO + 廠別(T/C/O) + 來源單號日期(YYYYMMDD) + 兩碼序號
+    // 末兩碼直接取 source_order_line（來源訂單項號 LINE_NO），例 LINE_NO=5 → 05
     // 日期取自來源銷售訂單號（例 RO26050101 → 20260501），無法解析時 fallback 今日
     const prefix = src.factory === 'O' ? 'MOO' : `MO${src.factory}`
     const soDateDigits = parseSoDateDigits(src.order_number) ?? todayDateDigits
     const lineNo = matchResults?.[rowIndex]?.line_no
-    const seqStr = lineNo ? String(Number(lineNo)).padStart(3, '0') : '000'
+    const seqStr = lineNo ? String(Number(lineNo)).padStart(2, '0') : '00'
     row.mo_number = `${prefix}${soDateDigits}${seqStr}`
 
     row.planned_start_date = nextBizDay                // 預定投產日：下一個工作日
@@ -315,9 +315,8 @@ function mapAllToExport(srcRows: SourceRow[], matchResults?: SoMatchResult[]): E
     row.seq_number = lineNo ? String(Number(lineNo)) : '1'  // 編號：來源訂單項號（LINE_NO）
     row.product_code = src.item_code                   // 生產貨號：品項編碼
     row.version = '1'                                  // 版本
-    // 批號(MBP_LOT_NO)：客戶名稱截斷 30 bytes（ERP 欄位限制 32 bytes，留餘裕）
-    // 這是昨日驗證可正常匯入的設計
-    row.lot_number = truncateByByteLength(src.customer, 30)
+    // 批號(MBP_LOT_NO)：來源訂單號截斷 30 bytes（ERP 欄位限制 32 bytes，留餘裕）
+    row.lot_number = truncateByByteLength(src.order_number, 30)
     row.custom_1 = ''                                  // 自定義欄位1：暫不送出
     row.planned_qty = src.quantity                     // 預訂產出量：數量
     row.bom_level = '99'                               // BOM製造批料階數
@@ -429,7 +428,7 @@ function buildSummaryRecords(sourceRows: SourceRow[], savedAt: string, matchResu
     mo_status: row.mo_status,
     department: row.department,
     product_code: row.product_code,
-    // lot_number 顯示客戶名稱（已在 mapAllToExport 截斷 30 bytes）
+    // lot_number 顯示來源訂單號（已在 mapAllToExport 截斷 30 bytes）
     lot_number: row.lot_number,
     planned_qty: row.planned_qty,
     source_order: row.source_order,
