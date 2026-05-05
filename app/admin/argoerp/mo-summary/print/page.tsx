@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 
@@ -169,7 +169,7 @@ function InfoGrid({ rows }: {
 }
 
 // ── 主頁面 ───────────────────────────────────────────────────
-export default function MoPrintPage() {
+function MoPrintContent() {
   const searchParams = useSearchParams()
   const isDemo = searchParams.get('demo') === '1'
 
@@ -574,5 +574,13 @@ export default function MoPrintPage() {
         })}
       </div>
     </>
+  )
+}
+
+export default function MoPrintPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>載入中…</div>}>
+      <MoPrintContent />
+    </Suspense>
   )
 }
