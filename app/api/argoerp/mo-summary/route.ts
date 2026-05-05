@@ -29,7 +29,7 @@ const ALLOWED_FIELDS = [
   'planned_start_date', 'planned_end_date', 'mo_status',
   'department', 'product_code', 'lot_number', 'planned_qty',
   'source_order', 'mo_note', 'create_date', 'saved_at',
-  'prep_status',
+  'prep_status', 'plate_count', 'machine',
 ] as const
 
 function pickAllowed(rec: Record<string, unknown>): Record<string, unknown> {
@@ -196,6 +196,48 @@ export async function PATCH(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, updated: count ?? 0 })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ success: false, error: formatSupabaseAdminError(msg) }, { status: 500 })
+  }
+}
+
+// ============================================================
+// PUT：更新單筆製令的可編輯欄位
+// body: { mo_number: string, fields: Partial<MoRecord> }
+// ============================================================
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const moNumber: string = body?.mo_number
+    const fields: Record<string, unknown> = body?.fields ?? {}
+
+    if (!moNumber) {
+      return NextResponse.json({ success: false, error: 'mo_number 不可為空' }, { status: 400 })
+    }
+
+    const cleaned = pickAllowed(fields)
+    // mo_number 不允許被更新
+    delete cleaned.mo_number
+
+    if (Object.keys(cleaned).length === 0) {
+      return NextResponse.json({ success: false, error: '沒有可更新的欄位' }, { status: 400 })
+    }
+
+    const supabase = getSupabaseAdminClient()
+    const { error } = await supabase
+      .from(TABLE)
+      .update(cleaned)
+      .eq('mo_number', moNumber)
+
+    if (error) {
+      return NextResponse.json(
+        { success: false, error: formatSupabaseAdminError(error.message) },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ success: true })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ success: false, error: formatSupabaseAdminError(msg) }, { status: 500 })

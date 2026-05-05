@@ -161,10 +161,17 @@ const MAPPED_KEYS = new Set([
   'mo_number', 'planned_start_date', 'planned_end_date', 'mo_status',
   'department', 'cost_department', 'seq_number', 'product_code', 'version',
   'lot_number', 'planned_qty', 'bom_level', 'product_cost_ratio',
-  'material_cost_ratio', 'source_order', 'mo_note', 'create_date', 'auto_material',
+  'material_cost_ratio', 'source_order', 'source_order_line', 'mo_note', 'create_date', 'auto_material',
 ])
 
 type ExportRow = Record<string, string>
+
+interface SoMatchResult {
+  line_no: string | null
+  pdl_seq: number | null
+  status: 'matched' | 'no_order' | 'no_qty_match'
+  reason: string
+}
 
 interface FailedImportItem {
   key: string
@@ -216,10 +223,10 @@ function getImportConfig(factory: 'T' | 'C' | 'O') {
 // 模組層 cache：key = "MOT20260422" → 該日該前綴在 DB 已用過的最大流水號
 const seqCacheFromDb = new Map<string, number>()
 
-async function prefetchSeqFromDb(dateDigits: string): Promise<void> {
+async function prefetchSeqFromDb(): Promise<void> {
   if (typeof window === 'undefined') return
   try {
-    const res = await fetch(`/api/argoerp/mo-summary?date=${encodeURIComponent(dateDigits)}`, {
+    const res = await fetch(`/api/argoerp/mo-summary`, {
       cache: 'no-store',
     })
     if (!res.ok) return
@@ -232,7 +239,6 @@ async function prefetchSeqFromDb(dateDigits: string): Promise<void> {
       const m = mo.match(/^(MO[TCO])(\d{8})(\d{3})$/)
       if (!m) continue
       const key = `${m[1]}${m[2]}`
-      if (m[2] !== dateDigits) continue
       const seq = Number(m[3])
       const cur = maxByKey.get(key) ?? 0
       if (seq > cur) maxByKey.set(key, seq)
@@ -271,38 +277,42 @@ function getMaxUsedSeq(prefix: string, dateDigits: string): number {
   return Math.max(dbMax, localMax)
 }
 
-function mapAllToExport(srcRows: SourceRow[]): ExportRow[] {
+// 從銷售訂單號解析日期（8碼 YYYYMMDD）
+// 格式：英文前綴 + YY(2) + MM(2) + DD(2) + 後綴，例 RO26050101 → 20260501
+// 從銷售訂單號取出英文前綴後的完整數字串
+// 例：RO26042801 → "26042801"、RO26050101 → "26050101"
+function parseSoDateDigits(orderNumber: string): string | null {
+  const m = orderNumber.match(/^[A-Za-z]+(\d+)/)
+  if (!m) return null
+  return m[1]
+}
+
+function mapAllToExport(srcRows: SourceRow[], matchResults?: SoMatchResult[]): ExportRow[] {
   const today = new Date()
   const todayStr = formatDate(today)
   const nextBizDay = formatDate(getNextBusinessDay(today))
-  const dateDigits = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+  // 今日日期作為 fallback（當 SO 號無法解析時使用）
+  const todayDateDigits = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
 
-  // 計算流水號：相同前綴(MOT/MOC/MOO) + 日期 → 001, 002, 003...
-  // 起始值會先去製令總表查詢已使用的最大號 → 從 max+1 接續
-  const seqCounter = new Map<string, number>()
-
-  return srcRows.map(src => {
+  return srcRows.map((src, rowIndex) => {
     const row: ExportRow = {}
     EXPORT_COLUMNS.forEach(col => { row[col.key] = '' })
 
-    // 製令單號：MO + 廠別(T/C/O) + 開立日期(YYYYMMDD) + 三碼流水號(001-999)
+    // 製令單號：MO + 廠別(T/C/O) + 來源單號日期(YYYYMMDD) + 三碼序號
+    // 末三碼直接取 source_order_line（來源訂單項號 LINE_NO），例 LINE_NO=5 → 005
+    // 日期取自來源銷售訂單號（例 RO26050101 → 20260501），無法解析時 fallback 今日
     const prefix = src.factory === 'O' ? 'MOO' : `MO${src.factory}`
-    const seqKey = `${prefix}${dateDigits}`
-    if (!seqCounter.has(seqKey)) {
-      // 首次遇到此 key → 用製令總表中的既存最大號當起點
-      seqCounter.set(seqKey, getMaxUsedSeq(prefix, dateDigits))
-    }
-    const currentSeq = (seqCounter.get(seqKey) ?? 0) + 1
-    seqCounter.set(seqKey, currentSeq)
-    const seqStr = String(currentSeq).padStart(3, '0')
-    row.mo_number = `${prefix}${dateDigits}${seqStr}`
+    const soDateDigits = parseSoDateDigits(src.order_number) ?? todayDateDigits
+    const lineNo = matchResults?.[rowIndex]?.line_no
+    const seqStr = lineNo ? String(Number(lineNo)).padStart(3, '0') : '000'
+    row.mo_number = `${prefix}${soDateDigits}${seqStr}`
 
     row.planned_start_date = nextBizDay                // 預定投產日：下一個工作日
     row.planned_end_date = src.delivery_date            // 預定結案日：交付日期
     row.mo_status = 'OPEN'                             // 製令狀態
     row.department = 'M1100'                           // 部門
     row.cost_department = 'M1000'                      // 成本部門
-    row.seq_number = '1'                               // 編號
+    row.seq_number = lineNo ? String(Number(lineNo)) : '1'  // 編號：來源訂單項號（LINE_NO）
     row.product_code = src.item_code                   // 生產貨號：品項編碼
     row.version = '1'                                  // 版本
     // 批號(MBP_LOT_NO)：客戶名稱截斷 30 bytes（ERP 欄位限制 32 bytes，留餘裕）
@@ -314,6 +324,7 @@ function mapAllToExport(srcRows: SourceRow[]): ExportRow[] {
     row.product_cost_ratio = '1'                       // 成品工費分攤約當比例
     row.material_cost_ratio = '1'                      // 直接原料分攤約當比例
     row.source_order = src.order_number                // 來源訂單：工單編號
+    row.source_order_line = matchResults?.[rowIndex]?.line_no ?? ''  // 來源訂單項號：SO 行號（ERP 比對）
     row.mo_note = [src.item_name, src.note].filter(Boolean).join(' ')  // 製令說明：品名/規格+備註
     row.create_date = todayStr                         // 開立日期：今天
     row.auto_material = 'N'                            // 自動批備料
@@ -410,8 +421,8 @@ function saveFailedImports(items: FailedImportItem[]) {
 
 const MO_SUMMARY_KEY = 'argoerp_mo_summary'
 
-function buildSummaryRecords(sourceRows: SourceRow[], savedAt: string) {
-  return mapAllToExport(sourceRows).map((row, index) => ({
+function buildSummaryRecords(sourceRows: SourceRow[], savedAt: string, matchResults?: SoMatchResult[]) {
+  return mapAllToExport(sourceRows, matchResults).map((row, index) => ({
     mo_number: row.mo_number,
     planned_start_date: row.planned_start_date,
     planned_end_date: row.planned_end_date,
@@ -426,6 +437,7 @@ function buildSummaryRecords(sourceRows: SourceRow[], savedAt: string) {
     create_date: row.create_date,
     factory: sourceRows[index]?.factory ?? 'T',
     saved_at: savedAt,
+    plate_count: sourceRows[index]?.plate_count ?? '',
   }))
 }
 
@@ -560,8 +572,69 @@ export default function OrderBatchExportPage() {
   const [importPreview, setImportPreview] = useState<{
     factory: 'T' | 'C' | 'O'
     dbMax: number
-    rows: Array<{ mo_number: string; product_code: string; source_order: string; planned_qty: string; custom_1: string; planned_end_date: string }>
+    skippedCount: number
+    rows: Array<{ mo_number: string; product_code: string; source_order: string; source_order_line: string; planned_qty: string; custom_1: string; planned_end_date: string }>
   } | null>(null)
+  const [poLinks, setPoLinks] = useState<Array<{
+    po_project_id: string; pdl_seq: number | null; so_project_id: string; pdl_seq_so: number | null; line_no: string; mbp_part: string; order_qty_oru: number | null
+  }> | null>(null)
+  const [poLinksLoading, setPoLinksLoading] = useState(false)
+  const [soMatchResults, setSoMatchResults] = useState<SoMatchResult[]>([])
+  const [soMatchLoading, setSoMatchLoading] = useState(false)
+
+  // ---- ERP 销售訂單 比對（品項編碼 + 數量 對源單號 + 行號）----
+  const buildSoMatches = useCallback(async (rows: SourceRow[]) => {
+    if (rows.length === 0) { setSoMatchResults([]); return }
+    setSoMatchLoading(true)
+    try {
+      const orderNumbers = [...new Set(rows.map(r => r.order_number).filter(Boolean))]
+      if (orderNumbers.length === 0) {
+        setSoMatchResults(rows.map(() => ({ line_no: null, pdl_seq: null, status: 'no_order' as const, reason: '無比對到對應的來源單號' })))
+        return
+      }
+      const { data: soLines } = await supabase
+        .from('erp_so_lines')
+        .select('project_id, line_no, mbp_part, order_qty_oru, pdl_seq')
+        .in('project_id', orderNumbers)
+      const lines = soLines ?? []
+      const soProjectIds = new Set(lines.map((l: { project_id: string }) => l.project_id))
+      // Group: project_id + mbp_part + qty → sorted candidates
+      const candidateMap = new Map<string, Array<{ line_no: string; pdl_seq: number | null }>>()
+      for (const line of lines) {
+        const qty = Number(line.order_qty_oru ?? 0)
+        const key = `${line.project_id}|${line.mbp_part ?? ''}|${qty}`
+        if (!candidateMap.has(key)) candidateMap.set(key, [])
+        candidateMap.get(key)!.push({ line_no: String(line.line_no ?? ''), pdl_seq: line.pdl_seq != null ? Number(line.pdl_seq) : null })
+      }
+      // Sort each group by line_no ascending (numeric)
+      for (const arr of candidateMap.values()) {
+        arr.sort((a, b) => (Number(a.line_no) || 0) - (Number(b.line_no) || 0))
+      }
+      // Assign line_no in order, duplicates get next candidate
+      const usageCounter = new Map<string, number>()
+      const results: SoMatchResult[] = rows.map(src => {
+        if (!src.order_number || !soProjectIds.has(src.order_number)) {
+          return { line_no: null, pdl_seq: null, status: 'no_order' as const, reason: '無比對到對應的來源單號' }
+        }
+        const qty = parseFloat(String(src.quantity).replace(/,/g, '')) || 0
+        const key = `${src.order_number}|${src.item_code}|${qty}`
+        const candidates = candidateMap.get(key) ?? []
+        if (candidates.length === 0) {
+          return { line_no: null, pdl_seq: null, status: 'no_qty_match' as const, reason: '有比對到對應的來源單號但無對應數量' }
+        }
+        const used = usageCounter.get(key) ?? 0
+        const candidate = candidates[Math.min(used, candidates.length - 1)]
+        usageCounter.set(key, used + 1)
+        return { line_no: candidate.line_no, pdl_seq: candidate.pdl_seq, status: 'matched' as const, reason: '' }
+      })
+      setSoMatchResults(results)
+    } catch (e) {
+      console.error('buildSoMatches error', e)
+      setSoMatchResults([])
+    } finally {
+      setSoMatchLoading(false)
+    }
+  }, [])
 
   // 還原暫存
   useEffect(() => {
@@ -652,10 +725,14 @@ export default function OrderBatchExportPage() {
       return
     }
 
-    setSourceRows(prev => [...prev, ...parsed])
+    setSourceRows(prev => {
+      const nextRows = [...prev, ...parsed]
+      buildSoMatches(nextRows)
+      return nextRows
+    })
     setPasteText('')
     setShowPasteArea(false)
-  }, [pasteText])
+  }, [pasteText, buildSoMatches])
 
   // ---- 切換選取列的廠別 ----
   const handleToggleFactory = useCallback((target: 'T' | 'C' | 'O') => {
@@ -708,8 +785,8 @@ export default function OrderBatchExportPage() {
   // ---- 匯出全部（CSV / XLSX）----
   const handleExport = useCallback(() => {
     if (sourceRows.length === 0) return
-    doExport(mapAllToExport(sourceRows), '')
-  }, [sourceRows, doExport])
+    doExport(mapAllToExport(sourceRows, soMatchResults), '')
+  }, [sourceRows, soMatchResults, doExport])
 
   // ---- 依廠別匯出 ----
   const handleExportByFactory = useCallback((factory: 'T' | 'C' | 'O') => {
@@ -724,12 +801,10 @@ export default function OrderBatchExportPage() {
     if (sourceRows.length === 0) return
     const nowStr = new Date().toLocaleString('zh-TW')
     try {
-      // 先從 Supabase 同步今日已使用的流水號 → 避免不同裝置同時誤出同號
-      const today = new Date()
-      const dateDigits = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
-      await prefetchSeqFromDb(dateDigits)
+      // 先從 Supabase 同步所有已使用的流水號 → 避免不同裝置同時誤出同號
+      await prefetchSeqFromDb()
 
-      const newRecords = buildSummaryRecords(sourceRows, nowStr)
+      const newRecords = buildSummaryRecords(sourceRows, nowStr, soMatchResults)
       await saveRecordsToSummary(newRecords)
       setSaveMsg(`✅ 已儲存 ${newRecords.length} 筆至製令總表（Supabase）`)
       setTimeout(() => setSaveMsg(''), 3000)
@@ -742,16 +817,35 @@ export default function OrderBatchExportPage() {
 
   // ---- 匯入 ERP 並儲存至總表 ----
   const handleImportToErp = useCallback(async (factory: 'T' | 'C' | 'O') => {
-    const filteredRows = sourceRows.filter(row => row.factory === factory)
-    if (filteredRows.length === 0) return
+    const withIdx = sourceRows.map((r, i) => ({ r, i })).filter(({ r }) => r.factory === factory)
+    if (withIdx.length === 0) return
+    const allMatch = withIdx.map(({ i }) => soMatchResults[i])
 
-    // 先同步 Supabase 製令總表中今日已用流水號 → 使 mo_number 生成不撒號
-    const today = new Date()
-    const dateDigits = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
-    await prefetchSeqFromDb(dateDigits)
+    // 分離有序號 vs 無序號 — 無序號不可匯入，移入暫緩區
+    const withSeqIdx = withIdx.filter((_, j) => !!allMatch[j]?.line_no)
+    const noSeqIdx = withIdx.filter((_, j) => !allMatch[j]?.line_no)
+    if (noSeqIdx.length > 0) {
+      const attemptedAt = new Date().toLocaleString('zh-TW')
+      setFailedImports(prev => mergeFailedImports(
+        prev,
+        noSeqIdx.map(({ r }) => r),
+        '來源訂單序號未比對到，請確認 ERP 同步後重新比對',
+        attemptedAt
+      ))
+    }
+    if (withSeqIdx.length === 0) {
+      alert('⚠️ 本批次所有列均無法比對序號，已移入暫緩區，無資料可匯入。')
+      return
+    }
+
+    const filteredRows = withSeqIdx.map(({ r }) => r)
+    const filteredMatch = withSeqIdx.map(({ i }) => soMatchResults[i])
+
+    // 先同步 Supabase 製令總表中所有已用流水號 → 使 mo_number 生成不撒號
+    await prefetchSeqFromDb()
 
     const { interfaceId, targetLabel } = getImportConfig(factory)
-    const exportRows = mapAllToExport(filteredRows)
+    const exportRows = mapAllToExport(filteredRows, filteredMatch)
     // 所有介面一律轉換為 ERP 欄位代碼（IFAF028 製令、IFAF044 採購單皆使用相同欄位代碼）
     const payload = toErpPayload(exportRows)
 
@@ -787,7 +881,7 @@ export default function OrderBatchExportPage() {
       }
 
       const nowStr = new Date().toLocaleString('zh-TW')
-      const records = buildSummaryRecords(filteredRows, nowStr)
+      const records = buildSummaryRecords(filteredRows, nowStr, filteredMatch)
       try {
         await saveRecordsToSummary(records)
       } catch (saveErr) {
@@ -824,35 +918,65 @@ export default function OrderBatchExportPage() {
     } finally {
       setImportingFactory(null)
     }
-  }, [sourceRows])
+  }, [sourceRows, soMatchResults])
 
   // ---- 匯入前預覽：先跑 prefetch 取得最新 seq，再呈現將產生的製令單號讓使用者確認 ----
   const handleShowPreview = useCallback(async (factory: 'T' | 'C' | 'O') => {
-    const filtered = sourceRows.filter(r => r.factory === factory)
-    if (filtered.length === 0) return
-    const today = new Date()
-    const dateDigits = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+    const withIdx = sourceRows.map((r, i) => ({ r, i })).filter(({ r }) => r.factory === factory)
+    if (withIdx.length === 0) return
+    const filteredMatch = withIdx.map(({ i }) => soMatchResults[i])
+
+    // 分離有序號（來源訂單項號已比對）vs 無序號（移入暫緩區）
+    const withSeqIdx = withIdx.filter((_, j) => !!filteredMatch[j]?.line_no)
+    const noSeqIdx = withIdx.filter((_, j) => !filteredMatch[j]?.line_no)
+    const noSeqCount = noSeqIdx.length
+
+    // 無序號的列移入暫緩區（failedImports）
+    if (noSeqIdx.length > 0) {
+      const attemptedAt = new Date().toLocaleString('zh-TW')
+      setFailedImports(prev => mergeFailedImports(
+        prev,
+        noSeqIdx.map(({ r }) => r),
+        '來源訂單序號未比對到，請確認 ERP 同步後重新比對',
+        attemptedAt
+      ))
+    }
+
+    if (withSeqIdx.length === 0) {
+      alert(`⚠️ ${noSeqCount} 筆均無法比對序號，已全數移入暫緩區。\n請重新同步 SO 後再比對序號。`)
+      return
+    }
+
+    const withSeqRows = withSeqIdx.map(({ r }) => r)
+    const withSeqMatch = withSeqIdx.map(({ i }) => soMatchResults[i])
+
     try {
-      await prefetchSeqFromDb(dateDigits)
+      await prefetchSeqFromDb()
     } catch {
       alert('⚠️ 無法連線 Supabase 查詢已用流水號，將使用本機暫存作為備援。\n如 dev server 剛重啟，請確認 SUPABASE_SERVICE_ROLE 已設定。')
     }
     const prefix = factory === 'O' ? 'MOO' : `MO${factory}`
-    const dbMax = (seqCacheFromDb as Map<string, number>).get(`${prefix}${dateDigits}`) ?? 0
-    const exportRows = mapAllToExport(filtered)
+    // dbMax：取本批次所有 SO 日期中已用的最大流水號（供預覽提示用）
+    const today = new Date()
+    const todayFallback = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+    const soDateDigitsInBatch = [...new Set(withSeqRows.map(r => parseSoDateDigits(r.order_number) ?? todayFallback))]
+    const dbMax = Math.max(0, ...soDateDigitsInBatch.map(d => (seqCacheFromDb as Map<string, number>).get(`${prefix}${d}`) ?? 0))
+    const exportRows = mapAllToExport(withSeqRows, withSeqMatch)
     setImportPreview({
       factory,
       dbMax,
+      skippedCount: noSeqCount,
       rows: exportRows.map(r => ({
         mo_number: r.mo_number,
         product_code: r.product_code,
         source_order: r.source_order,
+        source_order_line: r.source_order_line,
         planned_qty: r.planned_qty,
         custom_1: r.custom_1,
         planned_end_date: r.planned_end_date,
       })),
     })
-  }, [sourceRows])
+  }, [sourceRows, soMatchResults])
 
   const handleRestoreFailedToSource = useCallback((mode: 'append' | 'replace') => {
     if (failedImports.length === 0) return
@@ -882,6 +1006,28 @@ export default function OrderBatchExportPage() {
 
   const handleClearFailedImports = useCallback(() => {
     setFailedImports([])
+  }, [])
+
+  const handleCheckPoLinks = useCallback(async () => {
+    setPoLinksLoading(true)
+    setPoLinks(null)
+    try {
+      const res = await fetch('/api/argoerp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'fetch_po_pdl_links' }),
+      })
+      const json = await res.json()
+      if (json.status === 'ok') {
+        setPoLinks(json.links ?? [])
+      } else {
+        alert(`❌ 比對失敗：${json.error ?? '未知錯誤'}`)
+      }
+    } catch (e) {
+      alert(`❌ 連線錯誤：${e}`)
+    } finally {
+      setPoLinksLoading(false)
+    }
   }, [])
   // ---- 移至暫緩區 / 清空 ----
   const handleMoveToStaging = useCallback(() => {
@@ -966,6 +1112,27 @@ export default function OrderBatchExportPage() {
             {sourceRows.length > 0 && (
               <>
                 {/* 匯出格式選擇 */}
+                <button
+                  onClick={() => buildSoMatches(sourceRows)}
+                  disabled={soMatchLoading}
+                  className="px-4 py-2 rounded-lg bg-teal-800 hover:bg-teal-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium transition-colors text-sm flex items-center gap-1.5"
+                >
+                  {soMatchLoading ? '比對中…' : (
+                    <>
+                      {soMatchResults.length > 0
+                        ? `🔄 重新比對（${soMatchResults.filter(r => r.status === 'matched').length}/${soMatchResults.length} 已比對）`
+                        : '🔍 比對來源單號'
+                      }
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleCheckPoLinks}
+                  disabled={poLinksLoading}
+                  className="px-4 py-2 rounded-lg bg-violet-800 hover:bg-violet-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium transition-colors text-sm flex items-center gap-1.5"
+                >
+                  {poLinksLoading ? '查詢中…' : '🔗 比對採購單'}
+                </button>
                 <div className="flex bg-slate-800 rounded-lg p-0.5 border border-slate-700">
                   <button
                     onClick={() => setExportFormat('csv')}
@@ -1118,6 +1285,7 @@ export default function OrderBatchExportPage() {
                       </th>
                       <th className="px-2 py-3 text-center text-slate-500 font-mono text-xs w-10">#</th>
                       <th className="px-3 py-3 text-left text-slate-300 font-medium whitespace-nowrap text-xs">工單編號</th>
+                      <th className="px-3 py-3 text-center text-slate-300 font-medium whitespace-nowrap text-xs min-w-[100px]">序號比對</th>
                       <th className="px-3 py-3 text-left text-slate-300 font-medium whitespace-nowrap text-xs">單據種類</th>
                       <th className="px-3 py-3 text-center text-slate-300 font-medium whitespace-nowrap text-xs min-w-[90px]">生產廠別</th>
                       {SOURCE_DISPLAY_COLS.filter(c => c.key !== 'order_number' && c.key !== 'doc_type').map(col => (
@@ -1137,6 +1305,26 @@ export default function OrderBatchExportPage() {
                         <td className="px-2 py-2 text-center text-slate-500 font-mono text-xs">{idx + 1}</td>
                         <td className="px-3 py-2 text-slate-300 whitespace-nowrap max-w-[250px] truncate text-xs" title={row.order_number || ''}>
                           {row.order_number || <span className="text-slate-700">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">
+                          {soMatchLoading ? (
+                            <span className="text-slate-600 text-xs">…</span>
+                          ) : soMatchResults[idx] ? (
+                            soMatchResults[idx].status === 'matched' ? (
+                              <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-emerald-900/50 text-emerald-300 border border-emerald-700/40 font-mono">
+                                ✓ {soMatchResults[idx].line_no}
+                              </span>
+                            ) : (
+                              <span
+                                className={`inline-block text-xs px-1.5 py-0.5 rounded border font-medium cursor-help ${soMatchResults[idx].status === 'no_order' ? 'bg-red-900/40 text-red-300 border-red-700/40' : 'bg-amber-900/40 text-amber-300 border-amber-700/40'}`}
+                                title={soMatchResults[idx].reason}
+                              >
+                                {soMatchResults[idx].status === 'no_order' ? '✗ 無單號' : '⚠ 無數量'}
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-slate-700 text-xs">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-slate-300 whitespace-nowrap max-w-[250px] truncate text-xs" title={row.doc_type || ''}>
                           {row.doc_type || <span className="text-slate-700">—</span>}
@@ -1178,9 +1366,11 @@ export default function OrderBatchExportPage() {
                     { type: 'C' as const, label: '常平 (MOC / 採購單)', colorBg: 'bg-orange-900/30', colorBorder: 'border-orange-700/40', colorText: 'text-orange-300', btnClass: 'bg-orange-700 hover:bg-orange-600' },
                     { type: 'O' as const, label: '委外 (MOO / 採購單)', colorBg: 'bg-purple-900/30', colorBorder: 'border-purple-700/40', colorText: 'text-purple-300', btnClass: 'bg-purple-700 hover:bg-purple-600' },
                   ]).map(group => {
-                    const factoryRows = sourceRows.filter(r => r.factory === group.type)
+                    const factoryWithIdx = sourceRows.map((r, i) => ({ r, i })).filter(({ r }) => r.factory === group.type)
+                    const factoryRows = factoryWithIdx.map(({ r }) => r)
                     if (factoryRows.length === 0) return null
-                    const fExportRows = mapAllToExport(factoryRows)
+                    const factoryMatchResults = factoryWithIdx.map(({ i }) => soMatchResults[i])
+                    const fExportRows = mapAllToExport(factoryRows, factoryMatchResults)
                     const importConfig = getImportConfig(group.type)
                     return (
                       <div key={group.type} className={`rounded-lg border ${group.colorBorder} overflow-hidden`}>
@@ -1324,6 +1514,99 @@ export default function OrderBatchExportPage() {
           </div>
         )}
 
+        {/* PO 比對結果面板 */}
+        {poLinks !== null && (() => {
+          // 建立 so_project_id → PO 清單 的 map
+          const soToPo = new Map<string, typeof poLinks>()
+          for (const link of poLinks) {
+            if (!link.so_project_id) continue
+            if (!soToPo.has(link.so_project_id)) soToPo.set(link.so_project_id, [])
+            soToPo.get(link.so_project_id)!.push(link)
+          }
+          // 找出當前來源清單中有對應採購單的 order_number
+          const matchedOrders = sourceRows.filter(r => soToPo.has(r.order_number))
+          return (
+            <div className="mt-6 bg-violet-950/20 border border-violet-700/40 rounded-lg overflow-hidden">
+              <div className="px-4 py-4 border-b border-violet-700/30 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-violet-300">採購單比對結果</h3>
+                  <p className="text-sm text-violet-200/60 mt-0.5">
+                    共查到 <span className="text-violet-300 font-medium">{poLinks.length}</span> 筆 PO 明細有連結訂購單序號。
+                    目前工單清單中有 <span className={`font-medium ${matchedOrders.length > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>{matchedOrders.length}</span> 筆訂購單已對應採購單。
+                  </p>
+                </div>
+                <button onClick={() => setPoLinks(null)} className="text-slate-400 hover:text-white text-lg">✕</button>
+              </div>
+
+              {matchedOrders.length > 0 && (
+                <div className="px-4 py-3 border-b border-violet-700/20 bg-amber-950/20">
+                  <p className="text-xs font-semibold text-amber-300 mb-2">⚠️ 以下工單的訂購單在 ERP 已有採購單，請確認是否重複建立：</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-slate-400 border-b border-slate-700">
+                          <th className="px-3 py-2 text-left">訂購單號</th>
+                          <th className="px-3 py-2 text-left">客戶</th>
+                          <th className="px-3 py-2 text-left">品項</th>
+                          <th className="px-3 py-2 text-left">對應採購單</th>
+                          <th className="px-3 py-2 text-left">採購貨號</th>
+                          <th className="px-3 py-2 text-right">採購數量</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {matchedOrders.flatMap(src =>
+                          (soToPo.get(src.order_number) ?? []).map((link, i) => (
+                            <tr key={`${src.order_number}-${i}`} className="border-b border-slate-800/40">
+                              <td className="px-3 py-1.5 font-mono text-amber-300 whitespace-nowrap">{src.order_number}</td>
+                              <td className="px-3 py-1.5 text-slate-300 max-w-[120px] truncate" title={src.customer}>{src.customer}</td>
+                              <td className="px-3 py-1.5 text-slate-400 max-w-[150px] truncate" title={src.item_name}>{src.item_name}</td>
+                              <td className="px-3 py-1.5 font-mono text-violet-300 whitespace-nowrap">{link.po_project_id}</td>
+                              <td className="px-3 py-1.5 text-slate-300 whitespace-nowrap">{link.mbp_part || '—'}</td>
+                              <td className="px-3 py-1.5 text-right text-slate-300">{link.order_qty_oru ?? '—'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="px-4 py-3">
+                <p className="text-xs text-slate-500 mb-2">所有有連結訂購單的採購單明細（共 {poLinks.length} 筆）：</p>
+                <div className="overflow-x-auto max-h-64">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-slate-900">
+                      <tr className="text-slate-400 border-b border-slate-700">
+                        <th className="px-3 py-2 text-left">採購單號</th>
+                        <th className="px-3 py-2 text-right">採購單序號</th>
+                        <th className="px-3 py-2 text-left">訂購單號</th>
+                        <th className="px-3 py-2 text-right">訂購單序號</th>
+                        <th className="px-3 py-2 text-left">項號</th>
+                        <th className="px-3 py-2 text-left">貨號</th>
+                        <th className="px-3 py-2 text-right">數量</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {poLinks.map((link, i) => (
+                        <tr key={i} className={`border-b border-slate-800/30 ${i % 2 === 0 ? 'bg-slate-900/50' : ''}`}>
+                          <td className="px-3 py-1.5 font-mono text-violet-300 whitespace-nowrap">{link.po_project_id}</td>
+                          <td className="px-3 py-1.5 text-right text-slate-400 font-mono">{link.pdl_seq}</td>
+                          <td className="px-3 py-1.5 font-mono text-cyan-300 whitespace-nowrap">{link.so_project_id}</td>
+                          <td className="px-3 py-1.5 text-right text-slate-400 font-mono">{link.pdl_seq_so}</td>
+                          <td className="px-3 py-1.5 text-slate-400">{link.line_no}</td>
+                          <td className="px-3 py-1.5 text-slate-300">{link.mbp_part || '—'}</td>
+                          <td className="px-3 py-1.5 text-right text-slate-300">{link.order_qty_oru ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* 欄位對應說明 */}
         {sourceRows.length > 0 && (
           <div className="mt-6 bg-slate-900/50 border border-slate-800/50 rounded-lg p-4">
@@ -1371,11 +1654,16 @@ export default function OrderBatchExportPage() {
             <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
               <div>
                 <h2 className="text-base font-bold text-white">匯入預覽 — {factoryLabel(importPreview.factory)} ({importPreview.rows.length} 筆)</h2>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
                   以下為將產生的製令單號，請確認無誤後再匯入
-                  <span className={`ml-3 px-2 py-0.5 rounded text-[11px] font-mono ${importPreview.dbMax > 0 ? 'bg-emerald-900/60 text-emerald-300' : 'bg-yellow-900/60 text-yellow-300'}`}>
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-mono ${importPreview.dbMax > 0 ? 'bg-emerald-900/60 text-emerald-300' : 'bg-yellow-900/60 text-yellow-300'}`}>
                     DB 已用最大號：{importPreview.dbMax > 0 ? String(importPreview.dbMax).padStart(3, '0') : '未抓到（server 可能需重啟）'}
                   </span>
+                  {importPreview.skippedCount > 0 && (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-red-900/60 text-red-300">
+                      ⚠ {importPreview.skippedCount} 筆無序號已移入暫緩區
+                    </span>
+                  )}
                 </p>
               </div>
               <button onClick={() => setImportPreview(null)} className="text-slate-400 hover:text-white text-lg leading-none">✕</button>
@@ -1388,6 +1676,7 @@ export default function OrderBatchExportPage() {
                     <th className="px-3 py-2.5 text-left font-medium">製令單號</th>
                     <th className="px-3 py-2.5 text-left font-medium">生產貨號</th>
                     <th className="px-3 py-2.5 text-left font-medium">來源訂單</th>
+                    <th className="px-3 py-2.5 text-center font-medium">序號 <span className="text-red-400">*</span></th>
                     <th className="px-3 py-2.5 text-right font-medium">數量</th>
                     <th className="px-3 py-2.5 text-left font-medium">客戶</th>
                     <th className="px-3 py-2.5 text-left font-medium">結案日</th>
@@ -1400,6 +1689,11 @@ export default function OrderBatchExportPage() {
                       <td className="px-3 py-2 font-mono text-cyan-300 text-xs whitespace-nowrap">{row.mo_number}</td>
                       <td className="px-3 py-2 text-white text-xs whitespace-nowrap">{row.product_code}</td>
                       <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{row.source_order}</td>
+                      <td className="px-3 py-2 text-center text-xs">
+                        {row.source_order_line
+                          ? <span className="text-emerald-400 font-mono">{row.source_order_line}</span>
+                          : <span className="text-red-400">—</span>}
+                      </td>
                       <td className="px-3 py-2 text-right text-slate-300 text-xs">{row.planned_qty}</td>
                       <td className="px-3 py-2 text-slate-400 text-xs max-w-[150px] truncate" title={row.custom_1}>{row.custom_1}</td>
                       <td className="px-3 py-2 text-slate-400 text-xs whitespace-nowrap">{row.planned_end_date}</td>

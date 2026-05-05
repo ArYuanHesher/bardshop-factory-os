@@ -414,6 +414,51 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    if (action === 'fetch_po_pdl_links') {
+      // ── 查詢有 PDL_SEQ_SO 的採購單明細（代表此 PO 行連結了某 SO 行） ──
+      const poSparam = JSON.stringify({
+        APIKEY1: keys.APIKEY1, APIKEY2: keys.APIKEY2, APIKEY3: keys.APIKEY3,
+        SEGMENT,
+        TABLE: 'PJ_PROJECTDETAIL',
+        SHOWNULLCOLUMN: 'N',
+        CUSTOMCOLUMN: [
+          'PJ_PROJECTDETAIL.PJT_PROJECT_ID',
+          'PJ_PROJECTDETAIL.PDL_SEQ',
+          'PJ_PROJECTDETAIL.SO_PROJECT_ID',
+          'PJ_PROJECTDETAIL.PDL_SEQ_SO',
+          'PJ_PROJECTDETAIL.LINE_NO',
+          'PJ_PROJECTDETAIL.MBP_PART',
+          'PJ_PROJECTDETAIL.ORDER_QTY_ORU',
+        ].join(','),
+        'PJ_PROJECTDETAIL.PDL_SEQ_SO': 'IS NOT NULL',
+      })
+      const poRes = await fetch(`${API_BASE}/S_QUERY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sparam: poSparam }),
+      })
+      const { parsed: parsedPo, rawText: rawPo } = await readApiResponse(poRes)
+      const poError = extractApiError(parsedPo)
+      if (!poRes.ok || !isArgoSuccess(parsedPo)) {
+        return NextResponse.json({
+          status: 'error',
+          error: poError || 'ARGO PO PDL_SEQ_SO query failed',
+          rawText: rawPo,
+        }, { status: 502 })
+      }
+      const poRows = findObjectRows(parsedPo)
+      const links = poRows.map((row) => ({
+        po_project_id: String(getRecordValue(row, 'PJT_PROJECT_ID') ?? '').trim(),
+        pdl_seq:       getRecordValue(row, 'PDL_SEQ') != null ? Number(getRecordValue(row, 'PDL_SEQ')) : null,
+        so_project_id: String(getRecordValue(row, 'SO_PROJECT_ID') ?? '').trim(),
+        pdl_seq_so:    getRecordValue(row, 'PDL_SEQ_SO') != null ? Number(getRecordValue(row, 'PDL_SEQ_SO')) : null,
+        line_no:       String(getRecordValue(row, 'LINE_NO') ?? '').trim(),
+        mbp_part:      String(getRecordValue(row, 'MBP_PART') ?? '').trim(),
+        order_qty_oru: getRecordValue(row, 'ORDER_QTY_ORU') != null ? Number(getRecordValue(row, 'ORDER_QTY_ORU')) : null,
+      }))
+      return NextResponse.json({ status: 'ok', count: links.length, links })
+    }
+
     if (action === 'explore_so_columns') {
       // ── 探索 PJ_PROJECT 和 PJ_PROJECTDETAIL 全部欄位 ──────
       // PJ_PROJECT：取 1 筆 SO
@@ -530,11 +575,11 @@ export async function POST(request: NextRequest) {
           'PJ_PROJECT.HOLD_STATUS',
           'PJ_PROJECT.SALES_NAME',
           'PJ_PROJECT.PARTNER_NAME',
+          'PJ_PROJECTDETAIL.PDL_SEQ',
           'PJ_PROJECTDETAIL.LINE_NO',
           'PJ_PROJECTDETAIL.MBP_PART',
           'PJ_PROJECTDETAIL.MBP_VER',
-          // DESCRIPTION excluded: may contain \n/\t → ORA-64451
-          // REMARK excluded: may contain \n/\t → ORA-64451
+          // REMARK / PACKING / REMARK2 all excluded: ORA-64451 (handled by sync_so_remarks)
           'PJ_PROJECTDETAIL.DUEDATE',
           'PJ_PROJECTDETAIL.ORDER_QTY_ORU',
           'PJ_PROJECTDETAIL.UNIT_OF_MEASURE_ORU',
@@ -589,6 +634,7 @@ export async function POST(request: NextRequest) {
         department:         String(getRecordValue(row, 'SEG_SEGMENT_NO_DEPARTMENT') ?? '').trim() || null,
         sales_category:     String(getRecordValue(row, 'SALES_CATEGORY') ?? '').trim() || null,
         hold_status:        String(getRecordValue(row, 'HOLD_STATUS') ?? '').trim() || null,
+        pdl_seq:            getRecordValue(row, 'PDL_SEQ') != null ? Number(getRecordValue(row, 'PDL_SEQ')) : null,
         line_no:            String(getRecordValue(row, 'LINE_NO') ?? '').trim(),
         mbp_part:           String(getRecordValue(row, 'MBP_PART') ?? '').trim() || null,
         mbp_ver:            getRecordValue(row, 'MBP_VER') != null ? Number(getRecordValue(row, 'MBP_VER')) : null,
@@ -596,7 +642,9 @@ export async function POST(request: NextRequest) {
         description:        String(getRecordValue(row, 'DESCRIPTION') ?? '').trim() || null,
         sales_name:         String(getRecordValue(row, 'SALES_NAME') ?? '').trim() || null,
         partner_name:       String(getRecordValue(row, 'PARTNER_NAME') ?? '').trim() || null,
-        remark:             String(getRecordValue(row, 'REMARK') ?? '').trim() || null,
+        remark:             null,  // excluded: ORA-64451
+        packing:            null,  // excluded: confirmed \t → ORA-64451
+        remark2:            (() => { const v = String(getRecordValue(row, 'REMARK2') ?? '').replace(/[\n\r\t\u0085\u2028\u2029]/g, ' ').trim(); return v || null })(),
         order_qty_oru:      toNumber(getRecordValue(row, 'ORDER_QTY_ORU')),
         unit_of_measure_oru: String(getRecordValue(row, 'UNIT_OF_MEASURE_ORU') ?? '').trim() || null,
         unit_price_oru:     toNumber(getRecordValue(row, 'UNIT_PRICE_ORU')),
@@ -630,6 +678,93 @@ export async function POST(request: NextRequest) {
         status: 'ok',
         syncedCount: soLines.length,
         totalRows: soRows.length,
+      })
+    }
+
+    if (action === 'sync_so_remarks') {
+      // ── 備註欄逐訂單同步（繞過 ORA-64451）────────────────────
+      // REMARK / PACKING / REMARK2 含控制字元，整批查詢會炸；改成逐 project_id 查詢，失敗的跳過。
+      const supabaseAdmin = getSupabaseAdminClient()
+
+      // 1. 取得所有 project_id
+      const { data: projectRows, error: fetchError } = await supabaseAdmin
+        .from('erp_so_lines')
+        .select('project_id')
+      if (fetchError) {
+        return NextResponse.json({ status: 'error', error: fetchError.message }, { status: 500 })
+      }
+
+      const projectIds = [
+        ...new Set((projectRows ?? []).map(r => (r as { project_id: string }).project_id).filter(Boolean)),
+      ]
+
+      // 安全性：只允許 project_id 含字母、數字、連字號（避免 SQL/ARGO 注入）
+      const safeId = /^[A-Za-z0-9_\-]{1,40}$/
+      const sanitize = (v: unknown): string | null =>
+        String(v ?? '').replace(/[\n\r\t\u0085\u2028\u2029]/g, ' ').trim() || null
+
+      type RemarkRow = { pdl_seq: number; remark: string | null; packing: string | null; remark2: string | null }
+      const updates: RemarkRow[] = []
+      const skipped: string[] = []
+
+      // 2. 逐訂單查詢（sequential，避免並發過高）
+      for (const projectId of projectIds) {
+        if (!safeId.test(projectId)) { skipped.push(projectId); continue }
+        try {
+          const sparam = JSON.stringify({
+            APIKEY1: keys.APIKEY1,
+            APIKEY2: keys.APIKEY2,
+            APIKEY3: keys.APIKEY3,
+            SEGMENT,
+            TABLE: 'PJ_PROJECTDETAIL',
+            SHOWNULLCOLUMN: 'N',
+            CUSTOMCOLUMN: 'PDL_SEQ,LINE_NO,REMARK,PACKING,REMARK2',
+            PJT_PROJECT_ID: `= '${projectId}'`,
+          })
+          const res = await fetch(`${API_BASE}/S_QUERY`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sparam }),
+          })
+          const { parsed } = await readApiResponse(res)
+          if (!res.ok || !isArgoSuccess(parsed)) { skipped.push(projectId); continue }
+
+          for (const row of findObjectRows(parsed)) {
+            const pdlSeq = getRecordValue(row, 'PDL_SEQ')
+            if (pdlSeq == null) continue
+            updates.push({
+              pdl_seq: Number(pdlSeq),
+              remark:  sanitize(getRecordValue(row, 'REMARK')),
+              packing: sanitize(getRecordValue(row, 'PACKING')),
+              remark2: sanitize(getRecordValue(row, 'REMARK2')),
+            })
+          }
+        } catch {
+          skipped.push(projectId)
+        }
+      }
+
+      // 3. 寫入 Supabase — 以 pdl_seq 為 key，並行更新（每批 20）
+      let updatedCount = 0
+      const CONCURRENCY = 20
+      for (let i = 0; i < updates.length; i += CONCURRENCY) {
+        const chunk = updates.slice(i, i + CONCURRENCY)
+        const results = await Promise.all(
+          chunk.map(u =>
+            supabaseAdmin
+              .from('erp_so_lines')
+              .update({ remark: u.remark, packing: u.packing, remark2: u.remark2 })
+              .eq('pdl_seq', u.pdl_seq)
+          )
+        )
+        updatedCount += results.filter(r => !r.error).length
+      }
+
+      return NextResponse.json({
+        status: 'ok',
+        updatedCount,
+        skippedProjectCount: skipped.length,
+        skippedProjects: skipped,
       })
     }
 

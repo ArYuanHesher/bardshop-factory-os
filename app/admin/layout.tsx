@@ -155,7 +155,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <div className="absolute inset-0 opacity-[0.15]" style={{ backgroundImage: 'linear-gradient(rgba(6, 182, 212, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(6, 182, 212, 0.1) 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
         </div>
 
-        {useSystemSettingsNavbar ? <SystemSettingsNavbar /> : <AdminNavbar />}
+        <div className="no-print">
+          {useSystemSettingsNavbar ? <SystemSettingsNavbar /> : <AdminNavbar />}
+        </div>
 
         <main className="relative z-10 min-h-[calc(100vh-70px)] p-4 md:p-6">
           {children}

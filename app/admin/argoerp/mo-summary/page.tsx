@@ -18,9 +18,13 @@ interface MoRecord {
   create_date: string
   factory: string
   saved_at: string  // 儲存時間
+  machine?: string
+  plate_count?: string
 }
 
 const STORAGE_KEY = 'argoerp_mo_summary'
+const MACHINES_KEY = 'mo_machines_list'
+const MACHINES_MAP_KEY = 'mo_machines_map'
 
 const DISPLAY_COLS: { key: keyof MoRecord; label: string }[] = [
   { key: 'mo_number', label: '製令單號' },
@@ -34,6 +38,7 @@ const DISPLAY_COLS: { key: keyof MoRecord; label: string }[] = [
   { key: 'mo_note', label: '製令說明' },
   { key: 'create_date', label: '開立日期' },
   { key: 'saved_at', label: '儲存時間' },
+  { key: 'plate_count', label: '盤數' },
 ]
 
 export default function MoSummaryPage() {
@@ -43,6 +48,16 @@ export default function MoSummaryPage() {
   const [exportFormat, setExportFormat] = useState<'csv' | 'xlsx'>('csv')
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState('')
+  const [machines, setMachines] = useState<string[]>([])
+  const [moMachines, setMoMachines] = useState<Record<string, string>>({})
+  const [showMachineManager, setShowMachineManager] = useState(false)
+  const [newMachineName, setNewMachineName] = useState('')
+  const [editingMachineIdx, setEditingMachineIdx] = useState<number | null>(null)
+  const [editingMachineName, setEditingMachineName] = useState('')
+  const [editingRecord, setEditingRecord] = useState<MoRecord | null>(null)
+  const [editFields, setEditFields] = useState<Partial<MoRecord>>({})
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
 
   // 主來源：Supabase。localStorage 只當離線備援。
   const reload = useCallback(async () => {
@@ -70,6 +85,78 @@ export default function MoSummaryPage() {
 
   useEffect(() => { reload() }, [reload])
 
+  // 機台選單初始化
+  useEffect(() => {
+    try {
+      const m = localStorage.getItem(MACHINES_KEY)
+      if (m) setMachines(JSON.parse(m))
+      const mm = localStorage.getItem(MACHINES_MAP_KEY)
+      if (mm) setMoMachines(JSON.parse(mm))
+    } catch {}
+  }, [])
+
+  // 機台選單管理
+  const saveMachineList = (list: string[]) => {
+    setMachines(list)
+    try { localStorage.setItem(MACHINES_KEY, JSON.stringify(list)) } catch {}
+  }
+  const addMachine = () => {
+    const name = newMachineName.trim()
+    if (!name || machines.includes(name)) return
+    saveMachineList([...machines, name])
+    setNewMachineName('')
+  }
+  const deleteMachine = (idx: number) => saveMachineList(machines.filter((_, i) => i !== idx))
+  const startEditMachine = (idx: number) => { setEditingMachineIdx(idx); setEditingMachineName(machines[idx]) }
+  const saveEditMachine = () => {
+    const name = editingMachineName.trim()
+    if (!name || editingMachineIdx === null) return
+    saveMachineList(machines.map((m, i) => i === editingMachineIdx ? name : m))
+    setEditingMachineIdx(null)
+  }
+  const setMoMachine = (moNumber: string, machine: string) => {
+    setMoMachines(prev => {
+      const next = { ...prev, [moNumber]: machine }
+      try { localStorage.setItem(MACHINES_MAP_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
+
+  // 編輯單筆
+  const openEdit = (rec: MoRecord) => {
+    setEditingRecord(rec)
+    setEditFields({
+      planned_start_date: rec.planned_start_date ?? '',
+      planned_end_date: rec.planned_end_date ?? '',
+      planned_qty: rec.planned_qty ?? '',
+      mo_note: rec.mo_note ?? '',
+      plate_count: rec.plate_count ?? '',
+    })
+    setEditError('')
+  }
+  const saveEdit = async () => {
+    if (!editingRecord) return
+    setEditSaving(true)
+    setEditError('')
+    try {
+      const res = await fetch('/api/argoerp/mo-summary', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mo_number: editingRecord.mo_number, fields: editFields }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json?.success) throw new Error(json?.error || `HTTP ${res.status}`)
+      setRecords(prev => prev.map(r =>
+        r.mo_number === editingRecord.mo_number ? { ...r, ...editFields } : r
+      ))
+      setEditingRecord(null)
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   // 篩選
   const filtered = searchText.trim()
     ? records.filter(r =>
@@ -89,6 +176,15 @@ export default function MoSummaryPage() {
       return next
     })
   }, [])
+
+  // 列印預覽
+  const handlePrintPreview = useCallback(() => {
+    const selected = [...selectedRows].sort((a, b) => a - b).map(i => filtered[i]).filter(Boolean)
+    if (selected.length === 0) return
+    const withMachine = selected.map(r => ({ ...r, machine: moMachines[r.mo_number] || '' }))
+    sessionStorage.setItem('mo_print_selection', JSON.stringify(withMachine))
+    window.open('/admin/argoerp/mo-summary/print', '_blank')
+  }, [selectedRows, filtered, moMachines])
 
   // 刪除選取（同步刪 Supabase + localStorage）
   const handleDeleteSelected = useCallback(async () => {
@@ -209,10 +305,28 @@ export default function MoSummaryPage() {
               </>
             )}
             {selectedRows.size > 0 && (
+              <button
+                onClick={handlePrintPreview}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors text-sm flex items-center gap-1.5"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                列印預覽 ({selectedRows.size})
+              </button>
+            )}
+            {selectedRows.size > 0 && (
               <button onClick={handleDeleteSelected} className="px-4 py-2 rounded-lg bg-red-900/60 border border-red-700/50 text-red-300 hover:bg-red-800 hover:text-white transition-colors text-sm">
                 刪除選取 ({selectedRows.size})
               </button>
             )}
+            <button
+              onClick={() => setShowMachineManager(true)}
+              className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors text-sm"
+              title="管理機台選單"
+            >
+              ⚙ 機台管理
+            </button>
           </div>
         </div>
 
@@ -260,6 +374,8 @@ export default function MoSummaryPage() {
                         {col.label}
                       </th>
                     ))}
+                    <th className="px-3 py-3 text-left text-slate-300 font-medium whitespace-nowrap text-xs">機台</th>
+                    <th className="px-3 py-3 text-center text-slate-300 font-medium whitespace-nowrap text-xs">編輯</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -282,6 +398,22 @@ export default function MoSummaryPage() {
                           }
                         </td>
                       ))}
+                      <td className="px-2 py-2">
+                        <select
+                          value={moMachines[row.mo_number] || ''}
+                          onChange={e => setMoMachine(row.mo_number, e.target.value)}
+                          className="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-cyan-500 min-w-[100px]"
+                        >
+                          <option value="">— 未選 —</option>
+                          {machines.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <button
+                          onClick={() => openEdit(row)}
+                          className="px-2 py-1 rounded bg-slate-700 hover:bg-cyan-700 text-slate-300 hover:text-white text-xs transition-colors"
+                        >編輯</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -296,6 +428,125 @@ export default function MoSummaryPage() {
           </div>
         )}
       </div>
+
+      {/* ── 編輯 Modal ── */}
+      {editingRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => !editSaving && setEditingRecord(null)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-white">編輯製令</h2>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">{editingRecord.mo_number}</p>
+              </div>
+              <button onClick={() => !editSaving && setEditingRecord(null)} className="text-slate-500 hover:text-white text-xl leading-none">×</button>
+            </div>
+
+            <div className="space-y-3">
+              {[
+                { key: 'planned_start_date', label: '預定投產日' },
+                { key: 'planned_end_date',   label: '預定結案日' },
+                { key: 'planned_qty',        label: '預訂產出量' },
+                { key: 'plate_count',        label: '盤數' },
+                { key: 'mo_note',            label: '製令說明' },
+              ].map(({ key, label }) => (
+                <div key={key} className="flex items-start gap-3">
+                  <label className="w-24 shrink-0 text-xs text-slate-400 pt-2">{label}</label>
+                  {key === 'mo_note' ? (
+                    <textarea
+                      rows={2}
+                      value={(editFields as Record<string, string>)[key] ?? ''}
+                      onChange={e => setEditFields(prev => ({ ...prev, [key]: e.target.value }))}
+                      className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-cyan-500 resize-none"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={(editFields as Record<string, string>)[key] ?? ''}
+                      onChange={e => setEditFields(prev => ({ ...prev, [key]: e.target.value }))}
+                      className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {editError && (
+              <div className="mt-3 px-3 py-2 bg-red-950/40 border border-red-700/50 rounded text-red-300 text-xs">⚠ {editError}</div>
+            )}
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => !editSaving && setEditingRecord(null)} disabled={editSaving}
+                className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm disabled:opacity-50">
+                取消
+              </button>
+              <button onClick={saveEdit} disabled={editSaving}
+                className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-50">
+                {editSaving ? '儲存中…' : '儲存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 機台管理 Modal ── */}
+      {showMachineManager && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowMachineManager(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-white">機台選單管理</h2>
+              <button onClick={() => setShowMachineManager(false)} className="text-slate-500 hover:text-white text-xl leading-none">×</button>
+            </div>
+
+            {/* 新增 */}
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                value={newMachineName}
+                onChange={e => setNewMachineName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addMachine()}
+                placeholder="輸入機台名稱…"
+                className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-cyan-500 placeholder:text-slate-600"
+              />
+              <button
+                onClick={addMachine}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-sm font-medium transition-colors"
+              >新增</button>
+            </div>
+
+            {/* 清單 */}
+            {machines.length === 0 ? (
+              <p className="text-slate-500 text-sm text-center py-4">尚無機台，請新增</p>
+            ) : (
+              <ul className="space-y-1 max-h-64 overflow-y-auto">
+                {machines.map((m, idx) => (
+                  <li key={idx} className="flex items-center gap-2 px-3 py-2 bg-slate-800/60 rounded-lg border border-slate-700/50">
+                    {editingMachineIdx === idx ? (
+                      <>
+                        <input
+                          type="text"
+                          value={editingMachineName}
+                          onChange={e => setEditingMachineName(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && saveEditMachine()}
+                          autoFocus
+                          className="flex-1 px-2 py-1 bg-slate-700 border border-cyan-500 rounded text-sm text-white focus:outline-none"
+                        />
+                        <button onClick={saveEditMachine} className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs">儲存</button>
+                        <button onClick={() => setEditingMachineIdx(null)} className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded text-xs">取消</button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="flex-1 text-sm text-slate-200">{m}</span>
+                        <button onClick={() => startEditMachine(idx)} className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded text-xs">編輯</button>
+                        <button onClick={() => deleteMachine(idx)} className="px-2 py-1 bg-red-900/60 hover:bg-red-800 text-red-300 rounded text-xs">刪除</button>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

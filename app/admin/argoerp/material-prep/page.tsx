@@ -17,6 +17,7 @@ interface MoRecord {
   create_date?: string
   saved_at?: string
   prep_status?: '未備料' | '已備料' | '無需備料'
+  plate_count?: string
 }
 
 interface BomRow {
