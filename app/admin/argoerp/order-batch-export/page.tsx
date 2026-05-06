@@ -594,6 +594,23 @@ export default function OrderBatchExportPage() {
   const [soMatchResults, setSoMatchResults] = useState<SoMatchResult[]>([])
   const [soMatchLoading, setSoMatchLoading] = useState(false)
 
+  // ---- 手動新增製令 Modal ----
+  const [showManualMoModal, setShowManualMoModal] = useState(false)
+  const [manualMoForm, setManualMoForm] = useState({
+    order_number: '',
+    line_no: '',
+    item_code: '',
+    item_name: '',
+    quantity: '',
+    delivery_date: '',
+    factory: 'T' as 'T' | 'C' | 'O',
+    customer: '',
+    note: '',
+  })
+  const [manualMoErrors, setManualMoErrors] = useState<Record<string, string>>({})
+  const [manualMoImporting, setManualMoImporting] = useState(false)
+  const [manualMoMsg, setManualMoMsg] = useState('')
+
   // ---- ERP 销售訂單 比對（品項編碼 + 數量 對源單號 + 行號）----
   const buildSoMatches = useCallback(async (rows: SourceRow[]) => {
     if (rows.length === 0) { setSoMatchResults([]); return }
@@ -1087,6 +1104,113 @@ export default function OrderBatchExportPage() {
     setTimeout(() => setSaveMsg(''), 5000)
   }, [failedImports])
 
+  // ---- 手動新增製令：驗證 → 建 ExportRow → 上傳 ARGO → 寫總表 ----
+  const handleManualMoImport = useCallback(async () => {
+    // 必填驗證
+    const errs: Record<string, string> = {}
+    if (!manualMoForm.order_number.trim()) errs.order_number = '必填'
+    if (!manualMoForm.line_no.trim() || isNaN(Number(manualMoForm.line_no))) errs.line_no = '必填，請輸入整數序號'
+    if (!manualMoForm.item_code.trim()) errs.item_code = '必填'
+    if (!manualMoForm.item_name.trim()) errs.item_name = '必填'
+    if (!manualMoForm.quantity.trim() || isNaN(Number(manualMoForm.quantity)) || Number(manualMoForm.quantity) <= 0) errs.quantity = '必填，需為正整數'
+    if (!manualMoForm.delivery_date.trim()) errs.delivery_date = '必填'
+    setManualMoErrors(errs)
+    if (Object.keys(errs).length > 0) return
+
+    setManualMoImporting(true)
+    setManualMoMsg('')
+
+    try {
+      // 將 HTML date input (YYYY-MM-DD) 轉為 ERP 需要的 YYYY/MM/DD
+      const deliveryDate = manualMoForm.delivery_date.trim().replace(/-/g, '/')
+
+      const srcRow: SourceRow = {
+        order_number: manualMoForm.order_number.trim(),
+        doc_type: manualMoForm.factory === 'C' ? '常平' : manualMoForm.factory === 'O' ? '委外' : '台北',
+        factory: manualMoForm.factory,
+        receiver: '', is_sample: '', has_material: '', designer: '',
+        customer: manualMoForm.customer.trim(),
+        line_nickname: '', handler: '', issuer: '',
+        item_code: manualMoForm.item_code.trim(),
+        item_name: manualMoForm.item_name.trim(),
+        note: manualMoForm.note.trim(),
+        quantity: manualMoForm.quantity.trim(),
+        delivery_date: deliveryDate,
+        plate_count: '', upload_ro: '', order_status: '', pm_note: '',
+      }
+
+      const matchResult: SoMatchResult = {
+        line_no: String(Number(manualMoForm.line_no.trim())),
+        pdl_seq: null,
+        status: 'matched',
+        reason: '',
+      }
+
+      await prefetchSeqFromDb()
+
+      const { interfaceId, targetLabel } = getImportConfig(manualMoForm.factory)
+      const exportRows = mapAllToExport([srcRow], [matchResult])
+      const payload = toErpPayload(exportRows)
+
+      const response = await fetch('/api/argoerp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'import', interfaceId, data: payload }),
+      })
+      const result = await response.json()
+      const isSuccess = response.ok && result?.success === true
+      const errorStr = typeof result?.error === 'string' ? result.error : ''
+
+      const nowStr = new Date().toLocaleString('zh-TW')
+      const records = buildSummaryRecords([srcRow], nowStr, [matchResult])
+
+      if (!isSuccess && errorStr.includes('製令單號已存在')) {
+        await saveRecordsToSummaryDbUpsert(records)
+        try { saveRecordsToSummaryLocal(records) } catch {}
+        const msg = `⚠️ 製令已存在於 ERP（跳過重複上傳），已補存至製令總表\n製令單號：${records[0]?.mo_number}`
+        alert(msg)
+        setManualMoMsg(msg)
+        setShowManualMoModal(false)
+        return
+      }
+
+      if (!isSuccess) {
+        const errorMessage = result?.error || result?.message || `HTTP ${response.status}`
+        throw new Error(String(errorMessage))
+      }
+
+      await saveRecordsToSummary(records)
+
+      // fire-and-forget 上傳紀錄
+      fetch('/api/argoerp/mo-upload-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rows: records.map(r => ({
+            mo_number: r.mo_number, factory: r.factory, product_code: r.product_code,
+            planned_qty: r.planned_qty, source_order: r.source_order, lot_number: r.lot_number,
+            mo_note: r.mo_note, planned_start_date: r.planned_start_date,
+            planned_end_date: r.planned_end_date, create_date: r.create_date, interface_id: interfaceId,
+          })),
+        }),
+      }).catch(() => {})
+
+      const successMsg = `✅ 製令建立成功！${factoryLabel(manualMoForm.factory)} ${targetLabel}\n製令單號：${records[0]?.mo_number}\n已寫入製令總表，請前往機台分配及批備料頁面查看`
+      alert(successMsg)
+      setManualMoMsg(`✅ 已建立 ${records[0]?.mo_number}`)
+      setShowManualMoModal(false)
+      // 重置表單
+      setManualMoForm({ order_number: '', line_no: '', item_code: '', item_name: '', quantity: '', delivery_date: '', factory: 'T', customer: '', note: '' })
+      setManualMoErrors({})
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setManualMoMsg(`❌ 建立失敗：${message}`)
+      alert(`❌ 手動建立製令失敗：${message}`)
+    } finally {
+      setManualMoImporting(false)
+    }
+  }, [manualMoForm])
+
   const handleCheckPoLinks = useCallback(async () => {
     setPoLinksLoading(true)
     setPoLinks(null)
@@ -1182,6 +1306,15 @@ export default function OrderBatchExportPage() {
             <p className="text-slate-400 mt-1 text-sm">ArgoERP — 貼上工單資料 → 設定廠別 → 匯出 CSV / XLSX</p>
           </div>
           <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => { setManualMoMsg(''); setShowManualMoModal(true) }}
+              className="px-4 py-2 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-medium transition-colors text-sm flex items-center gap-1.5"
+            >
+              ✏️ 手動新增製令
+            </button>
+            {manualMoMsg && (
+              <span className={`px-3 py-2 text-sm ${manualMoMsg.startsWith('❌') ? 'text-red-400' : 'text-emerald-400'}`}>{manualMoMsg}</span>
+            )}
             <button
               onClick={() => setShowPasteArea(v => !v)}
               className="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors text-sm"
@@ -1732,6 +1865,193 @@ export default function OrderBatchExportPage() {
           </div>
         )}
       </div>
+
+      {/* ---- 手動新增製令 Modal ---- */}
+      {showManualMoModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => { if (!manualMoImporting) setShowManualMoModal(false) }}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* 標題 */}
+            <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-white">✏️ 手動新增製令</h2>
+                <p className="text-xs text-slate-400 mt-0.5">填寫必填欄位後，將直接上傳至 ARGO 並寫入製令總表</p>
+              </div>
+              {!manualMoImporting && (
+                <button onClick={() => setShowManualMoModal(false)} className="text-slate-400 hover:text-white text-lg leading-none">✕</button>
+              )}
+            </div>
+
+            {/* 表單 */}
+            <div className="px-5 py-4 space-y-3 overflow-y-auto max-h-[70vh]">
+              {/* 生產廠別 */}
+              <div>
+                <label className="block text-xs text-slate-300 font-medium mb-1">生產廠別 <span className="text-red-400">*</span></label>
+                <div className="flex gap-2">
+                  {(['T', 'C', 'O'] as const).map(f => (
+                    <button key={f} type="button"
+                      onClick={() => setManualMoForm(prev => ({ ...prev, factory: f }))}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                        manualMoForm.factory === f
+                          ? f === 'T' ? 'bg-blue-700 border-blue-500 text-white'
+                          : f === 'C' ? 'bg-orange-700 border-orange-500 text-white'
+                          : 'bg-purple-700 border-purple-500 text-white'
+                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {f === 'T' ? 'T 台北 (製令)' : f === 'C' ? 'C 常平 (採購)' : 'O 委外 (採購)'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 兩欄：來源訂單號 + 訂單序號 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-300 font-medium mb-1">
+                    來源訂單號 (工單編號) <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text" placeholder="例：RO26050101"
+                    value={manualMoForm.order_number}
+                    onChange={e => setManualMoForm(prev => ({ ...prev, order_number: e.target.value }))}
+                    className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 ${manualMoErrors.order_number ? 'border-red-500 focus:ring-red-500/30' : 'border-slate-700 focus:border-cyan-500/50 focus:ring-cyan-500/30'}`}
+                  />
+                  {manualMoErrors.order_number && <p className="text-red-400 text-xs mt-1">{manualMoErrors.order_number}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-300 font-medium mb-1">
+                    訂單項號 (LINE_NO) <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="number" min="1" placeholder="例：5"
+                    value={manualMoForm.line_no}
+                    onChange={e => setManualMoForm(prev => ({ ...prev, line_no: e.target.value }))}
+                    className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 ${manualMoErrors.line_no ? 'border-red-500 focus:ring-red-500/30' : 'border-slate-700 focus:border-cyan-500/50 focus:ring-cyan-500/30'}`}
+                  />
+                  {manualMoErrors.line_no && <p className="text-red-400 text-xs mt-1">{manualMoErrors.line_no}</p>}
+                </div>
+              </div>
+
+              {/* 品項編碼 */}
+              <div>
+                <label className="block text-xs text-slate-300 font-medium mb-1">
+                  品項編碼 (生產貨號) <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text" placeholder="例：P3CMOUB-KZ3080"
+                  value={manualMoForm.item_code}
+                  onChange={e => setManualMoForm(prev => ({ ...prev, item_code: e.target.value }))}
+                  className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 ${manualMoErrors.item_code ? 'border-red-500 focus:ring-red-500/30' : 'border-slate-700 focus:border-cyan-500/50 focus:ring-cyan-500/30'}`}
+                />
+                {manualMoErrors.item_code && <p className="text-red-400 text-xs mt-1">{manualMoErrors.item_code}</p>}
+              </div>
+
+              {/* 品名/規格 */}
+              <div>
+                <label className="block text-xs text-slate-300 font-medium mb-1">
+                  品名/規格 <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text" placeholder="例：客製滑鼠墊 30cm*80cm"
+                  value={manualMoForm.item_name}
+                  onChange={e => setManualMoForm(prev => ({ ...prev, item_name: e.target.value }))}
+                  className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 ${manualMoErrors.item_name ? 'border-red-500 focus:ring-red-500/30' : 'border-slate-700 focus:border-cyan-500/50 focus:ring-cyan-500/30'}`}
+                />
+                {manualMoErrors.item_name && <p className="text-red-400 text-xs mt-1">{manualMoErrors.item_name}</p>}
+              </div>
+
+              {/* 兩欄：數量 + 交付日期 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-300 font-medium mb-1">
+                    數量 <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="number" min="1" placeholder="例：100"
+                    value={manualMoForm.quantity}
+                    onChange={e => setManualMoForm(prev => ({ ...prev, quantity: e.target.value }))}
+                    className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 ${manualMoErrors.quantity ? 'border-red-500 focus:ring-red-500/30' : 'border-slate-700 focus:border-cyan-500/50 focus:ring-cyan-500/30'}`}
+                  />
+                  {manualMoErrors.quantity && <p className="text-red-400 text-xs mt-1">{manualMoErrors.quantity}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-300 font-medium mb-1">
+                    交付日期 (預定結案日) <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={manualMoForm.delivery_date}
+                    onChange={e => setManualMoForm(prev => ({ ...prev, delivery_date: e.target.value }))}
+                    className={`w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 ${manualMoErrors.delivery_date ? 'border-red-500 focus:ring-red-500/30' : 'border-slate-700 focus:border-cyan-500/50 focus:ring-cyan-500/30'}`}
+                  />
+                  {manualMoErrors.delivery_date && <p className="text-red-400 text-xs mt-1">{manualMoErrors.delivery_date}</p>}
+                </div>
+              </div>
+
+              {/* 客戶名稱 */}
+              <div>
+                <label className="block text-xs text-slate-300 font-medium mb-1">客戶名稱</label>
+                <input
+                  type="text" placeholder="選填"
+                  value={manualMoForm.customer}
+                  onChange={e => setManualMoForm(prev => ({ ...prev, customer: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
+                />
+              </div>
+
+              {/* 備註 */}
+              <div>
+                <label className="block text-xs text-slate-300 font-medium mb-1">備註</label>
+                <input
+                  type="text" placeholder="選填，會附加在製令說明後"
+                  value={manualMoForm.note}
+                  onChange={e => setManualMoForm(prev => ({ ...prev, note: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
+                />
+              </div>
+
+              {/* 製令號預覽 */}
+              {manualMoForm.order_number && manualMoForm.line_no && !isNaN(Number(manualMoForm.line_no)) && (
+                <div className="rounded-lg bg-slate-800/60 border border-slate-700 px-3 py-2">
+                  <p className="text-xs text-slate-400 mb-0.5">預計產生製令單號</p>
+                  <p className="font-mono text-cyan-300 text-sm">
+                    {(() => {
+                      const prefix = manualMoForm.factory === 'O' ? 'MOO' : `MO${manualMoForm.factory}`
+                      const today = new Date()
+                      const todayFallback = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+                      const soDate = parseSoDateDigits(manualMoForm.order_number) ?? todayFallback
+                      const seqStr = String(Number(manualMoForm.line_no)).padStart(2, '0')
+                      return `${prefix}${soDate}${seqStr}`
+                    })()}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* 底部按鈕 */}
+            <div className="px-5 py-4 border-t border-slate-700 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowManualMoModal(false)}
+                disabled={manualMoImporting}
+                className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleManualMoImport}
+                disabled={manualMoImporting}
+                className="px-4 py-2 rounded-lg bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 disabled:text-slate-400 text-white text-sm font-medium transition-colors flex items-center gap-1.5"
+              >
+                {manualMoImporting ? (
+                  <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>上傳中…</>
+                ) : (
+                  <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>上傳至 ARGO 並建立製令</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ---- 匯入預覽 Modal ---- */}
       {importPreview && (
