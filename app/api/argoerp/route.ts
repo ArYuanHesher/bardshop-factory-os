@@ -34,6 +34,7 @@ interface InventorySyncMapping {
   itemCodeField: string
   itemNameField?: string
   specField?: string
+  unitField?: string
   physicalCountField?: string
   bookCountField: string
   warehouseTotalField?: string
@@ -148,6 +149,7 @@ function normalizeInventoryRows(rows: Record<string, unknown>[], mapping: Invent
         item_code: itemCode,
         item_name: String(getRecordValue(row, mapping.itemNameField) ?? '').trim(),
         spec: String(getRecordValue(row, mapping.specField) ?? '').trim(),
+        unit_of_measure: mapping.unitField ? String(getRecordValue(row, mapping.unitField) ?? '').trim() || null : null,
         physical_count: toNumber(getRecordValue(row, mapping.physicalCountField)),
         book_count: toNumber(getRecordValue(row, mapping.bookCountField)),
         qisheng_sichuan_total: toNumber(getRecordValue(row, mapping.warehouseTotalField)),

@@ -113,6 +113,7 @@ export default function MaterialPrepPage() {
   // ---- BOM / 庫存 / 替代料 ----
   const [bomRows, setBomRows] = useState<BomRow[]>([])
   const [inventoryMap, setInventoryMap] = useState<Record<string, number>>({})
+  const [unitMap, setUnitMap] = useState<Record<string, string>>({})
   const [substituteMap, setSubstituteMap] = useState<Record<string, SubstituteRuleRow[]>>({})
   const [bomLoading, setBomLoading] = useState(false)
   const [bomError, setBomError] = useState('')
@@ -243,6 +244,7 @@ export default function MaterialPrepPage() {
     if (productCodes.length === 0) {
       setBomRows([])
       setInventoryMap({})
+      setUnitMap({})
       setSubstituteMap({})
       setBomError('')
       return
@@ -282,17 +284,29 @@ export default function MaterialPrepPage() {
       ]))
 
       let nextInventoryMap: Record<string, number> = {}
+      let nextUnitMap: Record<string, string> = {}
       if (allInventoryCodes.length > 0) {
-        const { data: inventoryData, error: inventoryError } = await supabase
-          .from('erp_pj_sync')
-          .select('doc_no, qty')
-          .eq('doc_type', '倉庫庫存')
-          .in('doc_no', allInventoryCodes)
+        const [inventoryRes, unitRes] = await Promise.all([
+          supabase
+            .from('erp_pj_sync')
+            .select('doc_no, qty')
+            .eq('doc_type', '倉庫庫存')
+            .in('doc_no', allInventoryCodes),
+          supabase
+            .from('material_inventory_list')
+            .select('item_code, unit_of_measure')
+            .in('item_code', allInventoryCodes),
+        ])
 
-        if (inventoryError) throw inventoryError
+        if (inventoryRes.error) throw inventoryRes.error
 
-        nextInventoryMap = ((inventoryData as Array<{ doc_no: string; qty: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
+        nextInventoryMap = ((inventoryRes.data as Array<{ doc_no: string; qty: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
           acc[item.doc_no] = Number(item.qty) || 0
+          return acc
+        }, {})
+
+        nextUnitMap = ((unitRes.data as Array<{ item_code: string; unit_of_measure: string | null }> | null) || []).reduce<Record<string, string>>((acc, item) => {
+          if (item.unit_of_measure) acc[item.item_code] = item.unit_of_measure
           return acc
         }, {})
       }
@@ -300,6 +314,7 @@ export default function MaterialPrepPage() {
       setBomRows(rows)
       setSubstituteMap(groupedSubstitutes)
       setInventoryMap(nextInventoryMap)
+      setUnitMap(nextUnitMap)
 
       // ---- 查詢來源訂單的客戶名稱（從 erp_so_lines 取 partner_name）----
       const sourceOrders = Array.from(new Set(moRecords.map(r => (r.source_order ?? '').trim()).filter(Boolean)))
@@ -497,12 +512,12 @@ export default function MaterialPrepPage() {
         source_order: row.source_order,
         material_code: row.selected_material_code,
         required_qty: formatQty(row.required_qty),
-        unit: row.unit,
+        unit: unitMap[row.selected_material_code] || row.unit,
         note: row.source_material_code === row.selected_material_code
           ? '依原 BOM 備料'
           : `替代料：${row.source_material_code} -> ${row.selected_material_code}`,
       }))
-  }, [materialPrepRows, selectedRowKeys])
+  }, [materialPrepRows, selectedRowKeys, unitMap])
 
   // ---- 操作：勾選 ----
   const handleSelectMaterialOverride = useCallback((rowKey: string, materialCode: string) => {

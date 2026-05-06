@@ -15,6 +15,7 @@ interface InventorySyncConfig {
   itemCodeField: string
   itemNameField: string
   specField: string
+  unitField: string
   physicalCountField: string
   bookCountField: string
   warehouseTotalField: string
@@ -38,6 +39,7 @@ const DEFAULT_CONFIG: InventorySyncConfig = {
   itemCodeField: 'ITEM_CODE',
   itemNameField: 'ITEM_NAME',
   specField: 'SPEC',
+  unitField: '',
   physicalCountField: 'PHYSICAL_COUNT',
   bookCountField: 'BOOK_COUNT',
   warehouseTotalField: 'QISHENG_SICHUAN_TOTAL',
@@ -128,6 +130,7 @@ export default function InventorySyncPanel({
             itemCodeField: config.itemCodeField.trim(),
             itemNameField: config.itemNameField.trim() || undefined,
             specField: config.specField.trim() || undefined,
+            unitField: config.unitField.trim() || undefined,
             physicalCountField: config.physicalCountField.trim() || undefined,
             bookCountField: config.bookCountField.trim(),
             warehouseTotalField: config.warehouseTotalField.trim() || undefined,
@@ -243,6 +246,15 @@ export default function InventorySyncPanel({
               value={config.specField}
               onChange={(event) => updateConfig('specField', event.target.value)}
               placeholder="SPEC"
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">單位欄位</label>
+            <input
+              value={config.unitField}
+              onChange={(event) => updateConfig('unitField', event.target.value)}
+              placeholder="UNIT_OF_MEASURE（可留白）"
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-cyan-500/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/30"
             />
           </div>
