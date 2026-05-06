@@ -180,6 +180,15 @@ function extractApiError(result: unknown): string | null {
     if (typeof candidate === 'string' && candidate.trim()) return candidate
   }
 
+  // 從 RESULT 陣列收集 CHECK_FLAG=N 的 ERROR_CODE
+  if (Array.isArray(record.RESULT)) {
+    const errorLines = (record.RESULT as Record<string, unknown>[])
+      .filter(row => String(row.CHECK_FLAG ?? '').toUpperCase() === 'N')
+      .map(row => `${row.SLIP_NO ?? ''} L${row.LINE_NO ?? ''}: ${row.ERROR_CODE ?? ''}`)
+      .filter(Boolean)
+    if (errorLines.length > 0) return errorLines.join('\n')
+  }
+
   return null
 }
 
@@ -193,7 +202,15 @@ function isArgoSuccess(result: unknown): boolean {
   const record = result as Record<string, unknown>
   if (record.STATUS !== undefined) {
     const status = String(record.STATUS).trim().toUpperCase()
-    return !['0', 'FALSE', 'N', 'ERROR'].includes(status)
+    if (['0', 'FALSE', 'N', 'ERROR'].includes(status)) return false
+  }
+
+  // 檢查 RESULT 陣列中是否有任何 CHECK_FLAG = 'N' (ARGO 驗證失敗)
+  if (Array.isArray(record.RESULT)) {
+    const hasCheckError = (record.RESULT as Record<string, unknown>[]).some(
+      row => String(row.CHECK_FLAG ?? '').toUpperCase() === 'N'
+    )
+    if (hasCheckError) return false
   }
 
   return extractApiError(result) === null
