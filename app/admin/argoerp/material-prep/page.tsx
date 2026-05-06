@@ -660,7 +660,7 @@ export default function MaterialPrepPage() {
           MO_MBP_VER: 1,
           MO_QTY: Number(row.planned_qty),
           LINE_NO: lineIndex + 1,
-          MBP_PART: row.material_code,
+          MBP_PART: row.selected_material_code || row.source_material_code,
           MBP_VER: 1,
           NOTICE_QTY: Number(row.required_qty),
           UNIT_OF_MEASURE: 'PCS',
@@ -703,7 +703,8 @@ export default function MaterialPrepPage() {
         throw new Error(`ARGO 已匯入成功但更新狀態失敗：${patchJson?.error || `HTTP ${patchRes.status}`}\n請手動將以下製令標為已備料：${importMos.join(', ')}`)
       }
 
-      setMaterialPrepMessage(`✅ 已送出 ${selectedImportRows.length} 筆到 ARGO，並將 ${importMos.length} 筆製令標記為「已備料」`)
+      const argoRaw = result?.rawText ? `\nARGO 回應：${result.rawText}` : ''
+      setMaterialPrepMessage(`✅ 已送出 ${selectedImportRows.length} 筆到 ARGO，並將 ${importMos.length} 筆製令標記為「已備料」${argoRaw}`)
 
       // 寫入批備料紀錄（fire-and-forget）
       fetch('/api/argoerp/material-prep-log', {
