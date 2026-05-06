@@ -234,7 +234,8 @@ export default function MaterialPrepPage() {
 
   useEffect(() => {
     if (viewMode === 'history') void loadPrepLogs()
-  }, [viewMode, loadPrepLogs])
+    if (viewMode === 'pending') void loadMoRecords()
+  }, [viewMode, loadPrepLogs, loadMoRecords])
 
   // ---- 載入 BOM / 庫存 / 替代料 ----
   const loadBomContext = useCallback(async () => {
