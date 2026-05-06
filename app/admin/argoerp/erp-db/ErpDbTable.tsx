@@ -96,6 +96,31 @@ interface Props {
   title: string
 }
 
+// 每種 doc_type 對應的 sync_pj 參數（與 erp-sync/page.tsx 設定一致）
+const SYNC_CONFIG: Record<string, {
+  table: string
+  customColumn?: string
+  filters?: Record<string, string>
+  mapping: { docNoField: string; startDateField?: string; customerVendorField?: string; remarkField?: string }
+}> = {
+  銷售訂單: {
+    table: 'PJ_PROJECT',
+    customColumn: 'PROJECT_ID,BEGIN_DATE,SALES_NAME,TPN_PARTNER_ID',
+    filters: { PJT_TYPE: "= 'SO'" },
+    mapping: { docNoField: 'PROJECT_ID', startDateField: 'BEGIN_DATE', customerVendorField: 'TPN_PARTNER_ID', remarkField: 'SALES_NAME' },
+  },
+  製令單號: {
+    table: 'PJ_PROJECT',
+    filters: { PJT_TYPE: "= 'MO'" },
+    mapping: { docNoField: 'PROJECT_ID', startDateField: 'BEGIN_DATE', remarkField: 'IN_CHARGE' },
+  },
+  採購單號: {
+    table: 'PJ_PROJECT',
+    filters: { PJT_TYPE: "= 'PO'" },
+    mapping: { docNoField: 'PROJECT_ID', startDateField: 'BEGIN_DATE', customerVendorField: 'TPN_PARTNER_ID' },
+  },
+}
+
 export default function ErpDbTable({ docType, title }: Props) {
   const [rows, setRows] = useState<ErpPjSyncRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -103,6 +128,8 @@ export default function ErpDbTable({ docType, title }: Props) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   const [syncedAt, setSyncedAt] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   const cols = COL_MAP[docType] ?? []
 
@@ -126,6 +153,45 @@ export default function ErpDbTable({ docType, title }: Props) {
   }, [docType])
 
   useEffect(() => { void load() }, [load])
+
+  // 切回分頁時自動重整（同步完後換頁 or 切 tab 回來）
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') void load() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [load])
+
+  const handleSync = useCallback(async () => {
+    const cfg = SYNC_CONFIG[docType]
+    if (!cfg) return
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const res = await fetch('/api/argoerp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sync_pj',
+          table: cfg.table,
+          ...(cfg.customColumn ? { customColumn: cfg.customColumn } : {}),
+          ...(cfg.filters ? { filters: cfg.filters } : {}),
+          docType,
+          mapping: cfg.mapping,
+        }),
+      })
+      const json = await res.json() as { status: string; syncedCount?: number; error?: string }
+      if (json.status === 'ok') {
+        setSyncMsg(`✅ 同步完成：${json.syncedCount ?? 0} 筆`)
+        void load()
+      } else {
+        setSyncMsg(`❌ 同步失敗：${json.error ?? '未知錯誤'}`)
+      }
+    } catch (e) {
+      setSyncMsg(`❌ ${e instanceof Error ? e.message : '連線錯誤'}`)
+    } finally {
+      setSyncing(false)
+    }
+  }, [docType, load])
 
   const filtered = rows.filter(r => {
     if (!search.trim()) return true
@@ -170,6 +236,18 @@ export default function ErpDbTable({ docType, title }: Props) {
             >
               {loading ? '讀取中...' : '🔄 重新整理'}
             </button>
+            {SYNC_CONFIG[docType] && (
+              <button
+                onClick={() => void handleSync()}
+                disabled={syncing || loading}
+                className="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white transition-colors text-sm font-medium"
+              >
+                {syncing ? '同步中...' : '⟳ 同步 ARGO'}
+              </button>
+            )}
+            {syncMsg && (
+              <span className={`text-xs ${syncMsg.startsWith('❌') ? 'text-red-400' : 'text-emerald-400'}`}>{syncMsg}</span>
+            )}
           </div>
         </div>
 

@@ -76,10 +76,14 @@ export async function GET(request: NextRequest) {
 // ============================================================
 // POST：批次寫入製令
 // body: { records: MoRecord[] }
-// 衝突策略：mo_number 已存在則直接報錯（不覆蓋），由前端決定如何處理
+// ?mode=upsert  → 衝突時覆蓋（直接轉入總表用）
+// 預設（無參數）→ INSERT，mo_number 已存在則報錯（不覆蓋）
 // ============================================================
 export async function POST(request: NextRequest) {
   try {
+    const url = new URL(request.url)
+    const isUpsert = url.searchParams.get('mode') === 'upsert'
+
     const body = await request.json()
     const records: MoRecord[] = Array.isArray(body?.records) ? body.records : []
 
@@ -100,6 +104,24 @@ export async function POST(request: NextRequest) {
     const cleaned = records.map(r => pickAllowed(r as unknown as Record<string, unknown>))
 
     const supabase = getSupabaseAdminClient()
+
+    if (isUpsert) {
+      // 直接轉入模式：已存在則覆蓋（跳過 ARGO 重新上傳）
+      const { data, error } = await supabase
+        .from(TABLE)
+        .upsert(cleaned, { onConflict: 'mo_number', ignoreDuplicates: false })
+        .select('mo_number')
+
+      if (error) {
+        return NextResponse.json(
+          { success: false, error: formatSupabaseAdminError(error.message) },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json({ success: true, upserted: data?.length ?? 0 })
+    }
+
     const { data, error } = await supabase
       .from(TABLE)
       .insert(cleaned)

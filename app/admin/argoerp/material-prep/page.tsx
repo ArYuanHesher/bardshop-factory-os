@@ -155,6 +155,33 @@ export default function MaterialPrepPage() {
   const [materialPrepImporting, setMaterialPrepImporting] = useState(false)
   const [materialPrepMessage, setMaterialPrepMessage] = useState('')
 
+  // ---- 同步料件單位 ----
+  const [syncingUnits, setSyncingUnits] = useState(false)
+  const [syncUnitsMsg, setSyncUnitsMsg] = useState<string | null>(null)
+
+  const handleSyncBomUnits = async () => {
+    setSyncingUnits(true)
+    setSyncUnitsMsg(null)
+    try {
+      const res = await fetch('/api/argoerp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync_bom_units' }),
+      })
+      const json = await res.json() as { status: string; totalFromArgo?: number; upsertedCount?: number; error?: string }
+      if (json.status === 'ok') {
+        setSyncUnitsMsg(`✅ 同步完成：ARGO 共 ${json.totalFromArgo ?? 0} 筆料號，寫入 ${json.upsertedCount ?? 0} 筆`)
+        void loadBomContext()
+      } else {
+        setSyncUnitsMsg(`❌ ${json.error ?? '同步失敗'}`)
+      }
+    } catch (e) {
+      setSyncUnitsMsg(`❌ ${e instanceof Error ? e.message : '連線錯誤'}`)
+    } finally {
+      setSyncingUnits(false)
+    }
+  }
+
   // ---- 載入暫存 interface id ----
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -293,10 +320,9 @@ export default function MaterialPrepPage() {
             .eq('doc_type', '倉庫庫存')
             .in('doc_no', allInventoryCodes),
           supabase
-            .from('erp_pj_sync')
-            .select('doc_no, unit')
-            .eq('doc_type', '倉庫庫存')
-            .in('doc_no', allInventoryCodes),
+            .from('mm_bom_part_units')
+            .select('part_code, unit_of_measure')
+            .in('part_code', allInventoryCodes),
         ])
 
         if (inventoryRes.error) throw inventoryRes.error
@@ -306,8 +332,8 @@ export default function MaterialPrepPage() {
           return acc
         }, {})
 
-        nextUnitMap = ((unitRes.data as Array<{ doc_no: string; unit: string | null }> | null) || []).reduce<Record<string, string>>((acc, item) => {
-          if (item.unit) acc[item.doc_no] = item.unit
+        nextUnitMap = ((unitRes.data as Array<{ part_code: string; unit_of_measure: string | null }> | null) || []).reduce<Record<string, string>>((acc, item) => {
+          if (item.unit_of_measure) acc[item.part_code] = item.unit_of_measure
           return acc
         }, {})
       }
@@ -762,6 +788,16 @@ export default function MaterialPrepPage() {
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={() => void handleSyncBomUnits()}
+                disabled={syncingUnits}
+                className="px-4 py-2 rounded-lg bg-amber-800 border border-amber-600 text-amber-100 hover:bg-amber-700 disabled:opacity-50 transition-colors text-sm"
+              >
+                {syncingUnits ? '⏳ 同步中...' : '⚙️ 同步料件單位'}
+              </button>
+              {syncUnitsMsg && <p className="text-xs text-slate-400 max-w-xs text-right">{syncUnitsMsg}</p>}
+            </div>
             <button
               onClick={() => viewMode === 'pending' ? void loadMoRecords() : void loadPrepLogs()}
               disabled={viewMode === 'pending' ? moLoading : prepLogLoading}
@@ -935,6 +971,7 @@ export default function MaterialPrepPage() {
                     <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">需求量</th>
                     <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">現有庫存</th>
                     <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">使用料號</th>
+                    <th className="px-3 py-3 text-center text-slate-300 text-xs whitespace-nowrap">ARGO 單位</th>
                     <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">選用庫存</th>
                     <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">狀態</th>
                     <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">說明</th>
@@ -1023,6 +1060,15 @@ export default function MaterialPrepPage() {
                               )}
                             </div>
                           )}
+                        </td>
+                        <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
+                          {(() => {
+                            const argoUnit = row.selected_material_code ? unitMap[row.selected_material_code] : undefined
+                            const bomUnit = row.unit
+                            if (argoUnit) return <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 font-mono text-xs">{argoUnit}</span>
+                            if (bomUnit) return <span className="px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40 font-mono text-xs" title="未從 ARGO 取得，使用 BOM 單位">{bomUnit}⚠</span>
+                            return <span className="text-red-400 text-xs">—</span>
+                          })()}
                         </td>
                         <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">
                           {row.selected_material_code ? formatQty(row.selected_material_stock_qty) : '—'}

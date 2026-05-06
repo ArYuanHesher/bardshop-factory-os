@@ -1081,6 +1081,64 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    if (action === 'sync_bom_units') {
+      // ── 全量同步 MM_BOM_PART 料號→單位 到 Supabase mm_bom_part_units ──
+      // 不帶 filter，一次取全部 PART + UNIT_OF_MEASURE，避免批次過多 ARGO 請求
+      const sparam = JSON.stringify({
+        APIKEY1: keys.APIKEY1,
+        APIKEY2: keys.APIKEY2,
+        APIKEY3: keys.APIKEY3,
+        SEGMENT,
+        TABLE: 'MM_BOM_PART',
+        SHOWNULLCOLUMN: 'N',
+        CUSTOMCOLUMN: 'PART,UNIT_OF_MEASURE',
+        PART: 'IS NOT NULL',   // ARGO 需要至少一個 filter，否則空 WHERE 子句 → ORA-00936
+      })
+      const argoRes = await fetch(`${API_BASE}/S_QUERY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sparam }),
+      })
+      const { parsed: argoParsed, rawText: argoRaw } = await readApiResponse(argoRes)
+      const argoError = extractApiError(argoParsed)
+      if (!argoRes.ok || !isArgoSuccess(argoParsed)) {
+        return NextResponse.json({ status: 'error', error: argoError || 'ARGO MM_BOM_PART query failed', rawText: argoRaw }, { status: 502 })
+      }
+
+      const bomRows = findObjectRows(argoParsed)
+      if (bomRows.length === 0) {
+        return NextResponse.json({ status: 'error', error: 'ARGO 查無 MM_BOM_PART 資料' }, { status: 422 })
+      }
+
+      // 整理：過濾掉 PART 或 UNIT_OF_MEASURE 為空的
+      const syncedAt = new Date().toISOString()
+      const upsertRows = bomRows
+        .map(row => ({
+          part_code: String(getRecordValue(row, 'PART') ?? '').trim(),
+          unit_of_measure: String(getRecordValue(row, 'UNIT_OF_MEASURE') ?? '').trim() || null,
+          synced_at: syncedAt,
+        }))
+        .filter(r => r.part_code && r.unit_of_measure)
+
+      const supabaseAdmin = getSupabaseAdminClient()
+      const BATCH_SIZE = 500
+      let upsertedCount = 0
+      for (let i = 0; i < upsertRows.length; i += BATCH_SIZE) {
+        const chunk = upsertRows.slice(i, i + BATCH_SIZE)
+        const { error: upsertError } = await supabaseAdmin
+          .from('mm_bom_part_units')
+          .upsert(chunk, { onConflict: 'part_code' })
+        if (upsertError) throw upsertError
+        upsertedCount += chunk.length
+      }
+
+      return NextResponse.json({
+        status: 'ok',
+        totalFromArgo: bomRows.length,
+        upsertedCount,
+      })
+    }
+
     return NextResponse.json({ status: 'error', error: `Unknown action: ${action}` }, { status: 400 })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error)

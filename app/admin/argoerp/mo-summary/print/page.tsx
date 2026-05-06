@@ -118,8 +118,10 @@ const FACTORY_COLOR: Record<string, string> = {
 }
 
 function getLineNo(moNumber: string): string {
-  const last3 = moNumber.slice(-3)
-  const n = parseInt(last3, 10)
+  // 製令號格式：MO{廠別}{soDateDigits}{seqStr(2碼)}
+  // 末 2 碼為來源訂單項號（LINE_NO padStart 2）
+  const last2 = moNumber.slice(-2)
+  const n = parseInt(last2, 10)
   return isNaN(n) ? '0' : String(n)
 }
 

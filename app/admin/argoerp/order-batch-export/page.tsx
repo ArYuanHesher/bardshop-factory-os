@@ -467,6 +467,19 @@ async function saveRecordsToSummaryDb(records: ReturnType<typeof buildSummaryRec
   }
 }
 
+// 直接轉入製令總表（upsert 模式，跳過 ARGO 上傳，已存在的記錄會覆蓋）。失敗會 throw。
+async function saveRecordsToSummaryDbUpsert(records: ReturnType<typeof buildSummaryRecords>): Promise<void> {
+  const res = await fetch('/api/argoerp/mo-summary?mode=upsert', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ records }),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok || !json?.success) {
+    throw new Error(json?.error || `HTTP ${res.status}`)
+  }
+}
+
 // 雙寫：先寫 DB，DB 成功再寫 localStorage（讓 DB 為主、本地為備援）
 async function saveRecordsToSummary(records: ReturnType<typeof buildSummaryRecords>): Promise<void> {
   await saveRecordsToSummaryDb(records)
@@ -876,6 +889,33 @@ export default function OrderBatchExportPage() {
       const isSuccess = response.ok && result?.success === true
 
       if (!isSuccess) {
+        const errorStr = typeof result.error === 'string' ? result.error : ''
+
+        // 製令單號已存在 ARGO（前次已成功上傳但 Supabase 補存失敗）
+        // → 不需重新上傳 ARGO，直接以 upsert 補存到總表即可
+        if (errorStr.includes('製令單號已存在')) {
+          const nowStr = new Date().toLocaleString('zh-TW')
+          const records = buildSummaryRecords(filteredRows, nowStr, filteredMatch)
+          try {
+            await saveRecordsToSummaryDbUpsert(records)
+            try { saveRecordsToSummaryLocal(records) } catch {}
+            setFailedImports(prev => removeFailedImportsByRows(prev, filteredRows))
+            const importedKeys = new Set(filteredRows.map(createSourceRowKey))
+            setSourceRows(prev => prev.filter(r => !importedKeys.has(createSourceRowKey(r))))
+            setSelectedRows(new Set())
+            const warningMsg = `⚠️ ${factoryLabel(factory)} ${records.length} 筆製令已存在於 ERP（跳過重複上傳），已補存至製令總表`
+            setSaveMsg(warningMsg)
+            alert(warningMsg)
+            setTimeout(() => setSaveMsg(''), 6000)
+          } catch (saveErr) {
+            const sm = saveErr instanceof Error ? saveErr.message : '未知錯誤'
+            const attemptedAt = new Date().toLocaleString('zh-TW')
+            setFailedImports(prev => mergeFailedImports(prev, filteredRows, `製令已在ARGO，補存Supabase失敗：${sm}`, attemptedAt))
+            alert(`⚠️ 製令已在 ERP，但補存總表（Supabase）失敗：${sm}\n${filteredRows.length} 筆已移至失敗區`)
+          }
+          return
+        }
+
         const raw = typeof result?.rawText === 'string' ? result.rawText.slice(0, 600) : JSON.stringify(result?.apiResult ?? '').slice(0, 600)
         const fullMsg = `${errorMessage || `ArgoERP 匯入失敗 (HTTP ${response.status})`}\n\n【ARGO 原始回應】\n${raw}`
         throw new Error(fullMsg)
@@ -1029,6 +1069,23 @@ export default function OrderBatchExportPage() {
   const handleClearFailedImports = useCallback(() => {
     setFailedImports([])
   }, [])
+
+  const handleDirectTransferFailedToSummary = useCallback(async () => {
+    if (failedImports.length === 0) return
+    const nowStr = new Date().toISOString()
+    const failedRows = failedImports.map(item => item.row)
+    const records = buildSummaryRecords(failedRows, nowStr)
+    try {
+      await saveRecordsToSummaryDbUpsert(records)
+      try { saveRecordsToSummaryLocal(records) } catch {}
+      setFailedImports(prev => removeFailedImportsByRows(prev, failedRows))
+      setSaveMsg(`✅ 已直接轉入製令總表 ${records.length} 筆`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setSaveMsg(`❌ 轉入失敗：${msg}`)
+    }
+    setTimeout(() => setSaveMsg(''), 5000)
+  }, [failedImports])
 
   const handleCheckPoLinks = useCallback(async () => {
     setPoLinksLoading(true)
@@ -1489,6 +1546,13 @@ export default function OrderBatchExportPage() {
                   className="px-3 py-2 rounded-lg bg-cyan-800/70 border border-cyan-700/50 text-cyan-100 hover:bg-cyan-700 transition-colors text-sm"
                 >
                   送回貼上區修改
+                </button>
+                <button
+                  onClick={handleDirectTransferFailedToSummary}
+                  className="px-3 py-2 rounded-lg bg-emerald-800/70 border border-emerald-700/50 text-emerald-100 hover:bg-emerald-700 transition-colors text-sm"
+                  title="跳過 ARGO 上傳，直接將失敗資料寫入製令總表（upsert，已存在會覆蓋）"
+                >
+                  直接轉入製令總表
                 </button>
                 <button
                   onClick={handleClearFailedImports}
