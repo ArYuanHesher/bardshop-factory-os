@@ -593,7 +593,7 @@ export async function POST(request: NextRequest) {
           'PJ_PROJECT.BEGIN_DATE',
           'PJ_PROJECT.HOLD_STATUS',
           'PJ_PROJECT.SALES_NAME',
-          'PJ_PROJECT.PARTNER_NAME',
+          // PARTNER_NAME excluded: not a direct PJ_PROJECT column in this ARGO instance → ORA-00923
           'PJ_PROJECTDETAIL.PDL_SEQ',
           'PJ_PROJECTDETAIL.LINE_NO',
           'PJ_PROJECTDETAIL.MBP_PART',
@@ -660,7 +660,7 @@ export async function POST(request: NextRequest) {
         duedate:            String(getRecordValue(row, 'DUEDATE') ?? '').trim() || null,
         description:        String(getRecordValue(row, 'DESCRIPTION') ?? '').trim() || null,
         sales_name:         String(getRecordValue(row, 'SALES_NAME') ?? '').trim() || null,
-        partner_name:       String(getRecordValue(row, 'PARTNER_NAME') ?? '').trim() || null,
+        partner_name:       null,  // excluded: PARTNER_NAME not a direct PJ_PROJECT column → ORA-00923
         remark:             null,  // excluded: ORA-64451
         packing:            null,  // excluded: confirmed \t → ORA-64451
         remark2:            (() => { const v = String(getRecordValue(row, 'REMARK2') ?? '').replace(/[\n\r\t\u0085\u2028\u2029]/g, ' ').trim(); return v || null })(),

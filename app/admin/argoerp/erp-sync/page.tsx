@@ -1630,22 +1630,29 @@ export default function ErpSyncPage() {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync_so' }) })
         } else if (tab.key === 'mo') {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync_mo' }) })
-        } else {
-          const cfg = loadConfig(tab.key)
-          const filtersObj: Record<string, string> = {}
-          for (const { key, value } of cfg.filters) { if (key.trim()) filtersObj[key.trim()] = value }
-          res = await fetch('/api/argoerp', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+        } else if (tab.key === 'po') {
+          res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'sync_pj', table: 'PJ_PROJECT', filters: { PJT_TYPE: "= 'PO'" }, docType: '採購單號',
+              mapping: { docNoField: 'PROJECT_ID', subNoField: '', itemCodeField: '', descriptionField: 'PROJECT_NAME', qtyField: '', unitField: '', statusField: 'HOLD_STATUS', startDateField: 'BEGIN_DATE', endDateField: 'END_DATE', customerVendorField: 'IN_CHARGE', remarkField: '' } }) })
+        } else if (tab.key === 'subcontract') {
+          res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'sync_pj', table: 'PJ_PROJECT', filters: { PJT_TYPE: "= 'OO'" }, docType: '委外製令',
+              mapping: { docNoField: 'PROJECT_ID', subNoField: '', itemCodeField: '', descriptionField: 'PROJECT_NAME', qtyField: '', unitField: '', statusField: 'HOLD_STATUS', startDateField: 'BEGIN_DATE', endDateField: 'END_DATE', customerVendorField: 'IN_CHARGE', remarkField: '' } }) })
+        } else if (tab.key === 'inventory') {
+          const invCfg = loadConfig('inventory')
+          const invFiltersObj: Record<string, string> = {}
+          for (const { key, value } of invCfg.filters) { if (key.trim()) invFiltersObj[key.trim()] = value }
+          res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              action: 'sync_pj',
-              table: cfg.table.trim(),
-              customColumn: cfg.customColumn.trim() || undefined,
-              filters: Object.keys(filtersObj).length > 0 ? filtersObj : undefined,
-              docType: DOC_TYPES[tab.key].label,
-              mapping: cfg.mapping,
-            }),
-          })
+              action: 'sync_inventory',
+              table: invCfg.table.trim() || 'MM_BOM_BOH_V',
+              customColumn: invCfg.customColumn.trim() || undefined,
+              filters: Object.keys(invFiltersObj).length > 0 ? invFiltersObj : undefined,
+              mapping: invCfg.mapping,
+            }) })
+        } else {
+          // fallback for unknown tab keys
+          continue
         }
         const result = await res.json() as { status: string; error?: string; syncedCount?: number; totalRows?: number; headerCount?: number; detailTotal?: number; detailAuthorized?: boolean }
         if (result.status !== 'ok') {
