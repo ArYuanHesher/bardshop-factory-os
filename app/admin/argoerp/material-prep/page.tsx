@@ -151,7 +151,7 @@ export default function MaterialPrepPage() {
   const [historyBusy, setHistoryBusy] = useState(false)
 
   // ---- 批備料介面 ----
-  const [materialPrepInterfaceId, setMaterialPrepInterfaceId] = useState('')
+  const materialPrepInterfaceId = 'IFAF078'
   const [materialPrepImporting, setMaterialPrepImporting] = useState(false)
   const [materialPrepMessage, setMaterialPrepMessage] = useState('')
   // 防止雙擊重複送出：useRef 在 React 畫面更新前就能同步擋住第二次點擊
@@ -185,21 +185,7 @@ export default function MaterialPrepPage() {
   }
 
   // ---- 載入暫存 interface id ----
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      const saved = localStorage.getItem(PREP_INTERFACE_KEY)
-      if (saved) setMaterialPrepInterfaceId(saved)
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      if (materialPrepInterfaceId.trim()) localStorage.setItem(PREP_INTERFACE_KEY, materialPrepInterfaceId.trim())
-      else localStorage.removeItem(PREP_INTERFACE_KEY)
-    } catch {}
-  }, [materialPrepInterfaceId])
+  // 介面編號已固定為 IFAF078，不再使用 localStorage
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -938,23 +924,6 @@ export default function MaterialPrepPage() {
 
         {/* 操作區 */}
         <div className="mb-6 bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-3">
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">批備料 ARGO 介面編號</label>
-              <input
-                value={materialPrepInterfaceId}
-                onChange={e => setMaterialPrepInterfaceId(e.target.value)}
-                placeholder="例如 IFAF0XX"
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">說明</label>
-              <div className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-400 leading-relaxed min-h-[42px] flex items-center">
-                勾選製令後可批量「送 ARGO 批備料」或「標記為無需備料」。庫存只從 Supabase material_inventory_list 讀取，請另行於物料總表頁同步 ARGO 庫存。
-              </div>
-            </div>
-          </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300">
               選取 {selectedRowKeys.size} 筆｜可送批備料 {selectedImportRows.length} 筆料號

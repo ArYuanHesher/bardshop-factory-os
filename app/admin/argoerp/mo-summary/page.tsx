@@ -56,6 +56,7 @@ export default function MoSummaryPage() {
   const [editError, setEditError] = useState('')
   const [moPrintRecords, setMoPrintRecords] = useState<Record<string, string[]>>({})
   const [printLogModal, setPrintLogModal] = useState<{ moNumber: string; times: string[] } | null>(null)
+  const [printFilter, setPrintFilter] = useState<'all' | 'printed' | 'unprinted'>('unprinted')
 
   // 主來源：Supabase。localStorage 只當離線備援。
   const reload = useCallback(async () => {
@@ -196,11 +197,16 @@ export default function MoSummaryPage() {
   }
 
   // 篩選
-  const filtered = searchText.trim()
-    ? records.filter(r =>
-        Object.values(r).some(v => v?.toLowerCase().includes(searchText.toLowerCase()))
-      )
-    : records
+  const filtered = records
+    .filter(r => {
+      if (printFilter === 'printed')  return (moPrintRecords[r.mo_number]?.length ?? 0) > 0
+      if (printFilter === 'unprinted') return (moPrintRecords[r.mo_number]?.length ?? 0) === 0
+      return true
+    })
+    .filter(r =>
+      !searchText.trim() ||
+      Object.values(r).some(v => v?.toLowerCase().includes(searchText.toLowerCase()))
+    )
 
   const toggleSelectAll = useCallback(() => {
     if (selectedRows.size === filtered.length) setSelectedRows(new Set())
@@ -320,6 +326,20 @@ export default function MoSummaryPage() {
             <p className="text-slate-400 mt-1 text-sm">已確認轉出的製令記錄（資料儲存於 Supabase）</p>
           </div>
           <div className="flex gap-2 flex-wrap items-center">
+            {/* 列印篩選 */}
+            <div className="flex bg-slate-800 rounded-lg p-0.5 border border-slate-700">
+              {(['unprinted', 'printed', 'all'] as const).map(opt => (
+                <button
+                  key={opt}
+                  onClick={() => { setPrintFilter(opt); setSelectedRows(new Set()) }}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    printFilter === opt ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {opt === 'all' ? '全部' : opt === 'printed' ? '已列印' : '未列印'}
+                </button>
+              ))}
+            </div>
             {/* 重新整理 */}
             <button
               onClick={reload}

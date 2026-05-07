@@ -1419,15 +1419,31 @@ export default function OrderBatchExportPage() {
         </div>
 
         <div className="mb-6 bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <h2 className="text-lg font-semibold text-white mb-3">流程狀態</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-              <span className="text-slate-400">已帶入流程</span>
-              <span className="text-cyan-300 font-semibold">{sourceRows.length} 筆</span>
+          <h2 className="text-base font-semibold text-white mb-3">流程狀態</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+            <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
+              <div className="text-xs text-slate-500 mb-1">出單表</div>
+              <div className={`font-semibold truncate ${loadedFromSheetDate ? 'text-cyan-300' : 'text-slate-600'}`}>
+                {loadedFromSheetDate ?? '未載入'}
+              </div>
             </div>
-            <div className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-              <span className="text-slate-400">批備料作業</span>
-              <span className="text-emerald-300 font-medium text-xs">請前往「生產批備料」頁面處理</span>
+            <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
+              <div className="text-xs text-slate-500 mb-1">已帶入</div>
+              <div className="text-cyan-300 font-bold">{sourceRows.length} <span className="text-slate-500 font-normal text-xs">筆</span></div>
+            </div>
+            <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
+              <div className="text-xs text-slate-500 mb-1">SO 比對</div>
+              <div className={`font-semibold ${soMatchResults.length > 0 ? 'text-emerald-300' : 'text-slate-600'}`}>
+                {soMatchResults.length > 0
+                  ? `${soMatchResults.filter(r => r.status === 'matched').length} / ${soMatchResults.length}`
+                  : '尚未比對'}
+              </div>
+            </div>
+            <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
+              <div className="text-xs text-slate-500 mb-1">匠入失敗</div>
+              <div className={`font-bold ${failedImports.length > 0 ? 'text-red-400' : 'text-slate-600'}`}>
+                {failedImports.length > 0 ? `${failedImports.length} 筆` : '—'}
+              </div>
             </div>
           </div>
         </div>

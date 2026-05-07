@@ -1632,11 +1632,15 @@ export default function ErpSyncPage() {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync_mo' }) })
         } else if (tab.key === 'po') {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'sync_pj', table: 'PJ_PROJECT', filters: { PJT_TYPE: "= 'PO'" }, docType: '採購單號',
+            body: JSON.stringify({ action: 'sync_pj', table: 'PJ_PROJECT',
+              customColumn: 'PROJECT_ID,PROJECT_NAME,HOLD_STATUS,BEGIN_DATE,END_DATE,IN_CHARGE',
+              filters: { PJT_TYPE: "= 'PO'" }, docType: '採購單號',
               mapping: { docNoField: 'PROJECT_ID', subNoField: '', itemCodeField: '', descriptionField: 'PROJECT_NAME', qtyField: '', unitField: '', statusField: 'HOLD_STATUS', startDateField: 'BEGIN_DATE', endDateField: 'END_DATE', customerVendorField: 'IN_CHARGE', remarkField: '' } }) })
         } else if (tab.key === 'subcontract') {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'sync_pj', table: 'PJ_PROJECT', filters: { PJT_TYPE: "= 'OO'" }, docType: '委外製令',
+            body: JSON.stringify({ action: 'sync_pj', table: 'PJ_PROJECT',
+              customColumn: 'PROJECT_ID,PROJECT_NAME,HOLD_STATUS,BEGIN_DATE,END_DATE,IN_CHARGE',
+              filters: { PJT_TYPE: "= 'OO'" }, docType: '委外製令',
               mapping: { docNoField: 'PROJECT_ID', subNoField: '', itemCodeField: '', descriptionField: 'PROJECT_NAME', qtyField: '', unitField: '', statusField: 'HOLD_STATUS', startDateField: 'BEGIN_DATE', endDateField: 'END_DATE', customerVendorField: 'IN_CHARGE', remarkField: '' } }) })
         } else if (tab.key === 'inventory') {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
