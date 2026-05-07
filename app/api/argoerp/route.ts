@@ -574,97 +574,122 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'sync_so') {
-      // ── 銷售訂單同步 (PJ_PROJECT JOIN PJ_PROJECTDETAIL) ─────
-      const soSparam: Record<string, string> = {
+      // ── 銷售訂單同步 (兩段式：先查 PJ_PROJECT 表頭，再查 PJ_PROJECTDETAIL，JS 端 JOIN) ──
+      // 不使用 ARGO 端 SQL JOIN，避免 ORA-00923 / 虛擬欄位地雷（與 sync_mo 同樣模式）
+      const soHeaderSparam = JSON.stringify({
         APIKEY1: keys.APIKEY1,
         APIKEY2: keys.APIKEY2,
         APIKEY3: keys.APIKEY3,
         SEGMENT,
-        TABLE: 'PJ_PROJECT,PJ_PROJECTDETAIL',
-        SHOWCOLUMNTIME: 'Y',  // 與 test_so_detail 一致
-        SHOWNULLCOLUMN: 'Y',  // JOIN 查詢不可用 'N'，否則 null 欄被剔除後 SELECT 變空 → ORA-00923 FROM keyword not found
-        CUSTOMCOLUMN: [
-          'PJ_PROJECT.PROJECT_ID',
-          'PJ_PROJECT.BEGIN_DATE',
-          'PJ_PROJECT.HOLD_STATUS',
-          'PJ_PROJECT.TPN_PARTNER_ID',
-          'PJ_PROJECTDETAIL.LINE_NO',
-          'PJ_PROJECTDETAIL.MBP_PART',
-          'PJ_PROJECTDETAIL.MBP_VER',
-          'PJ_PROJECTDETAIL.DUEDATE',
-          'PJ_PROJECTDETAIL.ORDER_QTY_ORU',
-          'PJ_PROJECTDETAIL.UNIT_OF_MEASURE_ORU',
-        ].join(','),
-        'PJ_PROJECT.PROJECT_ID': '=PJ_PROJECTDETAIL.PJT_PROJECT_ID',
-        'PJ_PROJECT.PJT_TYPE': "= 'SO'",
-      }
+        TABLE: 'PJ_PROJECT',
+        SHOWNULLCOLUMN: 'N',
+        CUSTOMCOLUMN: 'PROJECT_ID,BEGIN_DATE,HOLD_STATUS,TPN_PARTNER_ID',
+        PJT_TYPE: "= 'SO'",
+      })
 
-      const soRes = await fetch(`${API_BASE}/S_QUERY`, {
+      const soHeaderRes = await fetch(`${API_BASE}/S_QUERY`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sparam: JSON.stringify(soSparam) }),
+        body: JSON.stringify({ sparam: soHeaderSparam }),
       })
-      const { parsed: parsedSo, rawText: rawSo } = await readApiResponse(soRes)
-      const soError = extractApiError(parsedSo)
-      if (!soRes.ok || !isArgoSuccess(parsedSo)) {
-        const debugSparam = { ...soSparam }
-        delete (debugSparam as Record<string, string>).APIKEY1
-        delete (debugSparam as Record<string, string>).APIKEY2
-        delete (debugSparam as Record<string, string>).APIKEY3
+      const { parsed: parsedSoHeader, rawText: rawSoHeader } = await readApiResponse(soHeaderRes)
+      const soHeaderError = extractApiError(parsedSoHeader)
+      if (!soHeaderRes.ok || !isArgoSuccess(parsedSoHeader)) {
         return NextResponse.json({
           status: 'error',
-          error: soError || 'ARGO SO JOIN query failed',
-          rawText: rawSo,
-          debugSparam,
+          error: soHeaderError || 'ARGO PJ_PROJECT (SO) query failed',
+          rawText: rawSoHeader,
         }, { status: 502 })
       }
 
-      const soRows = findObjectRows(parsedSo)
-      if (soRows.length === 0) {
-        return NextResponse.json({ status: 'error', error: 'ARGO 查無 SO 資料' }, { status: 422 })
+      const soHeaderRows = findObjectRows(parsedSoHeader)
+      if (soHeaderRows.length === 0) {
+        return NextResponse.json({ status: 'error', error: 'PJ_PROJECT 查無 SO 表頭資料' }, { status: 422 })
       }
+
+      // 表頭 map: PROJECT_ID → header row
+      const soHeaderMap = new Map<string, Record<string, unknown>>()
+      for (const row of soHeaderRows) {
+        const pid = String(getRecordValue(row, 'PROJECT_ID') ?? '').trim()
+        if (pid) soHeaderMap.set(pid, row)
+      }
+
+      // 查 PJ_PROJECTDETAIL — 直接查所有，與 sync_mo 同模式
+      const soDetailSparam = JSON.stringify({
+        APIKEY1: keys.APIKEY1,
+        APIKEY2: keys.APIKEY2,
+        APIKEY3: keys.APIKEY3,
+        SEGMENT,
+        TABLE: 'PJ_PROJECTDETAIL',
+        SHOWNULLCOLUMN: 'N',
+        CUSTOMCOLUMN: 'PJT_PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,DUEDATE,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU',
+        LINE_NO: '>= 0',
+      })
+      const soDetailRes = await fetch(`${API_BASE}/S_QUERY`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sparam: soDetailSparam }),
+      })
+      const { parsed: parsedSoDetail, rawText: rawSoDetail } = await readApiResponse(soDetailRes)
+      if (!soDetailRes.ok || !isArgoSuccess(parsedSoDetail)) {
+        return NextResponse.json({
+          status: 'error',
+          error: extractApiError(parsedSoDetail) || 'ARGO PJ_PROJECTDETAIL query failed',
+          rawText: rawSoDetail,
+        }, { status: 502 })
+      }
+      const allDetailRows = findObjectRows(parsedSoDetail)
+      // 只保留 SO 表頭裡有的 project_id
+      const soDetailRows = allDetailRows.filter((row) => {
+        const pid = String(getRecordValue(row, 'PJT_PROJECT_ID') ?? '').trim()
+        return pid && soHeaderMap.has(pid)
+      })
 
       const syncedAt = new Date().toISOString()
 
-      // 去重：project_id + line_no 為 key
+      // 去重：project_id + line_no
       const dedupeMap = new Map<string, Record<string, unknown>>()
-      for (const row of soRows) {
-        const pid = String(getRecordValue(row, 'PROJECT_ID') ?? '').trim()
+      for (const row of soDetailRows) {
+        const pid = String(getRecordValue(row, 'PJT_PROJECT_ID') ?? '').trim()
         const lineNo = String(getRecordValue(row, 'LINE_NO') ?? '').trim()
         if (!pid) continue
         const key = `${pid}|${lineNo}`
         if (!dedupeMap.has(key)) dedupeMap.set(key, row)
       }
 
-      const soLines = Array.from(dedupeMap.values()).map((row) => ({
-        project_id:         String(getRecordValue(row, 'PROJECT_ID') ?? '').trim(),
-        begin_date:         String(getRecordValue(row, 'BEGIN_DATE') ?? '').trim() || null,
-        tpn_partner_id:     String(getRecordValue(row, 'TPN_PARTNER_ID') ?? '').trim() || null,
-        sales_id:           getRecordValue(row, 'SALES_ID') != null ? Number(getRecordValue(row, 'SALES_ID')) : null,
-        currency:           String(getRecordValue(row, 'CURRENCY') ?? '').trim() || null,
-        exchange_rate:      getRecordValue(row, 'EXCHANGE_RATE') != null ? Number(getRecordValue(row, 'EXCHANGE_RATE')) : null,
-        department:         String(getRecordValue(row, 'SEG_SEGMENT_NO_DEPARTMENT') ?? '').trim() || null,
-        sales_category:     String(getRecordValue(row, 'SALES_CATEGORY') ?? '').trim() || null,
-        hold_status:        String(getRecordValue(row, 'HOLD_STATUS') ?? '').trim() || null,
-        pdl_seq:            getRecordValue(row, 'PDL_SEQ') != null ? Number(getRecordValue(row, 'PDL_SEQ')) : null,
-        line_no:            String(getRecordValue(row, 'LINE_NO') ?? '').trim(),
-        mbp_part:           String(getRecordValue(row, 'MBP_PART') ?? '').trim() || null,
-        mbp_ver:            getRecordValue(row, 'MBP_VER') != null ? Number(getRecordValue(row, 'MBP_VER')) : null,
-        duedate:            String(getRecordValue(row, 'DUEDATE') ?? '').trim() || null,
-        description:        String(getRecordValue(row, 'DESCRIPTION') ?? '').trim() || null,
-        sales_name:         null,  // excluded: SALES_NAME computed/virtual → ORA-00923 in JOIN
-        partner_name:       null,  // excluded: PARTNER_NAME not a direct PJ_PROJECT column → ORA-00923
-        remark:             null,  // excluded: ORA-64451
-        packing:            null,  // excluded: confirmed \t → ORA-64451
-        remark2:            (() => { const v = String(getRecordValue(row, 'REMARK2') ?? '').replace(/[\n\r\t\u0085\u2028\u2029]/g, ' ').trim(); return v || null })(),
-        order_qty_oru:      toNumber(getRecordValue(row, 'ORDER_QTY_ORU')),
-        unit_of_measure_oru: String(getRecordValue(row, 'UNIT_OF_MEASURE_ORU') ?? '').trim() || null,
-        unit_price_oru:     toNumber(getRecordValue(row, 'UNIT_PRICE_ORU')),
-        grade:              String(getRecordValue(row, 'GRADE') ?? '').trim() || null,
-        create_date:        String(getRecordValue(row, 'CREATE_DATE') ?? '').trim() || null,
-        update_date:        String(getRecordValue(row, 'UPDATE_DATE') ?? '').trim() || null,
-        synced_at:          syncedAt,
-      }))
+      const soLines = Array.from(dedupeMap.values()).map((row) => {
+        const pid = String(getRecordValue(row, 'PJT_PROJECT_ID') ?? '').trim()
+        const header = soHeaderMap.get(pid)
+        return {
+          project_id:         pid,
+          begin_date:         String(getRecordValue(header, 'BEGIN_DATE') ?? '').trim() || null,
+          tpn_partner_id:     String(getRecordValue(header, 'TPN_PARTNER_ID') ?? '').trim() || null,
+          sales_id:           null,
+          currency:           null,
+          exchange_rate:      null,
+          department:         null,
+          sales_category:     null,
+          hold_status:        String(getRecordValue(header, 'HOLD_STATUS') ?? '').trim() || null,
+          pdl_seq:            null,
+          line_no:            String(getRecordValue(row, 'LINE_NO') ?? '').trim(),
+          mbp_part:           String(getRecordValue(row, 'MBP_PART') ?? '').trim() || null,
+          mbp_ver:            getRecordValue(row, 'MBP_VER') != null ? Number(getRecordValue(row, 'MBP_VER')) : null,
+          duedate:            String(getRecordValue(row, 'DUEDATE') ?? '').trim() || null,
+          description:        null,
+          sales_name:         null,
+          partner_name:       null,
+          remark:             null,
+          packing:            null,
+          remark2:            null,
+          order_qty_oru:      toNumber(getRecordValue(row, 'ORDER_QTY_ORU')),
+          unit_of_measure_oru: String(getRecordValue(row, 'UNIT_OF_MEASURE_ORU') ?? '').trim() || null,
+          unit_price_oru:     null,
+          grade:              null,
+          create_date:        null,
+          update_date:        null,
+          synced_at:          syncedAt,
+        }
+      })
 
       try {
         const supabaseAdmin = getSupabaseAdminClient()
@@ -689,7 +714,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         status: 'ok',
         syncedCount: soLines.length,
-        totalRows: soRows.length,
+        totalRows: soDetailRows.length,
+        headerCount: soHeaderRows.length,
       })
     }
 
