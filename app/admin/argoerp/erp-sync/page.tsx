@@ -1667,9 +1667,12 @@ export default function ErpSyncPage() {
           // fallback for unknown tab keys
           continue
         }
-        const result = await res.json() as { status: string; error?: string; syncedCount?: number; totalRows?: number; headerCount?: number; detailTotal?: number; detailAuthorized?: boolean }
+        const result = await res.json() as { status: string; error?: string; syncedCount?: number; totalRows?: number; headerCount?: number; detailTotal?: number; detailAuthorized?: boolean; rawText?: string; debugSparam?: Record<string, unknown> }
         if (result.status !== 'ok') {
-          updateStep(i, { status: 'error', message: result.error ?? '同步失敗' })
+          const sparamInfo = result.debugSparam
+            ? `\n送出參數：${Object.entries(result.debugSparam).map(([k,v]) => `${k}=${String(v)}`).join(', ')}` : ''
+          const detail = result.rawText ? `\nARGO 原始回應：${result.rawText.slice(0, 500)}` : ''
+          updateStep(i, { status: 'error', message: (result.error ?? '同步失敗') + sparamInfo + detail })
         } else {
           let msg = ''
           if (tab.key === 'sales') msg = `已同步 ${result.syncedCount ?? 0} 筆（ARGO ${result.totalRows ?? 0} 筆）`

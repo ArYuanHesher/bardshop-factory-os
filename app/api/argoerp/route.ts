@@ -581,6 +581,7 @@ export async function POST(request: NextRequest) {
         APIKEY3: keys.APIKEY3,
         SEGMENT,
         TABLE: 'PJ_PROJECT,PJ_PROJECTDETAIL',
+        SHOWCOLUMNTIME: 'Y',  // 與 test_so_detail 一致
         SHOWNULLCOLUMN: 'Y',  // JOIN 查詢不可用 'N'，否則 null 欄被剔除後 SELECT 變空 → ORA-00923 FROM keyword not found
         CUSTOMCOLUMN: [
           'PJ_PROJECT.PROJECT_ID',
@@ -606,10 +607,15 @@ export async function POST(request: NextRequest) {
       const { parsed: parsedSo, rawText: rawSo } = await readApiResponse(soRes)
       const soError = extractApiError(parsedSo)
       if (!soRes.ok || !isArgoSuccess(parsedSo)) {
+        const debugSparam = { ...soSparam }
+        delete (debugSparam as Record<string, string>).APIKEY1
+        delete (debugSparam as Record<string, string>).APIKEY2
+        delete (debugSparam as Record<string, string>).APIKEY3
         return NextResponse.json({
           status: 'error',
           error: soError || 'ARGO SO JOIN query failed',
           rawText: rawSo,
+          debugSparam,
         }, { status: 502 })
       }
 
