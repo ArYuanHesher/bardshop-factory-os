@@ -591,37 +591,28 @@ export default function DailyOrderSheetPage() {
           </div>
         </div>
 
-        <div className="flex gap-4">
-          {/* 左側：日期清單 */}
-          <aside className="hidden lg:block w-48 shrink-0">
-            <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase mb-2">已儲存日期</h3>
-              {availableSheets.length === 0 ? (
-                <p className="text-slate-600 text-xs">（尚無資料）</p>
-              ) : (
-                <ul className="space-y-1">
-                  {availableSheets.map(s => (
-                    <li key={s.sheet_date}>
-                      <button
-                        onClick={() => setSelectedDate(s.sheet_date)}
-                        className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
-                          s.sheet_date === selectedDate
-                            ? 'bg-cyan-700 text-white'
-                            : 'text-slate-300 hover:bg-slate-800'
-                        }`}
-                      >
-                        <div className="font-medium">{s.sheet_date}</div>
-                        <div className="text-slate-400">{s.row_count} 筆</div>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+        <div>
+          {/* 水平日期列 */}
+          {availableSheets.length > 0 && (
+            <div className="mb-4 flex gap-2 flex-wrap">
+              {availableSheets.map(s => (
+                <button
+                  key={s.sheet_date}
+                  onClick={() => setSelectedDate(s.sheet_date)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                    s.sheet_date === selectedDate
+                      ? 'bg-cyan-700 text-white border-cyan-600'
+                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                  }`}
+                >
+                  {s.sheet_date} <span className="opacity-60">{s.row_count}筆</span>
+                </button>
+              ))}
             </div>
-          </aside>
+          )}
 
           {/* 主內容 */}
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0">
             {/* 貼上區 */}
             {(showPasteArea || (!hasData && !loading)) && (
               <div className="mb-6 bg-slate-900 border border-slate-800 rounded-lg p-4">

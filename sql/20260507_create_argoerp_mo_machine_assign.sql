@@ -13,7 +13,7 @@ create table if not exists public.argoerp_mo_machine_assign (
 alter table public.argoerp_mo_machine_assign enable row level security;
 
 -- 開放 service_role 完整存取（API 透過 service key 存取）
-create policy if not exists "service_role full access"
+create policy "service_role full access"
   on public.argoerp_mo_machine_assign
   for all
   to service_role
