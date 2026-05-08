@@ -79,7 +79,7 @@ export default function RemarksTestPage() {
         setResult({ status: 'error', rows: [], rawSnippet: json.rawSnippet ?? '', error: json.error ?? '未知錯誤', parseMode: 'failed', headerRawSample: null, detailRawSample: null })
       }
     } catch (e) {
-      setResult({ status: 'error', rows: [], rawSnippet: '', error: e instanceof Error ? e.message : String(e), parseMode: 'failed' })
+      setResult({ status: 'error', rows: [], rawSnippet: '', error: e instanceof Error ? e.message : String(e), parseMode: 'failed', headerRawSample: null, detailRawSample: null })
     } finally {
       setRunning(false)
     }
