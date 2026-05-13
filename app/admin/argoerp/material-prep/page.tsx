@@ -176,10 +176,9 @@ export default function MaterialPrepPage() {
   )
   const [customCodeStocks, setCustomCodeStocks] = useState<Record<string, number | null>>({})
 
-  // ---- 盤數優先前綴設定 ----
-  const [platePrefixes, setPlatePrefixes] = useState<string[]>(
-    () => loadFromLocalStorage<string[]>(PREP_PLATE_PREFIXES_KEY, DEFAULT_PLATE_PREFIXES)
-  )
+  // ---- 盤數優先前綴設定（從 Supabase app_settings 載入） ----
+  const [platePrefixes, setPlatePrefixes] = useState<string[]>(DEFAULT_PLATE_PREFIXES)
+  const [platePrefixesLoaded, setPlatePrefixesLoaded] = useState(false)
   const [showPlatePrefixModal, setShowPlatePrefixModal] = useState(false)
   const [platePrefixInput, setPlatePrefixInput] = useState('')
 
@@ -1236,10 +1235,28 @@ export default function MaterialPrepPage() {
     }
   }, [selectedRowKeys, selectedImportRows, materialPrepRows, materialPrepInterfaceId, moRecords, sheetRows, selectedDate, loadSheet])
 
-  // ---- 盤數優先前綴 localStorage 持久化 ----
+  // ---- 盤數優先前綴：從 Supabase 載入 ----
   useEffect(() => {
-    try { localStorage.setItem(PREP_PLATE_PREFIXES_KEY, JSON.stringify(platePrefixes)) } catch {}
-  }, [platePrefixes])
+    supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'material_prep_plate_prefixes')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value && Array.isArray(data.value)) {
+          setPlatePrefixes(data.value as string[])
+        }
+        setPlatePrefixesLoaded(true)
+      })
+  }, [])
+
+  // ---- 盤數優先前綴：寫回 Supabase（載入完成後才觸發）----
+  useEffect(() => {
+    if (!platePrefixesLoaded) return
+    void supabase
+      .from('app_settings')
+      .upsert({ key: 'material_prep_plate_prefixes', value: platePrefixes, updated_at: new Date().toISOString() })
+  }, [platePrefixes, platePrefixesLoaded])
 
   // ============================================================
   // Render

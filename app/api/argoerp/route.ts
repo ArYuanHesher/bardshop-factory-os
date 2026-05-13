@@ -287,7 +287,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { action, data, interfaceId } = body as {
-      action: 'import' | 'query' | 'sync_inventory' | 'sync_customer' | 'fetch_po_pdl_links' | 'explore_so_columns' | 'test_so_detail' | 'sync_so' | 'test_remarks' | 'sync_so_remarks' | 'sync_mo' | 'sync_pj' | 'sync_bom_units' | 'sync_material_prep'
+      action: 'import' | 'query' | 'sync_inventory' | 'sync_customer' | 'fetch_po_pdl_links' | 'explore_so_columns' | 'test_so_detail' | 'sync_so' | 'sync_mo' | 'sync_pj' | 'sync_bom_units' | 'sync_material_prep'
       data?: Record<string, unknown>[]
       interfaceId?: string
     }
@@ -444,7 +444,10 @@ export async function POST(request: NextRequest) {
           if (insertError) throw insertError
         }
       } catch (error) {
-        const message = error instanceof Error ? formatSupabaseAdminError(error.message) : '寫入 material_inventory_list 失敗'
+        const pgErr = error as { message?: string; code?: string; details?: string; hint?: string }
+        const message = pgErr?.message
+          ? `寫入 material_inventory_list 失敗：${pgErr.message}${pgErr.details ? ` / ${pgErr.details}` : ''}${pgErr.hint ? ` (hint: ${pgErr.hint})` : ''}`
+          : error instanceof Error ? formatSupabaseAdminError(error.message) : '寫入 material_inventory_list 失敗（未知錯誤）'
         return NextResponse.json({ status: 'error', error: message }, { status: 500 })
       }
 
@@ -453,6 +456,7 @@ export async function POST(request: NextRequest) {
         syncedCount: normalizedRows.length,
         skippedCount: Math.max(0, queryRows.length - normalizedRows.length),
         table,
+        rawSample: queryRows[0] ?? null,
       })
     }
 
@@ -744,215 +748,6 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    if (action === 'test_remarks') {
-      // ── 備註欄單筆測試（驗證 REMARK/PACKING/REMARK2 解析是否正常）──────────
-      const { projectId } = body as { projectId?: string }
-      if (!projectId || !/^[A-Za-z0-9_\-]{1,40}$/.test(projectId)) {
-        return NextResponse.json({ status: 'error', error: '請提供合法的訂單號碼 (project_id)' }, { status: 400 })
-      }
-      const sanitize = (v: unknown): string | null =>
-        String(v ?? '').replace(/[\n\r\t\u0085\u2028\u2029]/g, ch => {
-          if (ch === '\n') return '\n'   // 保留原始換行（讓 UI 顯示 [含換行]）
-          if (ch === '\r') return ''
-          if (ch === '\t') return '\t'
-          return ' '
-        }).trim() || null
-      // ── 1. PJ_PROJECTDETAIL：明細備註欄 ──────────────────────
-      const sparam = JSON.stringify({
-        APIKEY1: keys.APIKEY1, APIKEY2: keys.APIKEY2, APIKEY3: keys.APIKEY3,
-        SEGMENT,
-        TABLE: 'PJ_PROJECTDETAIL',
-        SHOWNULLCOLUMN: 'N',
-        CUSTOMCOLUMN: 'PDL_SEQ,LINE_NO,REMARK,PACKING,REMARK2',
-        PJT_PROJECT_ID: `= '${projectId}'`,
-      })
-      const res = await fetch(`${API_BASE}/S_QUERY`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sparam }),
-      })
-      const rawText = await res.text()
-      // 判斷解析模式
-      let parsed: unknown = null
-      let parseMode: 'direct' | 'sanitized' | 'failed' = 'direct'
-      try {
-        parsed = JSON.parse(rawText)
-      } catch {
-        try {
-          const fixed = rawText.replace(
-            /[\u0000-\u001F\u007F\u0085\u2028\u2029]/g,
-            ch => {
-              if (ch === '\n') return '\\n'
-              if (ch === '\r') return '\\r'
-              if (ch === '\t') return '\\t'
-              return `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`
-            }
-          )
-          parsed = JSON.parse(fixed)
-          parseMode = 'sanitized'
-        } catch {
-          parseMode = 'failed'
-        }
-      }
-      if (parseMode === 'failed' || !isArgoSuccess(parsed)) {
-        return NextResponse.json({
-          status: 'error',
-          error: parseMode === 'failed' ? '無法解析 ARGO 回應 JSON（即使修復後仍失敗）' : extractApiError(parsed) ?? 'ARGO 回傳非成功狀態',
-          rawSnippet: rawText.slice(0, 1000),
-          parseMode,
-        })
-      }
-
-      // ── 2. PJ_PROJECT：表頭所有欄位（SHOWNULLCOLUMN:Y，方便確認 REMARK 欄位名稱）──
-      let customerRemark: string | null = null
-      let headerRawSample: Record<string, unknown> | null = null
-      try {
-        const hSparam = JSON.stringify({
-          APIKEY1: keys.APIKEY1, APIKEY2: keys.APIKEY2, APIKEY3: keys.APIKEY3,
-          SEGMENT,
-          TABLE: 'PJ_PROJECT',
-          SHOWNULLCOLUMN: 'Y',
-          PJT_PROJECT_ID: `= '${projectId}'`,
-        })
-        const hRes = await fetch(`${API_BASE}/S_QUERY`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sparam: hSparam }),
-        })
-        const hRaw = await hRes.text()
-        const hParsed = tryParseJson(hRaw)
-        if (isArgoSuccess(hParsed)) {
-          const hRows = findObjectRows(hParsed)
-          if (hRows.length > 0) {
-            headerRawSample = hRows[0] as Record<string, unknown>
-            // 嘗試幾個可能的欄位名稱
-            customerRemark =
-              sanitize(getRecordValue(hRows[0], 'CUSTOMER_REMARK')) ??
-              sanitize(getRecordValue(hRows[0], 'REMARK')) ??
-              null
-          }
-        }
-      } catch { /* 表頭查詢失敗不影響明細結果 */ }
-
-      // ── 3. PJ_PROJECTDETAIL：全欄位掃描（SHOWNULLCOLUMN:Y，方便確認明細備註欄名稱）──
-      let detailRawSample: Record<string, unknown> | null = null
-      try {
-        const dSparam = JSON.stringify({
-          APIKEY1: keys.APIKEY1, APIKEY2: keys.APIKEY2, APIKEY3: keys.APIKEY3,
-          SEGMENT,
-          TABLE: 'PJ_PROJECTDETAIL',
-          SHOWNULLCOLUMN: 'Y',
-          PJT_PROJECT_ID: `= '${projectId}'`,
-        })
-        const dRes = await fetch(`${API_BASE}/S_QUERY`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sparam: dSparam }),
-        })
-        const dRaw = await dRes.text()
-        const dParsed = tryParseJson(dRaw)
-        if (isArgoSuccess(dParsed)) {
-          const dRows = findObjectRows(dParsed)
-          if (dRows.length > 0) detailRawSample = dRows[0] as Record<string, unknown>
-        }
-      } catch { /* 掃描失敗不影響結果 */ }
-
-      const rows = findObjectRows(parsed).map(row => ({
-        pdl_seq:         String(getRecordValue(row, 'PDL_SEQ') ?? ''),
-        remark:          sanitize(getRecordValue(row, 'REMARK')),
-        packing:         sanitize(getRecordValue(row, 'PACKING')),
-        remark2:         sanitize(getRecordValue(row, 'REMARK2')),
-        customer_remark: customerRemark,
-      }))
-      return NextResponse.json({ status: 'ok', rows, rawSnippet: rawText.slice(0, 500), parseMode, headerRawSample, detailRawSample })
-    }
-
-    if (action === 'sync_so_remarks') {
-      // ── 備註欄逐訂單同步（繞過 ORA-64451）────────────────────
-      // REMARK / PACKING / REMARK2 含控制字元，整批查詢會炸；改成逐 project_id 查詢，失敗的跳過。
-      const supabaseAdmin = getSupabaseAdminClient()
-
-      // 1. 取得所有 project_id
-      const { data: projectRows, error: fetchError } = await supabaseAdmin
-        .from('erp_so_lines')
-        .select('project_id')
-      if (fetchError) {
-        return NextResponse.json({ status: 'error', error: fetchError.message }, { status: 500 })
-      }
-
-      const projectIds = [
-        ...new Set((projectRows ?? []).map(r => (r as { project_id: string }).project_id).filter(Boolean)),
-      ]
-
-      // 安全性：只允許 project_id 含字母、數字、連字號（避免 SQL/ARGO 注入）
-      const safeId = /^[A-Za-z0-9_\-]{1,40}$/
-      const sanitize = (v: unknown): string | null =>
-        String(v ?? '').replace(/[\n\r\t\u0085\u2028\u2029]/g, ' ').trim() || null
-
-      type RemarkRow = { pdl_seq: number; remark: string | null; packing: string | null; remark2: string | null }
-      const updates: RemarkRow[] = []
-      const skipped: string[] = []
-
-      // 2. 逐訂單查詢（sequential，避免並發過高）
-      for (const projectId of projectIds) {
-        if (!safeId.test(projectId)) { skipped.push(projectId); continue }
-        try {
-          const sparam = JSON.stringify({
-            APIKEY1: keys.APIKEY1,
-            APIKEY2: keys.APIKEY2,
-            APIKEY3: keys.APIKEY3,
-            SEGMENT,
-            TABLE: 'PJ_PROJECTDETAIL',
-            SHOWNULLCOLUMN: 'N',
-            CUSTOMCOLUMN: 'PDL_SEQ,LINE_NO,REMARK,PACKING,REMARK2',
-            PJT_PROJECT_ID: `= '${projectId}'`,
-          })
-          const res = await fetch(`${API_BASE}/S_QUERY`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sparam }),
-          })
-          const { parsed } = await readApiResponse(res)
-          if (!res.ok || !isArgoSuccess(parsed)) { skipped.push(projectId); continue }
-
-          for (const row of findObjectRows(parsed)) {
-            const pdlSeq = getRecordValue(row, 'PDL_SEQ')
-            if (pdlSeq == null) continue
-            updates.push({
-              pdl_seq: Number(pdlSeq),
-              remark:  sanitize(getRecordValue(row, 'REMARK')),
-              packing: sanitize(getRecordValue(row, 'PACKING')),
-              remark2: sanitize(getRecordValue(row, 'REMARK2')),
-            })
-          }
-        } catch {
-          skipped.push(projectId)
-        }
-      }
-
-      // 3. 寫入 Supabase — 以 pdl_seq 為 key，並行更新（每批 20）
-      let updatedCount = 0
-      const CONCURRENCY = 20
-      for (let i = 0; i < updates.length; i += CONCURRENCY) {
-        const chunk = updates.slice(i, i + CONCURRENCY)
-        const results = await Promise.all(
-          chunk.map(u =>
-            supabaseAdmin
-              .from('erp_so_lines')
-              .update({ remark: u.remark, packing: u.packing, remark2: u.remark2 })
-              .eq('pdl_seq', u.pdl_seq)
-          )
-        )
-        updatedCount += results.filter(r => !r.error).length
-      }
-
-      return NextResponse.json({
-        status: 'ok',
-        updatedCount,
-        skippedProjectCount: skipped.length,
-        skippedProjects: skipped,
-      })
-    }
 
     if (action === 'sync_mo') {
       // ── 製令同步 ────────────────────────────────────────────

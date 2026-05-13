@@ -50,9 +50,6 @@ export default function SoSyncPage() {
   const [syncing, setSyncing]           = useState(false)
   const [syncMsg, setSyncMsg]           = useState<string | null>(null)
   const [syncError, setSyncError]       = useState<string | null>(null)
-  const [syncingRemarks, setSyncingRemarks] = useState(false)
-  const [syncRemarksMsg, setSyncRemarksMsg] = useState<string | null>(null)
-  const [syncRemarksError, setSyncRemarksError] = useState<string | null>(null)
   const [search, setSearch]       = useState('')
   const [sortCol, setSortCol]     = useState<SortCol>('project_id')
   const [sortDir, setSortDir]     = useState<SortDir>('asc')
@@ -110,39 +107,6 @@ export default function SoSyncPage() {
     }
   }
 
-  async function handleSyncRemarks() {
-    setSyncingRemarks(true)
-    setSyncRemarksMsg(null)
-    setSyncRemarksError(null)
-    try {
-      const res = await fetch('/api/argoerp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'sync_so_remarks' }),
-      })
-      const json = await res.json() as {
-        status: string
-        updatedCount?: number
-        skippedProjectCount?: number
-        skippedProjects?: string[]
-        error?: string
-      }
-      if (json.status === 'ok') {
-        const skippedNote = (json.skippedProjectCount ?? 0) > 0
-          ? `，${String(json.skippedProjectCount)} 筆訂單因特殊字元跳過（${(json.skippedProjects ?? []).slice(0, 5).join(', ')}${(json.skippedProjectCount ?? 0) > 5 ? '...' : ''}）`
-          : ''
-        setSyncRemarksMsg(`備註欄同步完成：更新 ${String(json.updatedCount)} 列${skippedNote}`)
-        void fetchRows()
-      } else {
-        setSyncRemarksError(json.error ?? '備註同步失敗')
-      }
-    } catch (e) {
-      setSyncRemarksError(e instanceof Error ? e.message : '網路錯誤')
-    } finally {
-      setSyncingRemarks(false)
-    }
-  }
-
   function toggleSort(col: SortCol) {
     if (sortCol === col) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -173,14 +137,6 @@ export default function SoSyncPage() {
             </span>
           )}
           <button
-            onClick={() => void handleSyncRemarks()}
-            disabled={syncingRemarks || syncing}
-            className="px-4 py-2 rounded-lg bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm transition-colors"
-            title="逐訂單查詢 REMARK / PACKING / REMARK2，含特殊字元的訂單自動跳過"
-          >
-            {syncingRemarks ? '備註同步中...' : '同步備註欄'}
-          </button>
-          <button
             onClick={() => void handleSync()}
             disabled={syncing}
             className="px-5 py-2 rounded-lg bg-teal-600 hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm transition-colors"
@@ -194,16 +150,6 @@ export default function SoSyncPage() {
       {syncMsg && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-teal-900/40 border border-teal-700 text-teal-300 text-sm">
           {syncMsg}
-        </div>
-      )}
-      {syncRemarksMsg && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-indigo-900/40 border border-indigo-700 text-indigo-300 text-sm">
-          {syncRemarksMsg}
-        </div>
-      )}
-      {syncRemarksError && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-red-900/40 border border-red-700 text-red-300 text-sm whitespace-pre-wrap">
-          ⚠ 備註同步錯誤：{syncRemarksError}
         </div>
       )}
       {syncError && (
