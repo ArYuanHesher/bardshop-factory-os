@@ -459,6 +459,9 @@ export default function MaterialPrepPage() {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sheet_date: date, updates: autoFillUpdates }),
+          }).then(() => {
+            // PATCH 完成後重新整理日期下拉的待備料計數
+            void loadSheetList()
           }).catch(() => {})
         }
 
@@ -481,7 +484,7 @@ export default function MaterialPrepPage() {
     } finally {
       setSheetLoading(false)
     }
-  }, [loadMoRecords])
+  }, [loadMoRecords, loadSheetList])
 
   // ---- 載入上傳紀錄 ----
   const loadPrepLogs = useCallback(async () => {
@@ -894,6 +897,46 @@ export default function MaterialPrepPage() {
     }
   }, [selectedRowKeys, materialPrepRows, moRecords, sheetRows, selectedDate, loadSheet])
 
+  // ---- 操作：取消「無需備料」標記（改回待備料）----
+  const handleRevertNoNeed = useCallback(async (moNumber: string) => {
+    if (!moNumber) return
+    if (!window.confirm(`確定取消「無需備料」標記？\n製令 ${moNumber} 將改回「待備料」狀態。`)) return
+    if (!window.confirm(`再次確認：將 ${moNumber} 改回「待備料」？`)) return
+    setActionBusy(true)
+    setActionMessage('')
+    try {
+      const res = await fetch('/api/argoerp/mo-summary', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mo_numbers: [moNumber], prep_status: '未備料' }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json?.success) throw new Error(json?.error || `HTTP ${res.status}`)
+
+      // 同步出單表的 material_prep_status 設為 null
+      const sheetUpdates = sheetRows
+        .filter(r => r.mo_number === moNumber)
+        .map(r => ({ row_key: r.row_key, material_prep_status: null }))
+      if (sheetUpdates.length > 0) {
+        await fetch('/api/argoerp/daily-order-sheet', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sheet_date: selectedDate, updates: sheetUpdates }),
+        }).catch(() => {})
+      }
+
+      setActionMessage(`✅ ${moNumber} 已改回「待備料」`)
+      await loadSheet(selectedDate)
+      void loadSheetList()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setActionMessage(`❌ 取消失敗：${msg}`)
+    } finally {
+      setActionBusy(false)
+      setTimeout(() => setActionMessage(''), 6000)
+    }
+  }, [sheetRows, selectedDate, loadSheet, loadSheetList])
+
   // ---- 操作：從紀錄重設為未備料（可再次上傳）----
   const handleResetToPending = useCallback(async () => {
     if (selectedLogIds.size === 0) return
@@ -1259,7 +1302,15 @@ export default function MaterialPrepPage() {
                               <span className="px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 text-xs">已備料</span>
                             )}
                             {prepStatus === '無需備料' && (
-                              <span className="px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/50 text-xs">無需備料</span>
+                              <button
+                                type="button"
+                                onClick={() => row.mo_number && void handleRevertNoNeed(row.mo_number)}
+                                disabled={actionBusy || !row.mo_number}
+                                title="點擊取消「無需備料」標記，改回待備料"
+                                className="px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/50 text-xs hover:bg-amber-900/80 hover:border-amber-600 disabled:opacity-50 cursor-pointer transition-colors"
+                              >
+                                無需備料
+                              </button>
                             )}
                             {prepStatus === '未備料' && (
                               <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-xs">待備料</span>

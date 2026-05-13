@@ -950,6 +950,109 @@ export default function OrderBatchExportPage() {
           return
         }
 
+        // ── 嘗試解析 RESULT[] 做「部分成功 / 部分失敗」分割 ──
+        // ARGO 對每筆 MO 個別驗證；CHECK_FLAG=N 表示該筆失敗，其他 CHECK_FLAG=Y 的可視為已寫入
+        const argoResultRows: Record<string, unknown>[] = Array.isArray(result?.apiResult?.RESULT)
+          ? (result.apiResult.RESULT as Record<string, unknown>[])
+          : []
+        if (argoResultRows.length > 0) {
+          // 以 SLIP_NO（= mo_number）為 key 收集錯誤訊息
+          const failedSlipErrors = new Map<string, string[]>()
+          const seenSlips = new Set<string>()
+          for (const row of argoResultRows) {
+            const slip = String(row.SLIP_NO ?? '').trim()
+            if (!slip) continue
+            seenSlips.add(slip)
+            const flag = String(row.CHECK_FLAG ?? '').toUpperCase()
+            if (flag === 'N') {
+              const errCode = String(row.ERROR_CODE ?? row.ERROR ?? '未知錯誤').trim()
+              const lineNo = String(row.LINE_NO ?? '')
+              const detail = lineNo ? `L${lineNo}: ${errCode}` : errCode
+              if (!failedSlipErrors.has(slip)) failedSlipErrors.set(slip, [])
+              failedSlipErrors.get(slip)!.push(detail)
+            }
+          }
+
+          // 預先建構所有 MO 紀錄（包含 mo_number，方便對照）
+          const nowStr = new Date().toLocaleString('zh-TW')
+          const allRecords = buildSummaryRecords(filteredRows, nowStr, filteredMatch)
+          const successRows: typeof filteredRows = []
+          const successRecords: typeof allRecords = []
+          const failedRowsAndErrors: { row: SourceRow; error: string }[] = []
+          for (let i = 0; i < filteredRows.length; i++) {
+            const moNo = allRecords[i]?.mo_number ?? ''
+            // 該 MO 在 RESULT 中無 CHECK_FLAG=N → 視為成功（若 RESULT 完全沒提到該 SLIP，保守當失敗）
+            const errs = failedSlipErrors.get(moNo)
+            if (errs) {
+              failedRowsAndErrors.push({ row: filteredRows[i], error: errs.join(' / ') })
+            } else if (seenSlips.has(moNo)) {
+              successRows.push(filteredRows[i])
+              successRecords.push(allRecords[i])
+            } else {
+              // ARGO 沒回報這筆 → 不確定狀態，當失敗較安全
+              failedRowsAndErrors.push({ row: filteredRows[i], error: 'ARGO 未回報此筆狀態' })
+            }
+          }
+
+          if (successRows.length > 0) {
+            // 儲存成功部分至總表
+            try {
+              await saveRecordsToSummary(successRecords)
+            } catch (saveErr) {
+              const sm = saveErr instanceof Error ? saveErr.message : '未知錯誤'
+              alert(`⚠️ ${successRecords.length} 筆已匯入 ERP，但 Supabase 儲存失敗：${sm}\n\n請記下以下製令號並手動補登：\n${successRecords.map(r => r.mo_number).join(', ')}`)
+            }
+            // 寫入製令上傳紀錄
+            fetch('/api/argoerp/mo-upload-log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                rows: successRecords.map(r => ({
+                  mo_number: r.mo_number, factory: r.factory, product_code: r.product_code,
+                  planned_qty: r.planned_qty, source_order: r.source_order,
+                  lot_number: r.lot_number, mo_note: r.mo_note,
+                  planned_start_date: r.planned_start_date, planned_end_date: r.planned_end_date,
+                  create_date: r.create_date, interface_id: interfaceId,
+                })),
+              }),
+            }).catch(err => console.warn('[製令上傳紀錄] 寫入失敗', err))
+
+            // 從失敗區移除這些（如果原本在的話）
+            setFailedImports(prev => removeFailedImportsByRows(prev, successRows))
+
+            // 更新出單表狀態
+            if (loadedFromSheetDate) {
+              updateSheetRowStatuses(loadedFromSheetDate, successRows, '已匯入製令',
+                successRecords.map(r => r.mo_number))
+            }
+
+            // 從來源清單移除成功的
+            const importedKeys = new Set(successRows.map(createSourceRowKey))
+            setSourceRows(prev => prev.filter(r => !importedKeys.has(createSourceRowKey(r))))
+            setSelectedRows(new Set())
+          }
+
+          // 失敗的逐筆寫入失敗區（每筆帶自己的錯誤訊息）
+          if (failedRowsAndErrors.length > 0) {
+            const attemptedAt = new Date().toLocaleString('zh-TW')
+            setFailedImports(prev => {
+              let next = prev
+              for (const { row, error } of failedRowsAndErrors) {
+                next = mergeFailedImports(next, [row], error, attemptedAt)
+              }
+              return next
+            })
+          }
+
+          // 摘要訊息
+          const summaryMsg = `${factoryLabel(factory)} ${targetLabel}匯入完成：✅ 成功 ${successRows.length} 筆 / ❌ 失敗 ${failedRowsAndErrors.length} 筆`
+          setSaveMsg(summaryMsg)
+          alert(`${summaryMsg}${failedRowsAndErrors.length > 0 ? `\n\n失敗明細：\n${failedRowsAndErrors.slice(0, 10).map(f => `${f.row.order_number} [${f.row.item_code}]: ${f.error}`).join('\n')}${failedRowsAndErrors.length > 10 ? `\n...（其餘 ${failedRowsAndErrors.length - 10} 筆請至失敗區查看）` : ''}` : ''}`)
+          setTimeout(() => setSaveMsg(''), 8000)
+          return
+        }
+
+        // ── 無法解析 RESULT → 沿用原有「整批失敗」邏輯 ──
         const raw = typeof result?.rawText === 'string' ? result.rawText.slice(0, 600) : JSON.stringify(result?.apiResult ?? '').slice(0, 600)
         const fullMsg = `${errorMessage || `ArgoERP 匯入失敗 (HTTP ${response.status})`}\n\n【ARGO 原始回應】\n${raw}`
         throw new Error(fullMsg)

@@ -50,12 +50,6 @@ export const NAV_GROUPS = [
         path: '/admin/production/order-anomaly',
         icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z'
       },
-    ]
-  },
-  {
-    title: '產期告示',
-    theme: 'orange',
-    items: [
       {
         name: '告示設定',
         path: '/admin/production/notice',
@@ -70,7 +64,7 @@ export const NAV_GROUPS = [
         name: '產期詢問記錄',
         path: '/admin/production/notice/schedule-confirm',
         icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
-      }
+      },
     ]
   },
   {
@@ -86,7 +80,7 @@ export const NAV_GROUPS = [
    ]
   },
   {
-    title: '物料管理',
+    title: '系統資料庫',
     theme: 'cyan',
     items: [
       {
@@ -99,12 +93,6 @@ export const NAV_GROUPS = [
         path: '/admin/materials/substitute',
         icon: 'M4 7h16M4 12h10m-10 5h16'
       },
-    ]
-  },
-  {
-    title: '工序資料庫',
-    theme: 'green',
-    items: [
       { name: '工序總表查詢', path: '/admin/database', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4' },
       { name: '工序總表更新', path: '/admin/upload', icon: 'M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12' },
     ]

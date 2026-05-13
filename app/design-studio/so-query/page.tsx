@@ -70,6 +70,34 @@ export default function SoQueryPage() {
   const [searched, setSearched]       = useState(false)
   const [copyMsg, setCopyMsg]         = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [syncing, setSyncing]         = useState(false)
+  const [syncMsg, setSyncMsg]         = useState('')
+
+  const handleSyncSo = useCallback(async () => {
+    if (syncing) return
+    if (!window.confirm('確定要同步 ARGO 銷售訂單嗎？\n（將以 ARGO 最新資料覆寫本地快照）')) return
+    setSyncing(true)
+    setSyncMsg('')
+    try {
+      const res = await fetch('/api/argoerp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync_so' }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json?.status === 'error') {
+        throw new Error(json?.error || `HTTP ${res.status}`)
+      }
+      const count = json?.syncedCount ?? json?.detailTotal ?? json?.headerCount ?? '完成'
+      setSyncMsg(`✅ 同步成功：${count}`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setSyncMsg(`❌ 同步失敗：${msg}`)
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setSyncMsg(''), 6000)
+    }
+  }, [syncing])
 
   const handleQuery = useCallback(async () => {
     const raw = queryInput.trim()
@@ -140,6 +168,18 @@ export default function SoQueryPage() {
           ← 美編天地
         </Link>
         <h1 className="text-sm font-bold text-white">銷售訂單查詢</h1>
+        <div className="ml-auto flex items-center gap-3">
+          {syncMsg && <span className="text-xs text-slate-300">{syncMsg}</span>}
+          <button
+            type="button"
+            onClick={() => void handleSyncSo()}
+            disabled={syncing}
+            title="呼叫 ERP 同步區「同步銷售訂單」（sync_so）"
+            className="px-3 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 disabled:text-slate-500 text-xs font-semibold text-white transition-colors"
+          >
+            {syncing ? '同步中…' : '🔄 同步銷售訂單'}
+          </button>
+        </div>
       </div>
 
       {/* ─── Query bar ─── */}
