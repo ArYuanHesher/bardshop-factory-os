@@ -1639,12 +1639,10 @@ export default function MaterialPrepPage() {
                   <col className="w-20" />
                   <col className="w-44" />
                   <col className="w-28" />
-                  <col className="w-20" />
                   <col className="w-64" />
-                  <col className="w-20" />
-                  <col className="w-20" />
                   <col className="w-24" />
-                  <col className="w-48" />
+                  <col className="w-20" />
+                  <col className="w-[150px]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-slate-800/80 border-b border-slate-700">
@@ -1670,10 +1668,8 @@ export default function MaterialPrepPage() {
                     <th className="px-3 py-3 text-right text-slate-300 text-xs">映射盤數</th>
                     <th className="px-3 py-3 text-left text-slate-300 text-xs">原料料號 / 原料名稱</th>
                     <th className="px-3 py-3 text-right text-slate-300 text-xs">需求量</th>
-                    <th className="px-3 py-3 text-right text-slate-300 text-xs">現有庫存</th>
                     <th className="px-3 py-3 text-left text-slate-300 text-xs">使用料號</th>
-                    <th className="px-3 py-3 text-center text-slate-300 text-xs">ARGO 單位</th>
-                    <th className="px-3 py-3 text-right text-slate-300 text-xs">選用庫存</th>
+                    <th className="px-3 py-3 text-center text-slate-300 text-xs">單位 / 庫存</th>
                     <th className="px-3 py-3 text-left text-slate-300 text-xs">狀態</th>
                     <th className="px-3 py-3 text-left text-slate-300 text-xs">說明</th>
                   </tr>
@@ -1759,14 +1755,13 @@ export default function MaterialPrepPage() {
                             )
                           )}
                         </td>
-                        <td className="px-3 py-2 text-right text-slate-300 text-xs">{formatQty(row.stock_qty)}</td>
                         <td className="px-3 py-2 text-xs">
                           <div className="flex items-center gap-1 mb-1">
                             {row.status !== '無BOM' && (
                               <select
                                 value={row.selected_material_code}
                                 onChange={e => handleSelectMaterialOverride(row.row_key, e.target.value)}
-                                className="flex-1 px-2.5 py-1.5 rounded-md bg-slate-950 border border-slate-700 text-slate-200 text-xs focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
+                                className="w-full max-w-full px-2 py-1.5 rounded-md bg-slate-950 border border-slate-700 text-slate-200 text-xs focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 truncate"
                               >
                                 {row.substitute_options.map(option => (
                                   <option key={option.code} value={option.code}>
@@ -1817,22 +1812,27 @@ export default function MaterialPrepPage() {
                           {(() => {
                             const argoUnit = row.selected_material_code ? unitMap[row.selected_material_code] : undefined
                             const bomUnit = row.unit
-                            if (argoUnit) return <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 font-mono text-xs">{argoUnit}</span>
-                            if (bomUnit) return <span className="px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40 font-mono text-xs" title="未從 ARGO 取得，使用 BOM 單位">{bomUnit}⚠</span>
-                            return <span className="text-red-400 text-xs">—</span>
+                            const stockQtyEl = row.selected_material_code
+                              ? <span className="text-slate-300 text-xs font-mono">{formatQty(row.selected_material_stock_qty)}</span>
+                              : <span className="text-slate-600 text-xs">—</span>
+                            const unitEl = argoUnit
+                              ? <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 font-mono text-[10px]">{argoUnit}</span>
+                              : bomUnit
+                                ? <span className="px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40 font-mono text-[10px]" title="未從 ARGO 取得，使用 BOM 單位">{bomUnit}⚠</span>
+                                : <span className="text-red-400 text-[10px]">—</span>
+                            return <div className="flex flex-col items-center gap-0.5">{stockQtyEl}{unitEl}</div>
                           })()}
                         </td>
-                        <td className="px-3 py-2 text-right text-slate-300 text-xs">
-                          {row.selected_material_code ? formatQty(row.selected_material_stock_qty) : '—'}
-                        </td>
                         <td className="px-3 py-2 text-xs">
-                          <span className={`px-2 py-0.5 rounded-full ${
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
                             row.status === '可直接備料' ? 'bg-emerald-950/50 text-emerald-300 border border-emerald-800/40' :
                             row.status === '建議替代' ? 'bg-amber-950/50 text-amber-300 border border-amber-800/40' :
                             row.status === '缺料' ? 'bg-red-950/50 text-red-300 border border-red-800/40' :
                             'bg-slate-950 text-slate-300 border border-slate-700'
                           }`}>
-                            {row.status}
+                            {row.status === '可直接備料' ? '備料OK' :
+                             row.status === '建議替代' ? '替代' :
+                             row.status}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-slate-400 text-xs break-words" title={row.note}>{row.note}</td>
