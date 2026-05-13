@@ -120,8 +120,22 @@ function parseTSV(text: string): string[][] {
 }
 
 function parseSourceRows(text: string): { rows: SourceRow[]; error: string } {
-  const allRows = parseTSV(text.trim())
-  if (allRows.length === 0) return { rows: [], error: '未偵測到有效資料行' }
+  const rawRows = parseTSV(text.trim())
+  if (rawRows.length === 0) return { rows: [], error: '未偵測到有效資料行' }
+
+  // 合併因儲存格內換行而被切分的延續行：
+  // 若某行第一格為空白，代表上一筆資料的儲存格值含有 \n，
+  // 需要把這行的內容（跳過空白的第一格）接在上一行後面。
+  // 例：品名欄 "客製 | 悠遊卡\n單面印刷" 會被切成兩行，col[14]（數量）才不會遺失。
+  const allRows: string[][] = []
+  for (const row of rawRows) {
+    if ((row[0] ?? '').trim() === '' && allRows.length > 0) {
+      // 延續行：附加到上一行（略過空白的 col[0]）
+      allRows[allRows.length - 1].push(...row.slice(1))
+    } else {
+      allRows.push([...row])
+    }
+  }
 
   const headerKeywords = ['工單編號', '品項編碼', '單據種類', '品名/規格', '交付日期', '訂單狀態', '生產廠別', '承辦人', '開單人員', '客戶', '美編', '序號', '備註']
   let startIdx = 0
@@ -469,9 +483,25 @@ export default function DailyOrderSheetPage() {
         .in('source_order', noNone)
         .order('uploaded_at', { ascending: false })
       if (moErr) throw moErr
+
+      // 過濾掉已從 argoerp_mo_summary 刪除的製令（upload log 是永久歷史，刪除 summary 不會連動）
+      const rawLogMoNumbers = [...new Set(
+        (moLogs ?? []).map(l => l.mo_number).filter((n): n is string => !!n?.startsWith('MO'))
+      )]
+      let activeMoNumbers = new Set(rawLogMoNumbers)
+      if (rawLogMoNumbers.length > 0) {
+        const { data: summaryRows } = await supabase
+          .from('argoerp_mo_summary')
+          .select('mo_number')
+          .in('mo_number', rawLogMoNumbers)
+        const stillExists = new Set((summaryRows ?? []).map(r => r.mo_number))
+        activeMoNumbers = stillExists
+      }
+
       const moMap = new Map<string, { mo_number: string }>()
       for (const log of (moLogs ?? [])) {
         if (!log.mo_number?.startsWith('MO')) continue  // 排除非製令單號的資料
+        if (!activeMoNumbers.has(log.mo_number)) continue  // 排除已刪除的製令
         const qty = String(log.planned_qty ?? '').trim()
         const k1 = `${log.source_order}|${log.product_code}|${qty}`
         const k2 = `${log.source_order}|${log.product_code}`
@@ -489,6 +519,9 @@ export default function DailyOrderSheetPage() {
       // 必須用 erp_mo_lines.line_no（ARGO 的 SO 序號欄）作為比對依據
       const erpMoMap = new Map<string, string>()       // source_order|mbp_part|line_no(padded) → mo_number
       const erpMoBaseMap = new Map<string, string[]>() // source_order|mbp_part → [mo_numbers]
+      // source_order → Set<mo_number>：用於驗證某來源訂單的製令是否仍存在於 ARGO
+      // 若 Set 存在（erp_mo_lines 已同步）但不含該 MO → 代表已從 ARGO 刪除
+      const erpMoBySourceOrder = new Map<string, Set<string>>()
       for (const mo of (erp_mo ?? [])) {
         if (!mo.source_order || !mo.mbp_part || !mo.project_id) continue
         if (!mo.project_id.startsWith('MO')) continue
@@ -501,6 +534,10 @@ export default function DailyOrderSheetPage() {
         const baseKey = `${mo.source_order}|${mo.mbp_part}`
         const arr = erpMoBaseMap.get(baseKey) ?? []
         if (!arr.includes(mo.project_id)) erpMoBaseMap.set(baseKey, [...arr, mo.project_id])
+        // 建立 source_order → Set<mo_number>
+        const moSet = erpMoBySourceOrder.get(mo.source_order) ?? new Set<string>()
+        moSet.add(mo.project_id)
+        erpMoBySourceOrder.set(mo.source_order, moSet)
       }
 
       // 3. 對每列嘗試找出 mo_number
@@ -512,8 +549,13 @@ export default function DailyOrderSheetPage() {
           ? String(parseInt(r.match_line_no, 10)).padStart(2, '0')
           : null
 
-        // 若已有 MO：用 erp_mo_lines line_no 驗證，能改就改
+        // 若已有 MO：先檢查是否仍存在於 ARGO erp_mo_lines
         if (r.mo_number?.startsWith('MO')) {
+          const erpMosForOrder = erpMoBySourceOrder.get(r.order_number)
+          // erp_mo_lines 已同步此來源訂單，但找不到此製令 → 已從 ARGO 刪除，清除
+          if (erpMosForOrder && !erpMosForOrder.has(r.mo_number)) {
+            return { ...r, mo_number: undefined, mo_status: null, material_prep_status: null }
+          }
           if (!matchSeq) return r
           const erpConfirm = erpMoMap.get(`${r.order_number}|${r.item_code}|${matchSeq}`)
           if (!erpConfirm) return r              // ARGO 尚無資料，保留上傳 log 結果
@@ -533,7 +575,10 @@ export default function DailyOrderSheetPage() {
         const k1 = `${r.order_number}|${r.item_code}|${qty}`
         const logHit = moMap.get(k1) ?? moMap.get(`${r.order_number}|${r.item_code}`)
         if (logHit) {
-          if (!matchSeq || logHit.mo_number.slice(-2) === matchSeq) {
+          // erp_mo_lines 已同步此來源訂單但找不到該製令 → 已從 ARGO 刪除，跳過
+          const erpMosForOrder = erpMoBySourceOrder.get(r.order_number)
+          const stillInArgo = !erpMosForOrder || erpMosForOrder.has(logHit.mo_number)
+          if (stillInArgo && (!matchSeq || logHit.mo_number.slice(-2) === matchSeq)) {
             return { ...r, mo_number: logHit.mo_number, mo_status: '已匯入製令' as const }
           }
         }

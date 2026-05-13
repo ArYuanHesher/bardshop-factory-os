@@ -49,6 +49,8 @@ interface MaterialPrepRow {
   source_material_code: string
   source_material_name: string
   required_qty: number
+  is_buffered: boolean
+  uses_plate_count: boolean
   unit: string
   stock_qty: number
   substitute_options: Array<{
@@ -127,6 +129,9 @@ const PREP_INTERFACE_KEY = 'argoerp_material_prep_interface_id'
 const PREP_QTY_OVERRIDES_KEY = 'argoerp_material_prep_qty_overrides'
 const PREP_MATERIAL_OVERRIDES_KEY = 'argoerp_material_prep_material_overrides'
 const PREP_CUSTOM_CODE_INPUTS_KEY = 'argoerp_material_prep_custom_code_inputs'
+const PREP_PLATE_PREFIXES_KEY = 'argoerp_material_prep_plate_prefixes'
+const PREP_NO_BUFFER_KEYS_KEY = 'argoerp_material_prep_no_buffer_keys'
+const DEFAULT_PLATE_PREFIXES = ['MACRT']
 
 function loadFromLocalStorage<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback
@@ -170,6 +175,18 @@ export default function MaterialPrepPage() {
     () => loadFromLocalStorage<Record<string, string>>(PREP_CUSTOM_CODE_INPUTS_KEY, {})
   )
   const [customCodeStocks, setCustomCodeStocks] = useState<Record<string, number | null>>({})
+
+  // ---- 盤數優先前綴設定 ----
+  const [platePrefixes, setPlatePrefixes] = useState<string[]>(
+    () => loadFromLocalStorage<string[]>(PREP_PLATE_PREFIXES_KEY, DEFAULT_PLATE_PREFIXES)
+  )
+  const [showPlatePrefixModal, setShowPlatePrefixModal] = useState(false)
+  const [platePrefixInput, setPlatePrefixInput] = useState('')
+
+  // ---- 取消放數的列（料號→row_key）----
+  const [noBufferKeys, setNoBufferKeys] = useState<Set<string>>(
+    () => new Set(loadFromLocalStorage<string[]>(PREP_NO_BUFFER_KEYS_KEY, []))
+  )
 
   // ---- 換料 panel 開關（每行獨立）----
   const [swapOpenKeys, setSwapOpenKeys] = useState<Set<string>>(new Set())
@@ -257,6 +274,11 @@ export default function MaterialPrepPage() {
     if (typeof window === 'undefined') return
     try { localStorage.setItem(PREP_QTY_OVERRIDES_KEY, JSON.stringify(qtyOverrides)) } catch {}
   }, [qtyOverrides])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try { localStorage.setItem(PREP_NO_BUFFER_KEYS_KEY, JSON.stringify([...noBufferKeys])) } catch {}
+  }, [noBufferKeys])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -678,6 +700,8 @@ export default function MaterialPrepPage() {
             selected_material_stock_qty: customStock,
             status: displayQty > 0 && customStock >= displayQty ? '可直接備料' : '缺料',
             note: displayQty === 0 ? '自訂原料，請填寫需求量' : customStock >= displayQty ? '自訂原料，庫存足夠' : '自訂原料，庫存不足',
+            is_buffered: false,
+            uses_plate_count: false,
           }]
         }
         return [{
@@ -702,15 +726,29 @@ export default function MaterialPrepPage() {
           selected_material_stock_qty: 0,
           status: '無BOM',
           note: '此生產貨號尚未在系統 BOM 表建立對應',
+          is_buffered: false,
+          uses_plate_count: false,
         }]
       }
 
       return matchedBom.map((bom): MaterialPrepRow => {
         const rowKey = `${mo.mo_number}::${productCode}::${bom.material_code}`
-        const planQty = Number(mo.planned_qty ?? 0)
+        // 盤數優先前綴（可在設定中調整），其他原料優先使用數量
+        const matUpper = (bom.material_code ?? '').toUpperCase()
+        const isMacrt = platePrefixes.some(p => matUpper.startsWith(p.toUpperCase()))
+        const plateCountNum = (() => {
+          const raw = (mo.plate_count ?? '').trim()
+          if (!raw || raw === '-') return NaN
+          const n = Number(raw)
+          return isFinite(n) && n > 0 ? n : NaN
+        })()
+        const usesPlateCount = isMacrt && !isNaN(plateCountNum)
+        const planQty = usesPlateCount ? plateCountNum : Number(mo.planned_qty ?? 0)
         const productionQty = bom.production_quantity ?? 0
         const bomBaseQty = bom.quantity ?? 0
-        const computedQty = productionQty > 0 ? (planQty * bomBaseQty) / productionQty : planQty * bomBaseQty
+        const baseComputedQty = productionQty > 0 ? (planQty * bomBaseQty) / productionQty : planQty * bomBaseQty
+        const shouldBuffer = !usesPlateCount && !noBufferKeys.has(rowKey)
+        const computedQty = shouldBuffer ? Math.round(baseComputedQty * 1.03) : baseComputedQty
         const requiredQty = qtyOverrides[rowKey] !== undefined && qtyOverrides[rowKey] !== '' ? Number(qtyOverrides[rowKey]) : computedQty
         const stockQty = inventoryMap[bom.material_code] ?? 0
         const substitutes = substituteMap[bom.material_code] || []
@@ -767,7 +805,7 @@ export default function MaterialPrepPage() {
           customer: sourceOrderCustomerMap[mo.source_order ?? ''] || '-',
           source_order: mo.source_order || '-',
           product_code: productCode,
-          planned_qty: planQty,
+          planned_qty: Number(mo.planned_qty ?? 0),
           plate_count: mo.plate_count || '-',
           factory: mo.factory || '-',
           machine: mo.machine || '',
@@ -781,12 +819,14 @@ export default function MaterialPrepPage() {
           selected_material_code: selectedCode,
           selected_material_name: selectedName,
           selected_material_stock_qty: selectedStockQty,
+          is_buffered: shouldBuffer,
+          uses_plate_count: usesPlateCount,
           status,
           note,
         }
       })
     })
-  }, [moRecords, bomRows, inventoryMap, substituteMap, materialOverrides, qtyOverrides, sourceOrderCustomerMap])
+  }, [moRecords, bomRows, inventoryMap, substituteMap, materialOverrides, qtyOverrides, sourceOrderCustomerMap, noBufferKeys, platePrefixes])
 
   const materialPrepSummary = useMemo(() => {
     return materialPrepRows.reduce<Record<MaterialPrepRow['status'], number>>((acc, row) => {
@@ -1196,12 +1236,77 @@ export default function MaterialPrepPage() {
     }
   }, [selectedRowKeys, selectedImportRows, materialPrepRows, materialPrepInterfaceId, moRecords, sheetRows, selectedDate, loadSheet])
 
+  // ---- 盤數優先前綴 localStorage 持久化 ----
+  useEffect(() => {
+    try { localStorage.setItem(PREP_PLATE_PREFIXES_KEY, JSON.stringify(platePrefixes)) } catch {}
+  }, [platePrefixes])
+
   // ============================================================
   // Render
   // ============================================================
   return (
     <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
       <div className="max-w-[1800px] mx-auto">
+
+        {/* 盤數優先設定 Modal */}
+        {showPlatePrefixModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md shadow-2xl">
+              <h2 className="text-lg font-semibold text-white mb-1">⚙️ 盤數優先料號前綴設定</h2>
+              <p className="text-xs text-slate-400 mb-4">
+                料號開頭符合下列前綴的原料，BOM 需求量計算將優先套用<span className="text-amber-300">盤數</span>而非數量。<br/>
+                前綴不分大小寫。例：<code className="text-sky-300">MACRT</code>
+              </p>
+              <div className="flex flex-wrap gap-2 mb-4 min-h-[32px]">
+                {platePrefixes.map(p => (
+                  <span key={p} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-900/40 border border-amber-700/50 text-amber-200 text-xs font-mono">
+                    {p}
+                    <button
+                      onClick={() => setPlatePrefixes(prev => prev.filter(x => x !== p))}
+                      className="text-amber-400 hover:text-white transition-colors ml-0.5"
+                    >✕</button>
+                  </span>
+                ))}
+                {platePrefixes.length === 0 && <span className="text-xs text-slate-600 italic">尚無設定（全部套用數量）</span>}
+              </div>
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={platePrefixInput}
+                  onChange={e => setPlatePrefixInput(e.target.value.toUpperCase())}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      const v = platePrefixInput.trim().toUpperCase()
+                      if (v && !platePrefixes.includes(v)) setPlatePrefixes(prev => [...prev, v])
+                      setPlatePrefixInput('')
+                    }
+                  }}
+                  placeholder="輸入前綴，Enter 新增"
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-sm focus:outline-none focus:border-amber-500 font-mono uppercase"
+                />
+                <button
+                  onClick={() => {
+                    const v = platePrefixInput.trim().toUpperCase()
+                    if (v && !platePrefixes.includes(v)) setPlatePrefixes(prev => [...prev, v])
+                    setPlatePrefixInput('')
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-sm transition-colors"
+                >新增</button>
+              </div>
+              <div className="flex justify-between items-center">
+                <button
+                  onClick={() => setPlatePrefixes(DEFAULT_PLATE_PREFIXES)}
+                  className="text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors"
+                >還原預設（MACRT）</button>
+                <button
+                  onClick={() => setShowPlatePrefixModal(false)}
+                  className="px-4 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm transition-colors"
+                >關閉</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="mb-4 border-b border-slate-800 pb-4 flex flex-col lg:flex-row lg:items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">生產批備料</h1>
@@ -1220,6 +1325,18 @@ export default function MaterialPrepPage() {
               </button>
               {syncUnitsMsg && <p className="text-xs text-slate-400 max-w-xs text-right">{syncUnitsMsg}</p>}
             </div>
+            <button
+              onClick={() => setShowPlatePrefixModal(true)}
+              className="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 transition-colors text-sm flex items-center gap-1.5"
+              title="設定哪些料號前綴要優先套用盤數計算需求量"
+            >
+              🧮 盤數優先設定
+              {platePrefixes.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-800/60 text-amber-300 border border-amber-700/50 font-mono">
+                  {platePrefixes.join('、')}
+                </span>
+              )}
+            </button>
             <button
               onClick={() => viewMode === 'pending' ? void loadSheet(selectedDate) : void loadPrepLogs()}
               disabled={viewMode === 'pending' ? (sheetLoading || moLoading) : prepLogLoading}
@@ -1513,10 +1630,25 @@ export default function MaterialPrepPage() {
                     <button onClick={() => setStatusFilter(null)} className="text-slate-500 hover:text-white transition-colors">✕ 取消篩選</button>
                   </>
                 )}
-              </div>              <table className="w-full text-sm">
+              </div>              <table className="w-full text-sm table-fixed">
+                <colgroup>
+                  <col className="w-10" />
+                  <col className="w-36" />
+                  <col className="w-44" />
+                  <col className="w-32" />
+                  <col className="w-20" />
+                  <col className="w-44" />
+                  <col className="w-28" />
+                  <col className="w-20" />
+                  <col className="w-64" />
+                  <col className="w-20" />
+                  <col className="w-20" />
+                  <col className="w-24" />
+                  <col className="w-48" />
+                </colgroup>
                 <thead>
                   <tr className="bg-slate-800/80 border-b border-slate-700">
-                    <th className="px-2 py-3 text-center sticky left-0 bg-slate-800/80 z-10 w-10">
+                    <th className="px-2 py-3 text-center sticky left-0 bg-slate-800/80 z-10">
                       <input
                         type="checkbox"
                         checked={filteredPrepRows.length > 0 && filteredPrepRows.every(r => selectedRowKeys.has(r.row_key))}
@@ -1532,18 +1664,18 @@ export default function MaterialPrepPage() {
                         className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500/30"
                       />
                     </th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap sticky left-10 bg-slate-800/80 z-10">製令單號</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">客戶 / 來源訂單</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">生產貨號 / 預定產出量</th>
-                    <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">映射盤數</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">原料料號 / 原料名稱</th>
-                    <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">需求量</th>
-                    <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">現有庫存</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">使用料號</th>
-                    <th className="px-3 py-3 text-center text-slate-300 text-xs whitespace-nowrap">ARGO 單位</th>
-                    <th className="px-3 py-3 text-right text-slate-300 text-xs whitespace-nowrap">選用庫存</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">狀態</th>
-                    <th className="px-3 py-3 text-left text-slate-300 text-xs whitespace-nowrap">說明</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs sticky left-10 bg-slate-800/80 z-10">製令單號</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs">客戶 / 來源訂單</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs">生產貨號 / 預定產出量</th>
+                    <th className="px-3 py-3 text-right text-slate-300 text-xs">映射盤數</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs">原料料號 / 原料名稱</th>
+                    <th className="px-3 py-3 text-right text-slate-300 text-xs">需求量</th>
+                    <th className="px-3 py-3 text-right text-slate-300 text-xs">現有庫存</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs">使用料號</th>
+                    <th className="px-3 py-3 text-center text-slate-300 text-xs">ARGO 單位</th>
+                    <th className="px-3 py-3 text-right text-slate-300 text-xs">選用庫存</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs">狀態</th>
+                    <th className="px-3 py-3 text-left text-slate-300 text-xs">說明</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1559,20 +1691,20 @@ export default function MaterialPrepPage() {
                             className="rounded border-slate-600 bg-slate-700 text-cyan-500 focus:ring-cyan-500/30"
                           />
                         </td>
-                        <td className="px-3 py-2 text-xs whitespace-nowrap sticky left-10 bg-inherit z-10">
-                          <div className="text-cyan-300 font-mono font-semibold">{row.mo_number}</div>
+                        <td className="px-3 py-2 text-xs sticky left-10 bg-inherit z-10">
+                          <div className="text-cyan-300 font-mono font-semibold break-all">{row.mo_number}</div>
                           <div className="text-slate-500 text-[10px] mt-0.5">{row.factory}</div>
                         </td>
-                        <td className="px-3 py-2 text-xs whitespace-nowrap">
+                        <td className="px-3 py-2 text-xs">
                           {row.source_order && row.source_order !== '-' && (
                             <button
                               onClick={() => setSoModalId(row.source_order)}
-                              className="text-amber-300/80 font-mono text-[10px] hover:text-amber-200 hover:underline underline-offset-2 text-left"
+                              className="text-amber-300/80 font-mono text-[10px] hover:text-amber-200 hover:underline underline-offset-2 text-left break-all"
                             >
                               {row.source_order}
                             </button>
                           )}
-                          <div className="text-slate-400 truncate max-w-[180px]" title={row.customer}>
+                          <div className="text-slate-400 break-words" title={row.customer}>
                             {row.customer !== '-' ? row.customer : <span className="text-slate-600 italic">查無客戶</span>}
                           </div>
                           <input
@@ -1584,16 +1716,16 @@ export default function MaterialPrepPage() {
                             className="mt-1 w-full px-1.5 py-0.5 text-[10px] rounded bg-slate-800 border border-slate-700/60 text-slate-300 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50"
                           />
                         </td>
-                        <td className="px-3 py-2 text-xs whitespace-nowrap">
-                          <div className="text-slate-300">{row.product_code}</div>
+                        <td className="px-3 py-2 text-xs">
+                          <div className="text-slate-300 break-all">{row.product_code}</div>
                           <div className="text-slate-400 font-mono">{formatQty(row.planned_qty)}</div>
                         </td>
-                        <td className="px-3 py-2 text-right text-xs whitespace-nowrap">
+                        <td className="px-3 py-2 text-right text-xs">
                           <span className="text-slate-300 font-mono">{row.plate_count}</span>
                         </td>
                         <td className="px-3 py-2 text-xs">
-                          <div className="text-slate-300 whitespace-nowrap">{row.source_material_code}</div>
-                          <div className="text-slate-400 truncate max-w-[200px]" title={row.source_material_name}>{row.source_material_name}</div>
+                          <div className="text-slate-300 break-all">{row.source_material_code}</div>
+                          <div className="text-slate-400 break-words" title={row.source_material_name}>{row.source_material_name}</div>
                         </td>
                         <td className="px-3 py-2 text-right text-xs whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
@@ -1607,9 +1739,28 @@ export default function MaterialPrepPage() {
                             />
                             <span className="text-slate-500 text-xs">{row.unit}</span>
                           </div>
+                          {!row.uses_plate_count && qtyOverrides[row.row_key] === undefined && (
+                            row.is_buffered ? (
+                              <button
+                                onClick={() => setNoBufferKeys(prev => new Set([...prev, row.row_key]))}
+                                className="mt-0.5 text-[10px] text-amber-400/60 hover:text-amber-300 underline decoration-dotted transition-colors block w-full text-right"
+                                title="移除 +3% 放數，恢復原始計算量"
+                              >
+                                取消放數
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setNoBufferKeys(prev => { const next = new Set(prev); next.delete(row.row_key); return next })}
+                                className="mt-0.5 text-[10px] text-slate-500 hover:text-slate-300 underline decoration-dotted transition-colors block w-full text-right"
+                                title="重新套用 +3% 放數"
+                              >
+                                恢復放數
+                              </button>
+                            )
+                          )}
                         </td>
-                        <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">{formatQty(row.stock_qty)}</td>
-                        <td className="px-3 py-2 text-xs min-w-[260px]">
+                        <td className="px-3 py-2 text-right text-slate-300 text-xs">{formatQty(row.stock_qty)}</td>
+                        <td className="px-3 py-2 text-xs">
                           <div className="flex items-center gap-1 mb-1">
                             {row.status !== '無BOM' && (
                               <select
@@ -1662,7 +1813,7 @@ export default function MaterialPrepPage() {
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
+                        <td className="px-3 py-2 text-center text-xs">
                           {(() => {
                             const argoUnit = row.selected_material_code ? unitMap[row.selected_material_code] : undefined
                             const bomUnit = row.unit
@@ -1671,10 +1822,10 @@ export default function MaterialPrepPage() {
                             return <span className="text-red-400 text-xs">—</span>
                           })()}
                         </td>
-                        <td className="px-3 py-2 text-right text-slate-300 text-xs whitespace-nowrap">
+                        <td className="px-3 py-2 text-right text-slate-300 text-xs">
                           {row.selected_material_code ? formatQty(row.selected_material_stock_qty) : '—'}
                         </td>
-                        <td className="px-3 py-2 text-xs whitespace-nowrap">
+                        <td className="px-3 py-2 text-xs">
                           <span className={`px-2 py-0.5 rounded-full ${
                             row.status === '可直接備料' ? 'bg-emerald-950/50 text-emerald-300 border border-emerald-800/40' :
                             row.status === '建議替代' ? 'bg-amber-950/50 text-amber-300 border border-amber-800/40' :
@@ -1684,7 +1835,7 @@ export default function MaterialPrepPage() {
                             {row.status}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-slate-400 text-xs max-w-[320px]" title={row.note}>{row.note}</td>
+                        <td className="px-3 py-2 text-slate-400 text-xs break-words" title={row.note}>{row.note}</td>
                       </tr>
                     )
                   })}

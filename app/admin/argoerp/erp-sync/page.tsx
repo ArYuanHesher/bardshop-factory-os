@@ -51,6 +51,7 @@ interface SoLine {
   unit_price_oru: number
   grade: string | null
   remark: string | null
+  tpn_part_no: string | null
   create_date: string | null
   update_date: string | null
   synced_at: string
@@ -1417,8 +1418,8 @@ function SyncCard({ docKey }: SyncCardProps) {
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">品名/規格說明</th>
                   <th className="px-3 py-2 text-right text-slate-400 font-medium">數量</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">交貨日(預)</th>
-                  <th className="px-3 py-2 text-left text-slate-400 font-medium">客戶名稱</th>
-                  <th className="px-3 py-2 text-left text-slate-400 font-medium">業務員</th>
+                  <th className="px-3 py-2 text-left text-slate-400 font-medium">客戶名稱 / 業務員</th>
+                  <th className="px-3 py-2 text-left text-slate-400 font-medium">打樣/追加單號</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">備註</th>
                   <th className="px-3 py-2 text-center text-slate-400 font-medium">操作</th>
                 </tr>
@@ -1444,8 +1445,11 @@ function SyncCard({ docKey }: SyncCardProps) {
                     <td className="px-3 py-2 text-slate-200 max-w-[200px] truncate" title={r.description ?? ''}>{r.description ?? '—'}</td>
                     <td className="px-3 py-2 text-right text-slate-200">{r.order_qty_oru > 0 ? r.order_qty_oru.toLocaleString() : '—'}</td>
                     <td className="px-3 py-2 text-yellow-400/80">{r.duedate?.slice(0, 10) ?? '—'}</td>
-                    <td className="px-3 py-2 text-slate-300 max-w-[160px] truncate" title={r.partner_name ?? ''}>{r.partner_name ?? '—'}</td>
-                    <td className="px-3 py-2 text-slate-300">{r.sales_name ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      <div className="text-slate-300 max-w-[160px] truncate" title={r.partner_name ?? ''}>{r.partner_name ?? '—'}</div>
+                      <div className="text-slate-500 text-[11px] mt-0.5">{r.sales_name ?? '—'}</div>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-sky-400/90 text-xs">{r.tpn_part_no ?? '—'}</td>
                     <td className="px-3 py-2 text-slate-400 max-w-[160px] truncate" title={r.remark ?? ''}>{r.remark ?? '—'}</td>
                     <td className="px-3 py-2 text-center">
                       <button
