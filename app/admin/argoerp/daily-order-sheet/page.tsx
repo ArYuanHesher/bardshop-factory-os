@@ -63,6 +63,25 @@ interface SheetMeta {
   updated_at: string
 }
 
+// ===== 採購單（erp_pj_sync）資料型別 =====
+interface PjRecord {
+  id: number
+  doc_type: string
+  doc_no: string
+  sub_no: string
+  item_code: string | null
+  description: string | null
+  qty: number
+  unit: string | null
+  status: string | null
+  start_date: string | null
+  end_date: string | null
+  customer_vendor: string | null
+  remark: string | null
+  extra: Record<string, unknown> | null
+  synced_at: string
+}
+
 // ===== 工具函式 =====
 function todayStr(): string {
   const d = new Date()
@@ -208,6 +227,31 @@ export default function DailyOrderSheetPage() {
   const [moMachines, setMoMachines] = useState<Record<string, string>>({})
   const [rowMachines, setRowMachines] = useState<Record<string, string>>({})
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+
+  // ---- 分頁 ----
+  const [activeMainTab, setActiveMainTab] = useState<'daily' | 'c-orders'>('daily')
+
+  // ---- 常平廠訂單 ----
+  const [cOrders, setCOrders] = useState<PjRecord[]>([])
+  const [cOrdersLoading, setCOrdersLoading] = useState(false)
+  const [cOrdersSearch, setCOrdersSearch] = useState('')
+  const [cOrdersStatusFilter, setCOrdersStatusFilter] = useState('OPEN')
+  const [pinnedCOrderKeys, setPinnedCOrderKeys] = useState<Set<string>>(new Set())
+
+  const togglePinCOrder = (key: string) => {
+    setPinnedCOrderKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  // 頂置訂單排在最前
+  const sortedCOrders = [
+    ...cOrders.filter(r => pinnedCOrderKeys.has(`${r.doc_no}|${r.sub_no}`)),
+    ...cOrders.filter(r => !pinnedCOrderKeys.has(`${r.doc_no}|${r.sub_no}`)),
+  ]
   const [soModalId, setSoModalId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [globalSearch, setGlobalSearch] = useState('')
@@ -215,6 +259,34 @@ export default function DailyOrderSheetPage() {
   const [globalResults, setGlobalResults] = useState<{ sheet_date: string; rows: SheetRow[] }[] | null>(null)
   const [sampleRefInputs, setSampleRefInputs] = useState<Record<string, string>>({})
   const [legacyModal, setLegacyModal] = useState<{ query: string; rows: LegacyReceiptRow[]; loading: boolean } | null>(null)
+
+  // ---- 常平廠訂單（C01510 採購單）----
+  const fetchCOrders = useCallback(async () => {
+    setCOrdersLoading(true)
+    try {
+      let query = supabase
+        .from('erp_pj_sync')
+        .select('*', { count: 'exact' })
+        .eq('doc_type', '採購單號')
+        .eq('customer_vendor', 'C01510')
+        .order('doc_no', { ascending: true })
+      if (cOrdersStatusFilter) query = query.eq('status', cOrdersStatusFilter)
+      if (cOrdersSearch.trim()) {
+        const kw = cOrdersSearch.trim()
+        query = query.or(`doc_no.ilike.%${kw}%,item_code.ilike.%${kw}%,description.ilike.%${kw}%,remark.ilike.%${kw}%`)
+      }
+      const { data } = await query
+      setCOrders((data ?? []) as PjRecord[])
+    } catch (e) {
+      console.error('fetchCOrders error', e)
+    } finally {
+      setCOrdersLoading(false)
+    }
+  }, [cOrdersSearch, cOrdersStatusFilter])
+
+  useEffect(() => {
+    if (activeMainTab === 'c-orders') fetchCOrders()
+  }, [activeMainTab, fetchCOrders])
 
   // ---- 舊系統入庫紀錄比對 ----
   const handleLegacyLookup = useCallback(async (orderNo: string) => {
@@ -880,6 +952,35 @@ export default function DailyOrderSheetPage() {
         </div>
 
         <div>
+          {/* ===== 分頁切換 ===== */}
+          <div className="mb-5 flex gap-1 border-b border-slate-800">
+            <button
+              onClick={() => setActiveMainTab('daily')}
+              className={`px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors border-b-2 ${
+                activeMainTab === 'daily'
+                  ? 'border-cyan-500 text-cyan-300 bg-slate-900'
+                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
+              }`}
+            >
+              📋 每日出單表
+            </button>
+            <button
+              onClick={() => setActiveMainTab('c-orders')}
+              className={`px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors border-b-2 ${
+                activeMainTab === 'c-orders'
+                  ? 'border-orange-500 text-orange-300 bg-slate-900'
+                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
+              }`}
+            >
+              🏭 常平廠訂單
+              {pinnedCOrderKeys.size > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-orange-500 text-white text-[10px] font-bold leading-none">{pinnedCOrderKeys.size}</span>
+              )}
+            </button>
+          </div>
+
+          {/* ===== 每日出單表分頁 ===== */}
+          {activeMainTab === 'daily' && (<>
           {/* 水平日期列 */}
           {availableSheets.length > 0 && (
             <div className="mb-4 flex gap-2 flex-wrap">
@@ -1250,7 +1351,150 @@ export default function DailyOrderSheetPage() {
                 </button>
               </div>
             )}
+
+            {/* 空白狀態 */}
+            {!loading && !hasData && !showPasteArea && (
+              <div className="text-center py-20 text-slate-600">
+                <div className="text-4xl mb-3">📋</div>
+                <p>{selectedDate} 尚無出單表資料</p>
+                <button
+                  onClick={() => setShowPasteArea(true)}
+                  className="mt-4 px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-sm"
+                >
+                  + 新增出單表
+                </button>
+              </div>
+            )}
           </div>
+          </>)}
+
+          {/* ===== 常平廠訂單分頁 ===== */}
+          {activeMainTab === 'c-orders' && (
+            <div>
+              {/* 工具列 */}
+              <div className="mb-4 flex flex-wrap gap-3 items-center">
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+                  </svg>
+                  <input
+                    type="text"
+                    value={cOrdersSearch}
+                    onChange={e => setCOrdersSearch(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && fetchCOrders()}
+                    placeholder="搜尋採購單號 / 料號 / 品名…"
+                    className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-orange-500 placeholder:text-slate-500"
+                  />
+                </div>
+                <select
+                  value={cOrdersStatusFilter}
+                  onChange={e => setCOrdersStatusFilter(e.target.value)}
+                  className="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-orange-500"
+                >
+                  <option value="">全部狀態</option>
+                  <option value="OPEN">OPEN</option>
+                  <option value="CLOSED">CLOSED</option>
+                  <option value="CANCEL">CANCEL</option>
+                </select>
+                <button
+                  onClick={() => fetchCOrders()}
+                  disabled={cOrdersLoading}
+                  className="px-4 py-2 rounded-lg bg-orange-700 hover:bg-orange-600 disabled:bg-slate-700 text-white text-sm font-medium transition-colors"
+                >
+                  {cOrdersLoading ? '載入中…' : '🔄 重新載入'}
+                </button>
+                <span className="text-slate-500 text-xs ml-auto">{cOrders.length} 筆</span>
+              </div>
+
+              {/* 表格 */}
+              {cOrdersLoading ? (
+                <div className="text-center py-20 text-slate-500">載入中…</div>
+              ) : cOrders.length === 0 ? (
+                <div className="text-center py-20 text-slate-600">
+                  <div className="text-4xl mb-3">📦</div>
+                  <p>找不到常平廠（C01510）採購訂單</p>
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-800/80 text-slate-400 text-[11px] uppercase tracking-wider">
+                          <th className="px-3 py-2.5 whitespace-nowrap">採購單號</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">行號</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">銷售訂單</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">料號</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">品名 / 規格</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap text-right">數量</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">單位</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">開始日</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">交期</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">狀態</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap">備註</th>
+                          <th className="px-3 py-2.5 whitespace-nowrap"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {sortedCOrders.map((r, i) => {
+                          const rowKey = `${r.doc_no}|${r.sub_no}`
+                          const isPinned = pinnedCOrderKeys.has(rowKey)
+                          const statusCls = r.status === 'OPEN'
+                            ? 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50'
+                            : r.status === 'CLOSED'
+                              ? 'bg-slate-800 text-slate-400 border-slate-600'
+                              : 'bg-red-900/30 text-red-400 border-red-700/50'
+                          return (
+                            <tr key={r.id} className={`hover:bg-slate-800/40 ${isPinned ? 'bg-orange-950/30 border-l-2 border-orange-600/60' : i % 2 === 0 ? '' : 'bg-slate-900/30'}`}>
+                              <td className="px-3 py-2 font-mono text-cyan-300 whitespace-nowrap">{r.doc_no}</td>
+                              <td className="px-3 py-2 font-mono text-slate-400 whitespace-nowrap">{r.sub_no}</td>
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                {r.extra?.MBP_LOT_NO ? (
+                                  <button
+                                    onClick={() => setSoModalId(String(r.extra!.MBP_LOT_NO))}
+                                    className="font-mono text-amber-300 hover:text-amber-200 hover:underline text-xs"
+                                  >{String(r.extra.MBP_LOT_NO)}</button>
+                                ) : <span className="text-slate-600">—</span>}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-purple-300 whitespace-nowrap">{r.item_code ?? '—'}</td>
+                              <td className="px-3 py-2 text-slate-200 max-w-[280px]">
+                                <div className="truncate" title={r.description ?? ''}>{r.description ?? '—'}</div>
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-emerald-300 whitespace-nowrap">
+                                {typeof r.qty === 'number' ? r.qty.toLocaleString() : r.qty}
+                              </td>
+                              <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{r.unit ?? '—'}</td>
+                              <td className="px-3 py-2 text-slate-400 whitespace-nowrap font-mono text-[11px]">{r.start_date ?? '—'}</td>
+                              <td className="px-3 py-2 text-slate-300 whitespace-nowrap font-mono text-[11px]">{r.end_date ?? '—'}</td>
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                {r.status ? (
+                                  <span className={`px-2 py-0.5 rounded border text-[10px] font-medium ${statusCls}`}>{r.status}</span>
+                                ) : <span className="text-slate-600">—</span>}
+                              </td>
+                              <td className="px-3 py-2 text-slate-400 max-w-[160px]">
+                                <div className="truncate" title={r.remark ?? ''}>{r.remark ?? '—'}</div>
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                <button
+                                  onClick={() => togglePinCOrder(rowKey)}
+                                  className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                                    isPinned
+                                      ? 'bg-orange-600 hover:bg-orange-500 text-white'
+                                      : 'bg-slate-700 hover:bg-orange-700 text-slate-300 hover:text-white'
+                                  }`}
+                                >
+                                  {isPinned ? '★ 已頂置' : '轉四川'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <SoOrderModal projectId={soModalId} onClose={() => setSoModalId(null)} />
