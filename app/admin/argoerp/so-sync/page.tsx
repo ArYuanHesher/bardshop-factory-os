@@ -27,6 +27,9 @@ interface SoLine {
 type SortCol = 'project_id' | 'begin_date' | 'tpn_partner_id' | 'duedate' | 'synced_at'
 type SortDir = 'asc' | 'desc'
 
+// project_id → 機台列表（來自 argoerp_mo_summary + argoerp_mo_machine_assign）
+type MachineMap = Record<string, string[]>
+
 // ─── 搜尋篩選 ─────────────────────────────────────────
 function filterRows(rows: SoLine[], search: string) {
   if (!search) return rows
@@ -56,6 +59,7 @@ export default function SoSyncPage() {
   const [sortCol, setSortCol]     = useState<SortCol>('project_id')
   const [sortDir, setSortDir]     = useState<SortDir>('asc')
   const [lastSync, setLastSync]   = useState<string | null>(null)
+  const [machineMap, setMachineMap] = useState<MachineMap>({})
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
@@ -70,6 +74,50 @@ export default function SoSyncPage() {
     if (data && data.length > 0) {
       const latest = data.reduce((a, b) => a.synced_at > b.synced_at ? a : b)
       setLastSync(latest.synced_at)
+
+      // 載入機台：project_id → machines[]
+      // 路徑 A：argoerp_mo_summary.source_order = project_id（本系統上傳的製令）
+      // 路徑 B：erp_mo_lines.source_order = project_id（ARGO 直接建立的製令，erp_mo_lines.project_id = MO號）
+      const projectIds = [...new Set((data as SoLine[]).map(r => r.project_id).filter(Boolean))]
+      if (projectIds.length > 0) {
+        const [moSummaryRes, erpMoRes] = await Promise.all([
+          supabase
+            .from('argoerp_mo_summary')
+            .select('source_order, mo_number')
+            .in('source_order', projectIds),
+          supabase
+            .from('erp_mo_lines')
+            .select('source_order, project_id')
+            .in('source_order', projectIds),
+        ])
+        // 把兩個來源的 mo_number 合起來
+        const moRows: { source_order: string; mo_number: string }[] = []
+        for (const r of (moSummaryRes.data ?? []) as { source_order: string; mo_number: string }[]) {
+          if (r.mo_number?.startsWith('MO')) moRows.push(r)
+        }
+        for (const r of (erpMoRes.data ?? []) as { source_order: string; project_id: string }[]) {
+          if (r.project_id?.startsWith('MO')) moRows.push({ source_order: r.source_order, mo_number: r.project_id })
+        }
+        const moNumbers = [...new Set(moRows.map(r => r.mo_number))]
+        if (moNumbers.length > 0) {
+          const { data: machineData } = await supabase
+            .from('argoerp_mo_machine_assign')
+            .select('mo_number, machine')
+            .in('mo_number', moNumbers)
+            .neq('machine', '')
+          const machineRows = (machineData ?? []) as { mo_number: string; machine: string }[]
+          const moMachineMap = new Map(machineRows.map(r => [r.mo_number, r.machine]))
+          const map: MachineMap = {}
+          for (const r of moRows) {
+            if (!r.source_order) continue
+            const m = moMachineMap.get(r.mo_number)
+            if (!m) continue
+            if (!map[r.source_order]) map[r.source_order] = []
+            if (!map[r.source_order].includes(m)) map[r.source_order].push(m)
+          }
+          setMachineMap(map)
+        }
+      }
     }
   }, [sortCol, sortDir])
 
@@ -191,13 +239,14 @@ export default function SoSyncPage() {
               <th className="px-3 py-2.5 text-left font-medium min-w-[100px] cursor-pointer hover:text-white select-none" onClick={() => toggleSort('duedate')}>
                 交貨日(預){sortCol === 'duedate' && <span className="ml-1 text-teal-400">{sortDir === 'asc' ? '↑' : '↓'}</span>}
               </th>
+              <th className="px-3 py-2.5 text-center font-medium w-28">機台</th>
               <th className="px-3 py-2.5 text-right font-medium w-24">數量 / 單位</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && !loading && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                   {rows.length === 0 ? '尚未同步，請點「立即同步」' : '無符合搜尋條件的資料'}
                 </td>
               </tr>
@@ -251,6 +300,16 @@ export default function SoSyncPage() {
 
                 {/* 交貨日 */}
                 <td className="px-3 py-2 text-yellow-400/80 text-sm">{row.duedate ?? '—'}</td>
+
+                {/* 機台 */}
+                <td className="px-3 py-2 text-center">
+                  {(machineMap[row.project_id] ?? []).length > 0
+                    ? (machineMap[row.project_id]).map(m => (
+                        <span key={m} className="inline-block px-1.5 py-0.5 mr-1 mb-0.5 rounded bg-sky-900/60 border border-sky-700/50 text-sky-300 text-xs font-mono">{m}</span>
+                      ))
+                    : <span className="text-gray-600 text-xs">—</span>
+                  }
+                </td>
 
                 {/* 數量 / 單位 */}
                 <td className="px-3 py-2 text-right">

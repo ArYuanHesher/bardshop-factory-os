@@ -16,6 +16,7 @@ import { supabase } from '../../../../lib/supabaseClient'
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 interface SourceRow {
+  row_key?: string
   order_number: string; doc_type: string; factory: 'T' | 'C' | 'O'
   receiver: string; is_sample: string; has_material: string
   designer: string; customer: string; line_nickname: string
@@ -69,7 +70,7 @@ const ERP_KEYS = [
   'TPN_PARTNER_ID', 'SEG_SEGMENT_NO_DEPARTMENT', 'SALES_ID', 'PO_TYPE',
   'PAYMENT_TERM', 'PAYMENT_MODE', 'CURRENCY', 'EXCHANGE_RATE', 'TAX_RATE',
   'LINE_NO', 'MBP_PART', 'MBP_VER', 'ORDER_QTY_ORU', 'UNIT_OF_MEASURE_ORU',
-  'UNIT_PRICE_ORU', 'DUEDATE', 'MBP_LOT_NO', 'REMARK', 'REMARK2', 'PACKING', 'SO_PROJECT_ID', 'SO_LINE_NO', 'TPN_PART_NO',
+  'UNIT_PRICE_ORU', 'DUEDATE', 'MBP_LOT_NO', 'REMARK', 'REMARK2', 'PACKING', 'SO_PROJECT_ID', 'TPN_PART_NO',
 ] as const
 
 const DEF_EDIT: LineEdit = { mbp_ver: '1', uom: 'PCS', unit_price: '0', lot_no: '', remark2: '', so_line_no: '', packing: '' }
@@ -87,8 +88,8 @@ function makeDefaultHeader(): PoHeader {
   return {
     project_id: genPoNo(), modify_ver: '1', begin_date: fmtDate(new Date()),
     hold_status: 'OPEN', tpn_partner_id: 'C01510', department: 'M1100',
-    sales_id: '', po_type: 'GENERAL', payment_term: 'PM30',
-    payment_mode: 'T', currency: 'NTD', exchange_rate: '1', tax_rate: '0.05',
+    sales_id: '10149', po_type: 'GENERAL', payment_term: 'PM30',
+    payment_mode: 'T', currency: 'CNY', exchange_rate: '4', tax_rate: '0',
   }
 }
 
@@ -129,7 +130,16 @@ export default function PoBatchExportCPage() {
     } catch {}
     try {
       const h = localStorage.getItem(HEADER_KEY)
-      if (h) setHeader(JSON.parse(h))
+      if (h) {
+        const saved = JSON.parse(h)
+        const def = makeDefaultHeader()
+        // merge: 對空字串欄位也用預設值覆蓋
+        const merged: PoHeader = { ...def, ...saved }
+        for (const k of Object.keys(def) as (keyof PoHeader)[]) {
+          if ((saved[k] ?? '') === '') (merged as Record<string, unknown>)[k] = def[k]
+        }
+        setHeader(merged)
+      }
     } catch {}
   }, [])
 
@@ -163,8 +173,19 @@ export default function PoBatchExportCPage() {
       const r = await fetch(`/api/argoerp/daily-order-sheet?date=${date}`)
       const j = await r.json()
       if (!j.success || !j.sheet) { alert(`找不到 ${date} 的出單表`); return }
-      const rows: SourceRow[] = (j.sheet.rows ?? []).filter((x: SourceRow) => x.factory === 'C')
-      if (rows.length === 0) { alert(`${date} 出單表中沒有常平（C）廠別的資料`); return }
+      type SheetRowRaw = SourceRow & { po_status?: string; po_number?: string | null }
+      const allCRows = (j.sheet.rows ?? []).filter((x: SheetRowRaw) => x.factory === 'C')
+      const rows: SourceRow[] = allCRows.filter((x: SheetRowRaw) =>
+        !x.po_number && x.po_status !== 'matched'
+      )
+      if (allCRows.length === 0) {
+        alert(`${date} 出單表中沒有常平廠訂單`)
+        return
+      }
+      if (rows.length === 0) {
+        alert(`${date} 所有常平廠訂單（${allCRows.length} 筆）均已有採購單紀錄`)
+        return
+      }
       setSourceRows(rows)
       setLineEdits(rows.map((row) => ({ ...DEF_EDIT, lot_no: row.order_number })))
       setMatchResults([])
@@ -204,7 +225,6 @@ export default function PoBatchExportCPage() {
       rec['SO_PROJECT_ID']               = row.order_number
       if ((e.packing ?? '').trim())    rec['PACKING']     = e.packing.trim()
       if ((e.so_line_no ?? '').trim()) {
-        rec['SO_LINE_NO']  = e.so_line_no.trim()
         rec['TPN_PART_NO'] = e.so_line_no.trim()
       }
       return rec
@@ -286,6 +306,50 @@ export default function PoBatchExportCPage() {
     localStorage.removeItem(STORAGE_KEY)
   }, [])
 
+  // ── 移除已匯入項目（比對 erp_pj_sync sub_no = LINE_NO）──
+  const [removingImported, setRemovingImported] = useState(false)
+  const removeImported = useCallback(async () => {
+    const pid = header.project_id.trim()
+    if (!pid) { alert('請先填寫採購單號'); return }
+    if (sourceRows.length === 0) return
+    setRemovingImported(true)
+    try {
+      const { data, error } = await supabase
+        .from('erp_pj_sync')
+        .select('sub_no')
+        .eq('doc_type', '採購單號')
+        .eq('doc_no', pid)
+      if (error) throw error
+      const imported = data ?? []
+      if (imported.length === 0) {
+        setMsg('⚠️ erp_pj_sync 查無此採購單，請先至 ERP 同步區執行 PO 同步')
+        setTimeout(() => setMsg(''), 6000)
+        return
+      }
+      // sub_no 即 LINE_NO（payload 建立時 i+1）
+      const importedLineNos = new Set(imported.map(r => String(r.sub_no ?? '').trim()))
+      const keepIndices: number[] = []
+      for (let i = 0; i < sourceRows.length; i++) {
+        const lineNo = String(i + 1)
+        if (!importedLineNos.has(lineNo)) keepIndices.push(i)
+      }
+      const removedCount = sourceRows.length - keepIndices.length
+      if (removedCount === 0) {
+        setMsg(`ℹ️ 查無已匯入行號（erp_pj_sync 有 ${imported.length} 筆，但 LINE_NO 未對應）`)
+        setTimeout(() => setMsg(''), 6000)
+        return
+      }
+      setSourceRows(prev => keepIndices.map(i => prev[i]))
+      setLineEdits(prev => keepIndices.map(i => prev[i] ?? DEF_EDIT))
+      setMatchResults(prev => keepIndices.map(i => prev[i] ?? { status: null, line_no: null, reason: '' }))
+      setMsg(`✅ 已移除 ${removedCount} 筆已匯入項目（LINE_NO: ${[...importedLineNos].sort().join(', ')}），剩餘 ${keepIndices.length} 筆`)
+      setTimeout(() => setMsg(''), 8000)
+    } catch (e) {
+      setMsg(`❌ 查詢失敗：${e instanceof Error ? e.message : String(e)}`)
+      setTimeout(() => setMsg(''), 6000)
+    } finally { setRemovingImported(false) }
+  }, [header.project_id, sourceRows])
+
   // ── 查詢 ERP 同步区採購單 (erp_pj_sync) ──
   const searchPoSync = useCallback(async (q: string) => {
     const trimmed = q.trim()
@@ -308,6 +372,34 @@ export default function PoBatchExportCPage() {
     } finally { setPoSearching(false) }
   }, [])
 
+  // ── 回寫採購單號到每日出單表 ──
+  const [syncingPoBack, setSyncingPoBack] = useState(false)
+  const syncPoNumberBack = useCallback(async () => {
+    const pid = header.project_id.trim()
+    if (!pid) { alert('請先填寫採購單號'); return }
+    if (!loadedDate) { alert('尚未載入出單表日期'); return }
+    if (sourceRows.length === 0) return
+    setSyncingPoBack(true); setMsg('')
+    try {
+      const updates = sourceRows
+        .filter(r => r.row_key)
+        .map(r => ({ row_key: r.row_key!, po_number: pid, po_status: 'matched' }))
+      if (updates.length === 0) { setMsg('⚠️ 來源資料無 row_key，無法回寫'); setTimeout(() => setMsg(''), 5000); return }
+      const res = await fetch('/api/argoerp/daily-order-sheet', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheet_date: loadedDate, updates }),
+      })
+      const j = await res.json()
+      if (!j.success) throw new Error(j.error ?? '回寫失敗')
+      setMsg(`✅ 已將 ${updates.length} 筆常平訂單的採購單號（${pid}）回寫至 ${loadedDate} 出單表`)
+      setTimeout(() => setMsg(''), 8000)
+    } catch (e) {
+      setMsg(`❌ 回寫失敗：${e instanceof Error ? e.message : String(e)}`)
+      setTimeout(() => setMsg(''), 6000)
+    } finally { setSyncingPoBack(false) }
+  }, [header.project_id, loadedDate, sourceRows])
+
   // ── 來源序號比對 (erp_so_lines) ──
   const runSerialMatch = useCallback(async () => {
     if (sourceRows.length === 0) return
@@ -316,20 +408,20 @@ export default function PoBatchExportCPage() {
       const orderNumbers = [...new Set(sourceRows.map(r => r.order_number).filter(Boolean))]
       const { data: soLines, error } = await supabase
         .from('erp_so_lines')
-        .select('project_id, line_no, mbp_part, order_qty_oru, remark2, packing')
+        .select('project_id, line_no, mbp_part, order_qty_oru, unit_of_measure_oru, remark2, packing')
         .in('project_id', orderNumbers.length > 0 ? orderNumbers : ['__none__'])
       if (error) throw error
       const lines = soLines ?? []
       const soProjectIds = new Set(lines.map((l: { project_id: string }) => l.project_id))
-      type SoLine = { project_id: string; line_no: unknown; mbp_part: string | null; order_qty_oru: unknown; remark2: string | null; packing: string | null }
+      type SoLine = { project_id: string; line_no: unknown; mbp_part: string | null; order_qty_oru: unknown; unit_of_measure_oru: string | null; remark2: string | null; packing: string | null }
       const candidateMap = new Map<string, string[]>()
-      const soLineInfoMap = new Map<string, { remark2: string | null; packing: string | null }>()
+      const soLineInfoMap = new Map<string, { uom: string | null; remark2: string | null; packing: string | null }>()
       for (const line of (lines as SoLine[])) {
         const qty = Number(line.order_qty_oru ?? 0)
         const key = `${line.project_id}|${line.mbp_part ?? ''}|${qty}`
         if (!candidateMap.has(key)) candidateMap.set(key, [])
         candidateMap.get(key)!.push(String(line.line_no ?? ''))
-        soLineInfoMap.set(`${line.project_id}|${String(line.line_no ?? '')}`, { remark2: line.remark2, packing: line.packing })
+        soLineInfoMap.set(`${line.project_id}|${String(line.line_no ?? '')}`, { uom: line.unit_of_measure_oru, remark2: line.remark2, packing: line.packing })
       }
       for (const arr of candidateMap.values())
         arr.sort((a, b) => (Number(a) || 0) - (Number(b) || 0))
@@ -356,6 +448,7 @@ export default function PoBatchExportCPage() {
         return {
           ...e,
           so_line_no: lineNo,
+          uom:        soInfo?.uom || e.uom,
           remark2:    soInfo?.remark2 ?? e.remark2,
           packing:    soInfo?.packing ?? e.packing,
         }
@@ -657,7 +750,7 @@ export default function PoBatchExportCPage() {
         ) : (
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-12 text-center">
             <p className="text-slate-500">尚無明細，請選擇出單日期並載入</p>
-            <p className="text-slate-600 text-xs mt-2">將自動篩選廠別「常平（C）」的資料；每天所有常平訂單共用一張採購單</p>
+            <p className="text-slate-600 text-xs mt-2">自動篩選廠別「常平（C）」且尚未有採購單紀錄的訂單；每天所有常平訂單共用一張採購單</p>
           </div>
         )}
 

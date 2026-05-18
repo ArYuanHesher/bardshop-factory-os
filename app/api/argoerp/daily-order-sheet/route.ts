@@ -126,6 +126,8 @@ export async function PATCH(request: NextRequest) {
         match_reason?: string | null
         material_prep_status?: string | null
         argo_slip_no?: string | null
+        po_number?: string | null
+        po_status?: string | null
       }>
     }
     const { sheet_date, updates } = body
@@ -161,6 +163,8 @@ export async function PATCH(request: NextRequest) {
       if (upd.match_reason !== undefined) merged.match_reason = upd.match_reason
       if (upd.material_prep_status !== undefined) merged.material_prep_status = upd.material_prep_status
       if (upd.argo_slip_no !== undefined) merged.argo_slip_no = upd.argo_slip_no
+      if (upd.po_number !== undefined) merged.po_number = upd.po_number
+      if (upd.po_status !== undefined) merged.po_status = upd.po_status
       return merged
     })
 
