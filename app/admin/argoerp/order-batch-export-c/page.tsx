@@ -136,7 +136,7 @@ export default function PoBatchExportCPage() {
         // merge: 對空字串欄位也用預設值覆蓋
         const merged: PoHeader = { ...def, ...saved }
         for (const k of Object.keys(def) as (keyof PoHeader)[]) {
-          if ((saved[k] ?? '') === '') (merged as Record<string, unknown>)[k] = def[k]
+          if ((saved[k] ?? '') === '') (merged as unknown as Record<string, unknown>)[k] = def[k]
         }
         setHeader(merged)
       }
