@@ -1053,9 +1053,18 @@ export default function DailyOrderSheetPage() {
             if (!row.item_code) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
             const qty = parseFloat(String(row.quantity).replace(/,/g, '')) || 0
             const matchLineNo = (row.match_line_no ?? '').trim()
-            let hitIdx = matchLineNo
-              ? pool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.TPN_PART_NO ?? '') === matchLineNo)
-              : -1
+            // 第一優先：料號 + 數量 + MBP_LOT_NO === 銷售訂單號
+            let hitIdx = pool.findIndex(c =>
+              !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
+              String(c.extra?.MBP_LOT_NO ?? '').trim() === (row.order_number ?? '').trim()
+            )
+            // 第二優先：料號 + 數量 + TPN_PART_NO === match_line_no
+            if (hitIdx === -1 && matchLineNo)
+              hitIdx = pool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.TPN_PART_NO ?? '') === matchLineNo)
+            // 第三優先：料號 + 數量 + SO_PROJECT_ID === 銷售訂單號
+            if (hitIdx === -1)
+              hitIdx = pool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? ''))
+            // fallback：僅料號 + 數量
             if (hitIdx === -1)
               hitIdx = pool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty)
             if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
