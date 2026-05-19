@@ -138,6 +138,9 @@ export default function MaterialIssuePage() {
   const [showMissing, setShowMissing]     = useState(true)
   const [syncing, setSyncing]             = useState(false)
   const [syncMsg, setSyncMsg]             = useState('')
+  const [issuedSet, setIssuedSet]         = useState<Set<string>>(new Set())   // "slip_no:line_no"
+  const [tab, setTab]                     = useState<'pending' | 'issued'>('pending')
+  const [issuingKey, setIssuingKey]       = useState<string | null>(null)
 
   // ── Load date list ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -227,6 +230,20 @@ export default function MaterialIssuePage() {
       if (prepLinesResult.error) throw prepLinesResult.error
 
       const prepLines = (prepLinesResult.data ?? []) as PrepLine[]
+
+      // 3.5. Load issued status
+      const slipNos = [...new Set(prepLines.map(l => l.slip_no).filter(Boolean))] as string[]
+      const newIssuedSet = new Set<string>()
+      if (slipNos.length > 0) {
+        const { data: issueData } = await supabase
+          .from('erp_material_issue_status')
+          .select('slip_no, line_no')
+          .in('slip_no', slipNos)
+        for (const r of (issueData ?? []) as Array<{ slip_no: string; line_no: number }>) {
+          newIssuedSet.add(`${r.slip_no}:${r.line_no}`)
+        }
+      }
+      setIssuedSet(newIssuedSet)
 
       // Build machine map: mo_number → machine (prefer assign table over sheet row)
       const machineByMo = new Map<string, string>()
@@ -383,6 +400,33 @@ export default function MaterialIssuePage() {
     )
   }, [missingMos, searchQ])
 
+  // ── Tab-filtered groups (each group's mos filtered by issued state) ─────────
+  const tabGroups = useMemo(() => {
+    return filteredGroups
+      .map(g => ({
+        ...g,
+        mos: g.mos.filter(m => {
+          const key = m.slip_no && m.line_no != null ? `${m.slip_no}:${m.line_no}` : null
+          const issued = key ? issuedSet.has(key) : false
+          return tab === 'pending' ? !issued : issued
+        }),
+      }))
+      .filter(g => g.mos.length > 0)
+  }, [filteredGroups, issuedSet, tab])
+
+  // ── Pending / issued counts (across all filteredGroups, ignoring search) ────
+  const { pendingCount, issuedCount } = useMemo(() => {
+    let pending = 0, issued = 0
+    for (const g of filteredGroups) {
+      for (const m of g.mos) {
+        const key = m.slip_no && m.line_no != null ? `${m.slip_no}:${m.line_no}` : null
+        if (key && issuedSet.has(key)) issued++
+        else pending++
+      }
+    }
+    return { pendingCount: pending, issuedCount: issued }
+  }, [filteredGroups, issuedSet])
+
   // ── Stats ───────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const preppedCount = sheetRows.filter(r =>
@@ -402,10 +446,36 @@ export default function MaterialIssuePage() {
       return next
     })
 
-  const expandAll  = () => setExpanded(new Set(filteredGroups.map(g => g.group_key)))
+  const expandAll  = () => setExpanded(new Set(tabGroups.map(g => g.group_key)))
   const collapseAll = () => setExpanded(new Set())
 
   const hasData = groups.length > 0 || missingMos.length > 0
+
+  // ── Toggle issue / un-issue ─────────────────────────────────────────────────
+  const toggleIssue = useCallback(async (mo: MoDetail) => {
+    if (!mo.slip_no || mo.line_no == null) return
+    const key = `${mo.slip_no}:${mo.line_no}`
+    setIssuingKey(key)
+    const wasIssued = issuedSet.has(key)
+    try {
+      const res = await fetch('/api/argoerp/material-issue', {
+        method: wasIssued ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slip_no: mo.slip_no, line_no: mo.line_no }),
+      })
+      if (!res.ok) throw new Error('發料操作失敗')
+      setIssuedSet(prev => {
+        const next = new Set(prev)
+        if (wasIssued) next.delete(key)
+        else next.add(key)
+        return next
+      })
+    } catch (e) {
+      setSyncMsg(`操作失敗：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setIssuingKey(null)
+    }
+  }, [issuedSet])
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Render
@@ -505,6 +575,36 @@ export default function MaterialIssuePage() {
           >全部收合</button>
         </div>
 
+        {/* ── Tabs ── */}
+        <div className="flex gap-0 mb-0 no-print border-b border-slate-800">
+          <button
+            onClick={() => setTab('pending')}
+            className={`px-5 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+              tab === 'pending'
+                ? 'bg-slate-800 text-white border border-b-transparent border-slate-700 -mb-px'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            未發料
+            <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${tab === 'pending' ? 'bg-amber-800 text-amber-200' : 'bg-slate-700 text-slate-500'}`}>
+              {pendingCount}
+            </span>
+          </button>
+          <button
+            onClick={() => setTab('issued')}
+            className={`px-5 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+              tab === 'issued'
+                ? 'bg-slate-800 text-white border border-b-transparent border-slate-700 -mb-px'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            已發料
+            <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${tab === 'issued' ? 'bg-emerald-800 text-emerald-200' : 'bg-slate-700 text-slate-500'}`}>
+              {issuedCount}
+            </span>
+          </button>
+        </div>
+
         {/* ── Print header (only visible when printing) ── */}
         <div className="hidden print:block mb-4 border-b border-gray-300 pb-2">
           <h1 className="text-lg font-bold text-black">發料 / 領料清單 — {fmtDateLabel(selectedDate)}</h1>
@@ -543,14 +643,14 @@ export default function MaterialIssuePage() {
               : '此日期無批備料紀錄（已備料 / 已批備料）'}
           </div>
         )}
-        {!loading && !error && hasData && filteredGroups.length === 0 && filteredMissing.length === 0 && (
+        {!loading && !error && hasData && tabGroups.length === 0 && filteredMissing.length === 0 && (
           <div className="py-10 text-center text-slate-500">無符合搜尋的資料</div>
         )}
 
         {/* ── Material groups ── */}
-        {!loading && !error && filteredGroups.length > 0 && (
+        {!loading && !error && tabGroups.length > 0 && (
           <div className="space-y-1.5">
-            {filteredGroups.map(g => {
+            {tabGroups.map(g => {
               const isExp   = expanded.has(g.group_key)
               const hasSlip = g.mos.some(m => m.slip_no)
               const machines = [...new Set(g.mos.map(m => m.remark || m.machine).filter(Boolean))].join('、')
@@ -621,6 +721,7 @@ export default function MaterialIssuePage() {
                             <th className="px-3 py-1.5 text-left text-slate-500 whitespace-nowrap">批備日期</th>
                             <th className="px-3 py-1.5 text-left text-slate-500 whitespace-nowrap">交期</th>
                             <th className="px-3 py-1.5 text-left text-slate-500 whitespace-nowrap">廠</th>
+                            <th className="px-3 py-1.5 text-center text-slate-500 whitespace-nowrap no-print">操作</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -663,6 +764,25 @@ export default function MaterialIssuePage() {
                               </td>
                               <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap print:text-black">
                                 {mo.factory || '—'}
+                              </td>
+                              <td className="px-3 py-1.5 text-center no-print">
+                                {mo.slip_no && mo.line_no != null && (() => {
+                                  const key = `${mo.slip_no}:${mo.line_no}`
+                                  const isBusy = issuingKey === key
+                                  return (
+                                    <button
+                                      onClick={() => void toggleIssue(mo)}
+                                      disabled={isBusy}
+                                      className={`px-2.5 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
+                                        tab === 'pending'
+                                          ? 'bg-emerald-800 border border-emerald-600 text-emerald-200 hover:bg-emerald-700'
+                                          : 'bg-slate-700 border border-slate-600 text-slate-300 hover:bg-slate-600'
+                                      }`}
+                                    >
+                                      {isBusy ? '…' : tab === 'pending' ? '發料' : '未發'}
+                                    </button>
+                                  )
+                                })()}
                               </td>
                             </tr>
                           ))}
