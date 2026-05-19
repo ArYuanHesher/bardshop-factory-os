@@ -669,18 +669,6 @@ export default function OrderBatchExportPage() {
     }
   }, [])
 
-  // 還原暫存
-  useEffect(() => {
-    const saved = loadFromStorage()
-    const failed = loadFailedImports()
-    if (saved.length > 0) {
-      setSourceRows(saved)
-    }
-    if (failed.length > 0) {
-      setFailedImports(failed)
-    }
-  }, [])
-
   // 載入每日出單表日期清單
   useEffect(() => {
     setSheetDatesLoading(true)

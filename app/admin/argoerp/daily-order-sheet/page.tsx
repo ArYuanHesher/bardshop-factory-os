@@ -215,7 +215,7 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
 
 // ===== 頁面元件 =====
 export default function DailyOrderSheetPage() {
-  const [selectedDate, setSelectedDate] = useState(todayStr())
+  const [selectedDate, setSelectedDate] = useState('')
   const [availableSheets, setAvailableSheets] = useState<SheetMeta[]>([])
   const [sheetRows, setSheetRows] = useState<SheetRow[]>([])
   const [rawText, setRawText] = useState('')
@@ -322,6 +322,7 @@ export default function DailyOrderSheetPage() {
 
   // ---- 讀取指定日期的出單表 ----
   const loadSheet = useCallback(async (date: string) => {
+    if (!date) return
     setLoading(true)
     setSheetRows([])
     setSelectedKeys(new Set())

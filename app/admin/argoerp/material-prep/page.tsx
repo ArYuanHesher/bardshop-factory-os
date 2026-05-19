@@ -257,7 +257,7 @@ export default function MaterialPrepPage() {
   const importInFlightRef = useRef(false)
 
   // ---- 出單表選擇 ----
-  const [selectedDate, setSelectedDate] = useState(todayStr())
+  const [selectedDate, setSelectedDate] = useState('')
   const [availableSheets, setAvailableSheets] = useState<SheetMeta[]>([])
   const [sheetRows, setSheetRows] = useState<SheetRowBrief[]>([])
   const [sheetLoading, setSheetLoading] = useState(false)
@@ -447,6 +447,7 @@ export default function MaterialPrepPage() {
 
   // ---- 載入指定日期的出單表 ＋ 對應製令狀態 ----
   const loadSheet = useCallback(async (date: string) => {
+    if (!date) return
     setSheetLoading(true)
     setMoError('')
     try {

@@ -117,17 +117,8 @@ export default function PoBatchExportCPage() {
   const [poSearching, setPoSearching] = useState(false)
   const [poSyncRows, setPoSyncRows]   = useState<Array<Record<string, unknown>> | null>(null)
 
-  // ── Init from localStorage ──
+  // ── Init from localStorage（僅還原表頭設定，不還原資料列）──
   useEffect(() => {
-    try {
-      const s = localStorage.getItem(STORAGE_KEY)
-      if (s) {
-        const d = JSON.parse(s)
-        setSourceRows(d.rows ?? [])
-        setLineEdits(d.edits ?? [])
-        setLoadedDate(d.date ?? null)
-      }
-    } catch {}
     try {
       const h = localStorage.getItem(HEADER_KEY)
       if (h) {

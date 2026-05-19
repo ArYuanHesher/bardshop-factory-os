@@ -450,13 +450,6 @@ export default function FactoryOrderExportPage({
     } catch {}
   }
 
-  // ── 初始化 ──
-  useEffect(() => {
-    setSourceRows(loadRows())
-    setFailedImports(loadFailed())
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   useEffect(() => { if (sourceRows.length > 0) saveRows(sourceRows) }, [sourceRows])
   useEffect(() => { saveFailed(failedImports) }, [failedImports])
 
