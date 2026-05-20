@@ -103,6 +103,7 @@ export default function PrBatchExportOPage() {
 
   const [importing, setImporting]       = useState(false)
   const [msg, setMsg]                   = useState('')
+  const [activeTab, setActiveTab]       = useState<'pending' | 'skip'>('pending')
 
   // ── 初始化表頭設定（不還原資料列）──
   useEffect(() => {
@@ -229,7 +230,8 @@ export default function PrBatchExportOPage() {
   // ── ERP payload（每列獨立一張請購單，LINE_NO=1）──
   const payload = useMemo<Array<Record<string, string>>>(() => {
     const today = fmtDate(new Date())
-    return sourceRows.map((row, i) => {
+    return sourceRows.flatMap((row, i) => {
+      if (row.mo_status === '無須轉請購') return []
       const e = lineEdits[i] ?? DEF_LINE
       const m = matchResults[i]
       const applyId = buildApplyId(row.order_number, m?.line_no ?? null)
@@ -247,7 +249,7 @@ export default function PrBatchExportOPage() {
       rec['ORDER_QTY_ORU']              = row.quantity
       rec['CURRENCY']                   = e.currency || 'TWD'
       rec['DUEDATE']                    = row.delivery_date
-      return rec
+      return [rec]
     })
   }, [sourceRows, lineEdits, matchResults, header])
 
@@ -272,10 +274,10 @@ export default function PrBatchExportOPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sheet_date: loadedDate,
-            updates: sourceRows.map(r => ({
-              row_key: r.row_key,
-              mo_status: '已匯入採單',
-            })).filter(u => u.row_key),
+            updates: sourceRows
+              .filter(r => r.mo_status !== '無須轉請購')
+              .map(r => ({ row_key: r.row_key, mo_status: '已匯入採單' }))
+              .filter(u => u.row_key),
           }),
         })
       } else {
@@ -288,8 +290,31 @@ export default function PrBatchExportOPage() {
     }
   }, [header.interface_id, payload, loadedDate, sourceRows])
 
-  // ─── UI ────────────────────────────────────────────────────────────────────
+  // ── 標記無須轉請購 ──
+  const markSkip = useCallback((rowKey: string) => {
+    if (!loadedDate || !rowKey) return
+    setSourceRows(prev => prev.map(r => r.row_key === rowKey ? { ...r, mo_status: '無須轉請購' } : r))
+    fetch('/api/argoerp/daily-order-sheet', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet_date: loadedDate, updates: [{ row_key: rowKey, mo_status: '無須轉請購' }] }),
+    }).catch(() => {})
+  }, [loadedDate])
+
+  const markRestore = useCallback((rowKey: string) => {
+    if (!loadedDate || !rowKey) return
+    setSourceRows(prev => prev.map(r => r.row_key === rowKey ? { ...r, mo_status: '' } : r))
+    fetch('/api/argoerp/daily-order-sheet', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet_date: loadedDate, updates: [{ row_key: rowKey, mo_status: '' }] }),
+    }).catch(() => {})
+  }, [loadedDate])
+
+  // ─── UI ────────────────────────────────────────────────────────────────────────────
   const matchedCount = matchResults.filter(r => r.status === 'matched').length
+  const pendingCount = sourceRows.filter(r => r.mo_status !== '無須轉請購').length
+  const skipCount    = sourceRows.filter(r => r.mo_status === '無須轉請購').length
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
@@ -410,12 +435,40 @@ export default function PrBatchExportOPage() {
           </div>
         </div>
 
-        {/* ── 明細表格 ── */}
+        {/* ── Tab 切換 ── */}
         {sourceRows.length > 0 && (
+          <div className="flex gap-1 border-b border-slate-800">
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`px-5 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                activeTab === 'pending'
+                  ? 'border-purple-400 text-purple-300'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              📋 待轉請購
+              {pendingCount > 0 && <span className="ml-2 px-1.5 py-0.5 rounded-full text-xs bg-slate-700 text-slate-300">{pendingCount}</span>}
+            </button>
+            <button
+              onClick={() => setActiveTab('skip')}
+              className={`px-5 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                activeTab === 'skip'
+                  ? 'border-amber-400 text-amber-300'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🚫 無須轉請購
+              {skipCount > 0 && <span className="ml-2 px-1.5 py-0.5 rounded-full text-xs bg-amber-900/60 text-amber-300">{skipCount}</span>}
+            </button>
+          </div>
+        )}
+
+        {/* ── 明細表格（待轉請購 tab）── */}
+        {sourceRows.length > 0 && activeTab === 'pending' && (
           <div className="rounded-xl border border-slate-700 bg-slate-900/40">
             <div className="px-4 py-3 border-b border-slate-700/60 bg-purple-900/20 flex items-center gap-3">
               <span className="font-semibold text-purple-200">委外請購明細</span>
-              <span className="text-slate-400 text-sm">{sourceRows.length} 筆</span>
+              <span className="text-slate-400 text-sm">{pendingCount} 筆（待轉請購）</span>
               {matchResults.length > 0 && (
                 <span className={`text-xs px-2 py-0.5 rounded border ${
                   matchedCount === sourceRows.length
@@ -440,10 +493,12 @@ export default function PrBatchExportOPage() {
                     <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">幣別</th>
                     <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">預計交期</th>
                     <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">SO 比對</th>
+                    <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sourceRows.map((row, i) => {
+                    if (row.mo_status === '無須轉請購') return null
                     const m = matchResults[i]
                     const e = lineEdits[i] ?? DEF_LINE
                     const applyId = buildApplyId(row.order_number, m?.line_no ?? null)
@@ -512,6 +567,16 @@ export default function PrBatchExportOPage() {
                             </span>
                           )}
                         </td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => markSkip(row.row_key ?? '')}
+                            disabled={!row.row_key}
+                            title="標記為無須轉請購（不會列入匯入作業）"
+                            className="px-1.5 py-0.5 rounded text-[11px] bg-slate-800 hover:bg-amber-900/60 text-slate-500 hover:text-amber-300 border border-slate-700 hover:border-amber-700 transition-colors disabled:opacity-40"
+                          >
+                            🚫
+                          </button>
+                        </td>
                       </tr>
                     )
                   })}
@@ -521,8 +586,69 @@ export default function PrBatchExportOPage() {
           </div>
         )}
 
+        {/* ── 無須轉請購 tab ── */}
+        {activeTab === 'skip' && (
+          <div className="rounded-xl border border-amber-700/40 bg-amber-950/10">
+            <div className="px-4 py-3 border-b border-amber-800/40 bg-amber-950/20 flex items-center gap-3">
+              <span className="font-semibold text-amber-200">🚫 無須轉請購</span>
+              <span className="text-slate-400 text-sm">{skipCount} 筆</span>
+              <span className="text-xs text-slate-500">以下訂單已標記為無須轉請購，不會列入匯入作業</span>
+            </div>
+            {skipCount === 0 ? (
+              <div className="py-10 text-center text-slate-600 text-sm">尚無標記紀錄</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-900 text-slate-400 text-[11px] uppercase">
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">#</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">SO 工單號</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">料號</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap min-w-[180px]">品名說明</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">數量</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">預計交期</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sourceRows.map((row, i) => {
+                      if (row.mo_status !== '無須轉請購') return null
+                      const remark = [row.item_name, row.note].filter(Boolean).join(' ')
+                      return (
+                        <tr key={i} className="border-b border-slate-800/60 hover:bg-amber-950/20">
+                          <td className="px-3 py-2 text-slate-500 text-xs">{i + 1}</td>
+                          <td className="px-3 py-2">
+                            <button onClick={() => setSoModalId(row.order_number)} className="font-mono text-cyan-300 text-xs hover:underline">
+                              {row.order_number}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2 font-mono text-slate-400 text-xs">{row.item_code}</td>
+                          <td className="px-3 py-2 text-slate-300 text-xs max-w-[250px]">
+                            <div className="truncate" title={remark}>{remark || <span className="text-slate-600">—</span>}</div>
+                          </td>
+                          <td className="px-3 py-2 font-mono text-slate-200 text-xs">{row.quantity}</td>
+                          <td className="px-3 py-2 font-mono text-amber-300 text-xs">{row.delivery_date || '—'}</td>
+                          <td className="px-3 py-2">
+                            <button
+                              onClick={() => markRestore(row.row_key ?? '')}
+                              disabled={!row.row_key}
+                              className="px-2 py-1 rounded text-xs bg-slate-700 hover:bg-teal-700 text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+                            >
+                              恢復待轉請購
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── 批次套用 ── */}
-        {sourceRows.length > 1 && (
+        {activeTab === 'pending' && sourceRows.length > 1 && (
           <div className="rounded-xl border border-slate-700 bg-slate-900/30 p-4">
             <div className="text-xs text-slate-400 mb-2">批次套用（套用至所有列）</div>
             <div className="flex flex-wrap gap-3 items-end">
@@ -555,7 +681,7 @@ export default function PrBatchExportOPage() {
         )}
 
         {/* ── 操作列 ── */}
-        {sourceRows.length > 0 && (
+        {activeTab === 'pending' && sourceRows.length > 0 && (
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={handleImport}
@@ -577,7 +703,7 @@ export default function PrBatchExportOPage() {
         )}
 
         {/* ── ERP 欄位預覽 ── */}
-        {payload.length > 0 && (
+        {activeTab === 'pending' && payload.length > 0 && (
           <details className="rounded-xl border border-slate-700 bg-slate-900/30">
             <summary className="px-4 py-3 cursor-pointer text-sm text-slate-400 hover:text-slate-200 select-none">
               📄 ERP 欄位預覽（前 {Math.min(payload.length, 3)} 筆）

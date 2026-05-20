@@ -235,7 +235,7 @@ export default function MaterialPrepPage() {
   const [remarkOverrides, setRemarkOverrides] = useState<Record<string, string>>({})
 
   // ---- 檢視模式 ----
-  const [viewMode, setViewMode] = useState<'pending' | 'history'>('pending')
+  const [viewMode, setViewMode] = useState<'pending' | 'no_need' | 'history'>('pending')
 
   // ---- 出單表概覽收合（預設收起）----
   const [sheetOverviewOpen, setSheetOverviewOpen] = useState(false)
@@ -1344,6 +1344,8 @@ export default function MaterialPrepPage() {
   // ============================================================
   // Render
   // ============================================================
+  const noNeedRows = sheetRows.filter(r => r.material_prep_status === '無需備料')
+  const noNeedCount = noNeedRows.length
   return (
     <div className="min-h-screen bg-slate-950 text-white p-4 md:p-6">
       <div className="max-w-[1800px] mx-auto">
@@ -1438,11 +1440,11 @@ export default function MaterialPrepPage() {
               )}
             </button>
             <button
-              onClick={() => viewMode === 'pending' ? void loadSheet(selectedDate) : void loadPrepLogs()}
-              disabled={viewMode === 'pending' ? (sheetLoading || moLoading) : prepLogLoading}
+              onClick={() => viewMode === 'history' ? void loadPrepLogs() : void loadSheet(selectedDate)}
+              disabled={viewMode === 'history' ? prepLogLoading : (sheetLoading || moLoading)}
               className="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 disabled:opacity-50 transition-colors text-sm"
             >
-              {(viewMode === 'pending' ? (sheetLoading || moLoading) : prepLogLoading) ? '讀取中...' : '🔄 重新整理'}
+              {(viewMode === 'history' ? prepLogLoading : (sheetLoading || moLoading)) ? '讀取中...' : '🔄 重新整理'}
             </button>
           </div>
         </div>
@@ -1586,6 +1588,17 @@ export default function MaterialPrepPage() {
           >
             📋 批備料操作（未備料）
             {moRecords.length > 0 && <span className="ml-2 px-1.5 py-0.5 rounded-full text-xs bg-slate-700 text-slate-300">{moRecords.length}</span>}
+          </button>
+          <button
+            onClick={() => setViewMode('no_need')}
+            className={`px-5 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              viewMode === 'no_need'
+                ? 'border-amber-400 text-amber-300'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            🚫 無需備料紀錄
+            {noNeedCount > 0 && <span className="ml-2 px-1.5 py-0.5 rounded-full text-xs bg-slate-700 text-slate-300">{noNeedCount}</span>}
           </button>
           <button
             onClick={() => setViewMode('history')}
@@ -1990,6 +2003,60 @@ export default function MaterialPrepPage() {
           )}
         </div>
         </>)}
+
+        {viewMode === 'no_need' && (
+          <div className="rounded-xl border border-amber-700/40 bg-amber-950/10">
+            <div className="px-4 py-3 border-b border-amber-800/40 bg-amber-950/20 flex items-center gap-3">
+              <span className="font-semibold text-amber-200">🚫 無需備料紀錄</span>
+              <span className="text-slate-400 text-sm">{noNeedRows.length} 筆</span>
+              {!selectedDate && <span className="text-xs text-slate-500">請先選擇出單日期以查看紀錄</span>}
+            </div>
+            {noNeedRows.length === 0 ? (
+              <div className="py-10 text-center text-slate-600 text-sm">{selectedDate ? '該日期尚無無需備料紀錄' : '請先載入出單表'}</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-900 text-slate-400 text-xs uppercase">
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">工單號</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">製令號</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">料號 / 品名</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">客戶</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">數量</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">交期</th>
+                      <th className="px-3 py-2 border-b border-slate-800 text-left whitespace-nowrap">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {noNeedRows.map((row, idx) => (
+                      <tr key={row.row_key} className={`border-b border-slate-800/40 ${idx % 2 === 0 ? 'bg-slate-900/40' : 'bg-slate-900/20'} hover:bg-amber-950/20`}>
+                        <td className="px-3 py-2 font-mono text-slate-300 text-xs">{row.order_number}</td>
+                        <td className="px-3 py-2 font-mono text-cyan-300 text-xs">{row.mo_number || '—'}</td>
+                        <td className="px-3 py-2">
+                          <div className="text-slate-300 text-xs">{row.item_code}</div>
+                          <div className="text-slate-500 text-[11px] truncate max-w-[200px]" title={row.item_name}>{row.item_name}</div>
+                        </td>
+                        <td className="px-3 py-2 text-slate-400 text-xs truncate max-w-[120px]">{row.customer || '—'}</td>
+                        <td className="px-3 py-2 font-mono text-slate-200 text-xs">{row.quantity}</td>
+                        <td className="px-3 py-2 font-mono text-amber-300 text-xs">{row.delivery_date || '—'}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            type="button"
+                            onClick={() => row.mo_number && void handleRevertNoNeed(row.mo_number)}
+                            disabled={actionBusy || !row.mo_number}
+                            className="px-2 py-1 rounded text-xs bg-slate-700 hover:bg-teal-700 text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+                          >
+                            恢復待備料
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
         {viewMode === 'history' && (
           <div className="space-y-4">
