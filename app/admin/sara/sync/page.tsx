@@ -9,8 +9,208 @@ interface ApiResult {
   elapsedMs?: number
   count?: number | null
   error?: string
-  preview?: string
+  rawResult?: unknown
   message?: string
+}
+
+// ── 結構化預覽元件 ──────────────────────────────────────────────────
+
+function Th({ children }: { children: React.ReactNode }) {
+  return <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap border-b border-slate-700">{children}</th>
+}
+function Td({ children, mono }: { children: React.ReactNode; mono?: boolean }) {
+  return <td className={`px-3 py-1.5 text-xs border-b border-slate-800/60 ${mono ? 'font-mono' : ''}`}>{children}</td>
+}
+
+function PreviewResource({ data }: { data: unknown }) {
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+  type ResRow = { id: number; resource_name: string; resource_type: string; capacity_type: string; standard_capacity: number; disabled: boolean; job_name?: Array<{ id: number | null; job_name: string; type: string; line: string | null }>; events?: unknown[] }
+  const arr = (data as { data?: ResRow[] })?.data ?? []
+  if (!arr.length) return <div className="text-slate-500 text-xs">（無資料）</div>
+  return (
+    <div className="overflow-auto max-h-[500px] rounded border border-slate-700">
+      <table className="w-full text-white border-collapse">
+        <thead className="sticky top-0 bg-slate-900 z-10">
+          <tr><Th>ID</Th><Th>資源名稱</Th><Th>類型</Th><Th>容量模式</Th><Th>容量</Th><Th>製程數</Th><Th>事件數</Th><Th>狀態</Th></tr>
+        </thead>
+        <tbody>
+          {arr.map(r => {
+            const nullJobs = (r.job_name ?? []).filter(j => j.id == null)
+            const isOpen = expandedId === r.id
+            return (
+              <>
+                <tr key={r.id} className={`cursor-pointer hover:bg-slate-800/50 ${isOpen ? 'bg-slate-800/40' : ''}`} onClick={() => setExpandedId(isOpen ? null : r.id)}>
+                  <Td mono>{r.id}</Td>
+                  <Td><span className="text-emerald-300">{r.resource_name}</span></Td>
+                  <Td><span className="text-slate-300">{r.resource_type}</span></Td>
+                  <Td><span className="text-slate-400">{r.capacity_type}</span></Td>
+                  <Td mono>{r.standard_capacity}</Td>
+                  <Td>
+                    <span className={nullJobs.length ? 'text-amber-300' : 'text-slate-300'}>
+                      {(r.job_name ?? []).length}
+                      {nullJobs.length > 0 && <span className="ml-1 text-amber-400 text-[10px]">⚠ {nullJobs.length} null-id</span>}
+                    </span>
+                  </Td>
+                  <Td><span className="text-slate-400">{(r.events ?? []).length}</span></Td>
+                  <Td>
+                    {r.disabled
+                      ? <span className="px-1.5 py-0.5 rounded bg-red-900/40 text-red-300 text-[10px] border border-red-700/40">停用</span>
+                      : <span className="px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-300 text-[10px] border border-emerald-700/40">啟用</span>
+                    }
+                  </Td>
+                </tr>
+                {isOpen && (r.job_name ?? []).length > 0 && (
+                  <tr key={`${r.id}-jobs`}>
+                    <td colSpan={8} className="bg-slate-900/60 px-4 py-2">
+                      <div className="text-[10px] text-slate-500 mb-1">製程能力 (job_name)</div>
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr><Th>job_id</Th><Th>製程名稱</Th><Th>類型</Th><Th>生產線</Th></tr>
+                        </thead>
+                        <tbody>
+                          {(r.job_name ?? []).map((j, ji) => (
+                            <tr key={ji} className={j.id == null ? 'bg-amber-950/30' : ''}>
+                              <Td mono>{j.id == null ? <span className="text-amber-400">null ⚠</span> : j.id}</Td>
+                              <Td>{j.job_name}</Td>
+                              <Td><span className={j.type === 'primary' ? 'text-cyan-300' : 'text-slate-400'}>{j.type}</span></Td>
+                              <Td>{j.line ?? <span className="text-slate-600">—</span>}</Td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </td>
+                  </tr>
+                )}
+              </>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function PreviewOrder({ data }: { data: unknown }) {
+  type OrderRow = { mo_nbr: string; product_name?: string; lot_nbr?: string; doc_nbr?: string; required_qty?: number; due?: string; plan_start_time?: string; is_internal?: boolean }
+  const arr = (data as { data?: OrderRow[] })?.data ?? []
+  if (!arr.length) return <div className="text-slate-500 text-xs">（無資料）</div>
+  return (
+    <div className="overflow-auto max-h-[500px] rounded border border-slate-700">
+      <table className="w-full text-white border-collapse">
+        <thead className="sticky top-0 bg-slate-900 z-10">
+          <tr><Th>#</Th><Th>製令號</Th><Th>品名</Th><Th>批號</Th><Th>單號</Th><Th>數量</Th><Th>交期</Th><Th>預計開工</Th></tr>
+        </thead>
+        <tbody>
+          {arr.map((r, i) => (
+            <tr key={r.mo_nbr} className="hover:bg-slate-800/50">
+              <Td><span className="text-slate-600">{i + 1}</span></Td>
+              <Td mono><span className="text-cyan-300">{r.mo_nbr}</span></Td>
+              <Td>{r.product_name}</Td>
+              <Td mono>{r.lot_nbr ?? <span className="text-slate-600">—</span>}</Td>
+              <Td mono>{r.doc_nbr ?? <span className="text-slate-600">—</span>}</Td>
+              <Td mono>{r.required_qty ?? <span className="text-slate-600">—</span>}</Td>
+              <Td><span className="text-amber-300">{r.due?.slice(0, 10) ?? '—'}</span></Td>
+              <Td>{r.plan_start_time?.slice(0, 10) ?? <span className="text-slate-600">—</span>}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function PreviewWorkcenter({ data }: { data: unknown }) {
+  type WcRow = { id: number; workcenter_name: string }
+  const arr = (data as { data?: WcRow[] })?.data ?? []
+  if (!arr.length) return <div className="text-slate-500 text-xs">（無資料）</div>
+  return (
+    <div className="overflow-auto max-h-[400px] rounded border border-slate-700">
+      <table className="w-full text-white border-collapse">
+        <thead className="sticky top-0 bg-slate-900 z-10">
+          <tr><Th>ID</Th><Th>站點名稱</Th></tr>
+        </thead>
+        <tbody>
+          {arr.map(r => (
+            <tr key={r.id} className="hover:bg-slate-800/50">
+              <Td mono>{r.id}</Td>
+              <Td><span className="text-purple-300">{r.workcenter_name}</span></Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function PreviewJlb({ data }: { data: unknown }) {
+  type JlbRow = { id: number; job_name: string; sourcing: string; est_time_mode: string; workcenter_id?: number; workcenter_name?: string }
+  const arr = (data as { data?: JlbRow[] })?.data ?? []
+  if (!arr.length) return <div className="text-slate-500 text-xs">（無資料）</div>
+  return (
+    <div className="overflow-auto max-h-[500px] rounded border border-slate-700">
+      <table className="w-full text-white border-collapse">
+        <thead className="sticky top-0 bg-slate-900 z-10">
+          <tr><Th>ID</Th><Th>製程名稱</Th><Th>Sourcing</Th><Th>時間模式</Th><Th>站點 ID</Th><Th>站點名稱</Th></tr>
+        </thead>
+        <tbody>
+          {arr.map(r => (
+            <tr key={r.id} className="hover:bg-slate-800/50">
+              <Td mono>{r.id}</Td>
+              <Td><span className="text-teal-300">{r.job_name}</span></Td>
+              <Td><span className="text-slate-400">{r.sourcing}</span></Td>
+              <Td><span className="text-slate-400">{r.est_time_mode}</span></Td>
+              <Td mono>{r.workcenter_id ?? <span className="text-slate-600">—</span>}</Td>
+              <Td>{r.workcenter_name ?? <span className="text-slate-600">—</span>}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function PreviewLotDetail({ data }: { data: unknown }) {
+  type RouteRow = { mo_nbr?: string; lot_nbr?: string; seq?: number; job_name?: string; workcenter_name?: string; plan_start?: string; plan_end?: string; qty?: number }
+  const arr = (data as { data?: RouteRow[] })?.data ?? []
+  if (!arr.length) return <div className="text-slate-500 text-xs">（無資料）</div>
+  return (
+    <div className="overflow-auto max-h-[500px] rounded border border-slate-700">
+      <table className="w-full text-white border-collapse">
+        <thead className="sticky top-0 bg-slate-900 z-10">
+          <tr><Th>製令號</Th><Th>批號</Th><Th>Seq</Th><Th>製程</Th><Th>站點</Th><Th>預計開始</Th><Th>預計結束</Th><Th>數量</Th></tr>
+        </thead>
+        <tbody>
+          {arr.map((r, i) => (
+            <tr key={i} className="hover:bg-slate-800/50">
+              <Td mono><span className="text-cyan-300">{r.mo_nbr}</span></Td>
+              <Td mono>{r.lot_nbr ?? '—'}</Td>
+              <Td mono>{r.seq ?? '—'}</Td>
+              <Td><span className="text-teal-300">{r.job_name}</span></Td>
+              <Td>{r.workcenter_name}</Td>
+              <Td>{r.plan_start?.slice(0, 16) ?? '—'}</Td>
+              <Td>{r.plan_end?.slice(0, 16) ?? '—'}</Td>
+              <Td mono>{r.qty ?? '—'}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function StructuredPreview({ action, data }: { action: string; data: unknown }) {
+  switch (action) {
+    case 'resource':    return <PreviewResource data={data} />
+    case 'order':       return <PreviewOrder data={data} />
+    case 'workcenter':  return <PreviewWorkcenter data={data} />
+    case 'jlb':         return <PreviewJlb data={data} />
+    case 'lot_detail':  return <PreviewLotDetail data={data} />
+    default: return (
+      <pre className="max-h-80 overflow-auto bg-slate-950 border border-slate-800 rounded p-2 text-[11px] text-slate-300">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    )
+  }
 }
 
 const ACTIONS: { key: string; label: string; desc: string; needsBody?: boolean; syncAction?: string }[] = [
@@ -59,7 +259,7 @@ export default function SaraSyncPage() {
           count: json.count,
           error: json.error,
           message: json.message,
-          preview: json.result ? JSON.stringify(json.result, null, 2).slice(0, 4000) : undefined,
+          rawResult: json.result ?? null,
         },
       }))
     } catch (e) {
@@ -205,13 +405,10 @@ SARA_BASE_URL=https://sara-factory.com/api/data_export
                     ) : (
                       <div className="text-rose-300 break-all">✗ {r.error}</div>
                     )}
-                    {r.preview && (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-slate-400 hover:text-slate-200">查看回應內容</summary>
-                        <pre className="mt-2 max-h-80 overflow-auto bg-slate-950 border border-slate-800 rounded p-2 text-[11px] text-slate-300">
-{r.preview}
-                        </pre>
-                      </details>
+                    {r.rawResult != null && (
+                      <div className="mt-2">
+                        <StructuredPreview action={a.key} data={r.rawResult} />
+                      </div>
                     )}
                   </div>
                 )}
