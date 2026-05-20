@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import * as XLSX from 'xlsx'
@@ -581,6 +581,7 @@ export default function OrderBatchExportPage() {
   const [sheetDatesLoading, setSheetDatesLoading] = useState(false)
   const [loadedFromSheetDate, setLoadedFromSheetDate] = useState<string | null>(null)
   const [sheetPickerDate, setSheetPickerDate] = useState<string>('')
+  const [includeAlreadyImported, setIncludeAlreadyImported] = useState(false)
   const [exportFormat, setExportFormat] = useState<'csv' | 'xlsx'>('csv')
   const [saveMsg, setSaveMsg] = useState('')
   const [importingFactory, setImportingFactory] = useState<'T' | 'C' | 'O' | null>(null)
@@ -708,7 +709,7 @@ export default function OrderBatchExportPage() {
       }
       const sheetRows = (json.sheet.rows ?? []) as Array<SourceRow & { mo_status?: string; match_status?: string; match_line_no?: string | null; match_pdl_seq?: number | null; match_reason?: string | null }>
       const rows: SourceRow[] = sheetRows
-        .filter(r => r.factory === 'T')
+        .filter(r => r.factory === 'T' && (includeAlreadyImported || r.mo_status !== '已匯入製令'))
         .map(r => ({
           order_number: r.order_number, doc_type: r.doc_type, factory: r.factory,
           receiver: r.receiver, is_sample: r.is_sample, has_material: r.has_material,
@@ -723,10 +724,15 @@ export default function OrderBatchExportPage() {
       setLoadedFromSheetDate(date)
 
       // 若每日出單表已有預先比對結果，直接套用，不必重跑
+      // 但若出單表上次更新超過 3 天，視為結果可能過時，自動重新比對
       const hasPrematched = sheetRows.some(r => r.match_status)
-      if (hasPrematched) {
+      const sheetUpdatedAt = json.sheet.updated_at as string | null
+      const isStale = sheetUpdatedAt
+        ? (Date.now() - new Date(sheetUpdatedAt).getTime()) > 3 * 24 * 60 * 60 * 1000
+        : false
+      if (hasPrematched && !isStale) {
         const presetMatches: SoMatchResult[] = sheetRows
-          .filter(r => r.factory === 'T')
+          .filter(r => r.factory === 'T' && (includeAlreadyImported || r.mo_status !== '已匯入製令'))
           .map(r => {
             const status = (r.match_status as SoMatchResult['status']) || 'no_order'
             return {
@@ -738,12 +744,17 @@ export default function OrderBatchExportPage() {
           })
         setSoMatchResults(presetMatches)
       } else {
+        if (hasPrematched && isStale) {
+          const updatedDate = sheetUpdatedAt ? new Date(sheetUpdatedAt).toLocaleDateString('zh-TW') : '未知'
+          setSaveMsg(`⚠️ 出單表比對結果已超過 3 天（${updatedDate}），自動重新比對中…`)
+          setTimeout(() => setSaveMsg(''), 4000)
+        }
         buildSoMatches(rows)
       }
     } catch (e) {
       alert(`載入出單表失敗：${e}`)
     }
-  }, [buildSoMatches])
+  }, [buildSoMatches, includeAlreadyImported])
 
   // 更新每日出單表列狀態
   const updateSheetRowStatuses = useCallback(async (
@@ -1447,6 +1458,15 @@ export default function OrderBatchExportPage() {
                 >
                   📋 載入出單表
                 </button>
+                <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeAlreadyImported}
+                    onChange={e => setIncludeAlreadyImported(e.target.checked)}
+                    className="accent-amber-500 cursor-pointer"
+                  />
+                  包含已建製令
+                </label>
                 {loadedFromSheetDate && (
                   <span className="text-cyan-400 text-xs px-2 py-1 bg-cyan-900/30 rounded border border-cyan-700/40">
                     已載入 {loadedFromSheetDate}

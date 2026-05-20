@@ -57,6 +57,8 @@ export interface SheetRow extends SourceRow {
   match_reason?: string | null
   // 批備料狀態（對應 argoerp_material_prep_log 最近一筆 或 erp_material_prep_lines ARGO 批備料單）
   material_prep_status?: '已備料' | '無需備料' | '已批備料' | null
+  // ARGO 批備料建立的單據號碼（對應 argoerp_material_prep_log.argo_slip_no）
+  argo_slip_no?: string | null
   // 機台分配（對應 argoerp_mo_machine_assign）
   machine?: string
 }
@@ -1567,9 +1569,19 @@ export default function DailyOrderSheetPage() {
                             </td>
                             <td className="px-3 py-2">
                               {row.material_prep_status === '已批備料' ? (
-                                <span className="px-2 py-0.5 rounded border text-xs bg-teal-900/40 text-teal-300 border-teal-700/50">已批備料</span>
+                                <div>
+                                  <span className="px-2 py-0.5 rounded border text-xs bg-teal-900/40 text-teal-300 border-teal-700/50">已批備料</span>
+                                  {row.argo_slip_no && (
+                                    <div className="font-mono text-[10px] text-teal-400/70 mt-0.5">{row.argo_slip_no}</div>
+                                  )}
+                                </div>
                               ) : row.material_prep_status === '已備料' ? (
-                                <span className="px-2 py-0.5 rounded border text-xs bg-emerald-900/40 text-emerald-300 border-emerald-700/50">已備料</span>
+                                <div>
+                                  <span className="px-2 py-0.5 rounded border text-xs bg-emerald-900/40 text-emerald-300 border-emerald-700/50">已備料</span>
+                                  {row.argo_slip_no && (
+                                    <div className="font-mono text-[10px] text-emerald-400/70 mt-0.5">{row.argo_slip_no}</div>
+                                  )}
+                                </div>
                               ) : row.material_prep_status === '無需備料' ? (
                                 <span className="px-2 py-0.5 rounded border text-xs bg-slate-800 text-slate-400 border-slate-700">無需備料</span>
                               ) : (
