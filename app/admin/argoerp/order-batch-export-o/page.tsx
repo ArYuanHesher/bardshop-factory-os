@@ -36,7 +36,7 @@ interface SourceRow {
 
 interface PrHeader {
   department:     string   // SEG_SEGMENT_NO_DEPARTMENT
-  hold_status:    'OPEN' | 'HOLD' | 'CLOSE' | 'UNSIGNED'
+  hold_status:    'HOLD' | 'CLOSE' | 'UNSIGNED'
   interface_id:   string   // 請購單 ERP 介面 ID
 }
 
@@ -75,7 +75,7 @@ function parseSoDigits(orderNumber: string): string {
 }
 
 function makeDefaultHeader(): PrHeader {
-  return { department: 'M1100', hold_status: 'OPEN', interface_id: 'IFAF043' }
+  return { department: 'M1100', hold_status: 'UNSIGNED', interface_id: 'IFAF043' }
 }
 
 function buildApplyId(orderNumber: string, lineNo: string | null): string {
@@ -227,14 +227,16 @@ export default function PrBatchExportOPage() {
     }
   }, [sourceRows])
 
-  // ── ERP payload（每列獨立一張請購單，LINE_NO=1）──
+  // ── ERP payload（每列本是一張請購單，LINE_NO 按同 APPLY_ID 塗縞遞増）──
   const payload = useMemo<Array<Record<string, string>>>(() => {
     const today = fmtDate(new Date())
+    const lineCounters: Record<string, number> = {}
     return sourceRows.flatMap((row, i) => {
       if (row.mo_status === '無須轉請購') return []
       const e = lineEdits[i] ?? DEF_LINE
       const m = matchResults[i]
       const applyId = buildApplyId(row.order_number, m?.line_no ?? null)
+      lineCounters[applyId] = (lineCounters[applyId] ?? 0) + 1
       const remark = [row.item_name, row.note].filter(Boolean).join(' ')
       const rec: Record<string, string> = {}
       rec['APPLY_ID']                   = applyId
@@ -242,7 +244,7 @@ export default function PrBatchExportOPage() {
       rec['SEG_SEGMENT_NO_DEPARTMENT']  = header.department.trim() || 'M1100'
       rec['HOLD_STATUS']                = header.hold_status
       if (remark) rec['REMARK']         = remark
-      rec['LINE_NO']                    = '1'
+      rec['LINE_NO']                    = String(lineCounters[applyId])
       rec['MBP_PART']                   = row.item_code
       rec['MBP_VER']                    = e.mbp_ver || '1'
       rec['UNIT_OF_MEASURE_ORU']        = e.uom || 'PCS'
@@ -360,7 +362,6 @@ export default function PrBatchExportOPage() {
                   onChange={e => setHeader(h => ({ ...h, hold_status: e.target.value as PrHeader['hold_status'] }))}
                   className="w-full px-3 py-1.5 rounded bg-slate-800 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
                 >
-                  <option value="OPEN">OPEN</option>
                   <option value="HOLD">HOLD</option>
                   <option value="CLOSE">CLOSE</option>
                   <option value="UNSIGNED">UNSIGNED</option>
