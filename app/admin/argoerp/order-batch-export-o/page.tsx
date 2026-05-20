@@ -172,11 +172,13 @@ export default function PrBatchExportOPage() {
       const sb = createClient(sbUrl, sbKey)
 
       const results: MatchResult[] = []
-      for (const row of sourceRows) {
+      const uomMap = new Map<number, string>() // rowIndex → unit_of_measure_oru
+      for (let idx = 0; idx < sourceRows.length; idx++) {
+        const row = sourceRows[idx]
         const digits = parseSoDigits(row.order_number)
         const { data } = await sb
           .from('erp_so_lines')
-          .select('line_no, pdl_seq, order_qty_oru')
+          .select('line_no, pdl_seq, order_qty_oru, unit_of_measure_oru')
           .eq('project_id', row.order_number)
           .eq('mbp_part', row.item_code)
           .limit(5)
@@ -185,7 +187,7 @@ export default function PrBatchExportOPage() {
           // 嘗試只用數字部分比對 project_id
           const { data: d2 } = await sb
             .from('erp_so_lines')
-            .select('line_no, pdl_seq, order_qty_oru')
+            .select('line_no, pdl_seq, order_qty_oru, unit_of_measure_oru')
             .ilike('project_id', `%${digits}%`)
             .eq('mbp_part', row.item_code)
             .limit(5)
@@ -195,6 +197,7 @@ export default function PrBatchExportOPage() {
           }
           const qty = Number(row.quantity)
           const hit = d2.find(r => Math.abs(Number(r.order_qty_oru) - qty) < 0.01) ?? d2[0]
+          if (hit?.unit_of_measure_oru) uomMap.set(idx, hit.unit_of_measure_oru)
           results.push({
             status: hit ? 'matched' : 'no_qty_match',
             line_no: hit ? String(hit.line_no) : null,
@@ -204,6 +207,7 @@ export default function PrBatchExportOPage() {
         }
         const qty = Number(row.quantity)
         const hit = data.find(r => Math.abs(Number(r.order_qty_oru) - qty) < 0.01) ?? data[0]
+        if (hit?.unit_of_measure_oru) uomMap.set(idx, hit.unit_of_measure_oru)
         results.push({
           status: 'matched',
           line_no: String(hit.line_no),
@@ -211,6 +215,9 @@ export default function PrBatchExportOPage() {
         })
       }
       setMatchResults(results)
+      if (uomMap.size > 0) {
+        setLineEdits(prev => prev.map((e, i) => uomMap.has(i) ? { ...e, uom: uomMap.get(i)! } : e))
+      }
       setMsg(`✅ 比對完成：${results.filter(r => r.status === 'matched').length}/${results.length} 筆已比對`)
       setTimeout(() => setMsg(''), 4000)
     } catch (e) {
