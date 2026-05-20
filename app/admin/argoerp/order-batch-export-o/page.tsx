@@ -53,13 +53,6 @@ interface MatchResult {
   reason:  string
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
-const PR_DEPARTMENT   = 'M1100'
-const PR_HOLD_STATUS  = 'UNSIGNED'
-const PR_INTERFACE_ID = 'IFAF105'
-
 const ERP_KEYS = [
   'APPLY_ID', 'APPLY_DATE', 'SEG_SEGMENT_NO_DEPARTMENT', 'HOLD_STATUS',
   'REMARK', 'LINE_NO', 'MBP_PART', 'MBP_VER', 'UNIT_OF_MEASURE_ORU',
@@ -257,7 +250,7 @@ export default function PrBatchExportOPage() {
       rec['DUEDATE']                    = row.delivery_date
       return [rec]
     })
-  }, [sourceRows, lineEdits, matchResults, header])
+  }, [sourceRows, lineEdits, matchResults])
 
   // ── 匯入 ArgoERP ──
   const handleImport = useCallback(async () => {
