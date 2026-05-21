@@ -116,8 +116,8 @@ function PjSyncModal({ docNo, onClose }: { docNo: string; onClose: () => void })
                 : 'bg-slate-800 text-slate-400 border-slate-600'
               }`}>{poHdr.status}</span>
             )}
-            {!isMo && poHdr?.start_date && <span className="text-slate-500 text-xs">開立：{poHdr.start_date}</span>}
-            {isPo && poExtra?.SO_PROJECT_ID && (
+            {!isMo && !!poHdr?.start_date && <span className="text-slate-500 text-xs">開立：{poHdr.start_date}</span>}
+            {isPo && !!poExtra?.SO_PROJECT_ID && (
               <span className="text-slate-500 text-xs">銷售單：<span className="text-cyan-400 font-mono">{String(poExtra.SO_PROJECT_ID)}</span></span>
             )}
             {/* MO 標頭資訊 */}
@@ -129,8 +129,8 @@ function PjSyncModal({ docNo, onClose }: { docNo: string; onClose: () => void })
                 : 'bg-slate-800 text-slate-400 border-slate-600'
               }`}>{moHdr.hold_status}</span>
             )}
-            {isMo && moHdr?.begin_date && <span className="text-slate-500 text-xs">開立：{moHdr.begin_date}</span>}
-            {isMo && moHdr?.end_date && <span className="text-slate-500 text-xs">預交：{moHdr.end_date}</span>}
+            {isMo && !!moHdr?.begin_date && <span className="text-slate-500 text-xs">開立：{moHdr.begin_date}</span>}
+            {isMo && !!moHdr?.end_date && <span className="text-slate-500 text-xs">預交：{moHdr.end_date}</span>}
             {!loading && totalRows > 0 && <span className="text-slate-600 text-xs">共 {totalRows} 筆</span>}
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors text-2xl leading-none ml-6 flex-shrink-0 mt-0.5">✕</button>
