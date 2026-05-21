@@ -5,7 +5,7 @@ import { supabase } from '../../../../lib/supabaseClient'
 import SoOrderModal from '../../../../components/SoOrderModal'
 
 // ─── 型別 ─────────────────────────────────────────────
-type DocTypeKey = 'sales' | 'mo' | 'po' | 'subcontract' | 'inventory' | 'material_prep' | 'customer'
+type DocTypeKey = 'sales' | 'mo' | 'pr' | 'po' | 'subcontract' | 'inventory' | 'material_prep' | 'customer'
 
 interface PjSyncMapping {
   docNoField: string
@@ -186,6 +186,29 @@ const DOC_TYPES: Record<DocTypeKey, {
         startDateField: 'BEGIN_DATE',
         endDateField: 'END_DATE',
         customerVendorField: 'IN_CHARGE',
+      },
+    },
+  },
+  pr: {
+    label: '請購單號',
+    description: 'PJ_APPLYPROJECT 表頭 + PJ_APPLYPROJECTDETAIL 明細，JS 端 JOIN，同步至 erp_pj_sync (doc_type=請購單號)。',
+    defaultConfig: {
+      table: 'PJ_APPLYPROJECT + PJ_APPLYPROJECTDETAIL',
+      customColumn: '',
+      filters: [],
+      mapping: {
+        ...EMPTY_MAPPING,
+        docNoField: 'APPLY_ID',
+        subNoField: 'LINE_NO',
+        itemCodeField: 'MBP_PART',
+        descriptionField: 'REMARK',
+        qtyField: 'ORDER_QTY_ORU',
+        unitField: 'UNIT_OF_MEASURE_ORU',
+        statusField: 'HOLD_STATUS',
+        startDateField: 'APPLY_DATE',
+        endDateField: 'DUEDATE',
+        customerVendorField: 'SEG_SEGMENT_NO_DEPARTMENT',
+        remarkField: 'CURRENCY',
       },
     },
   },
@@ -457,6 +480,7 @@ function SyncCard({ docKey }: SyncCardProps) {
   const isMaterialPrepTab = docKey === 'material_prep'
   const isCustomerTab = docKey === 'customer'
   const isPoTab = docKey === 'po'
+  const isPrTab = docKey === 'pr'
   const isSubcontractTab = docKey === 'subcontract'
   const activeMappingLabels = meta.mappingLabels ?? MAPPING_LABELS
   const [config, setConfig] = useState<SyncConfig>(() => loadConfig(docKey))
@@ -651,7 +675,7 @@ function SyncCard({ docKey }: SyncCardProps) {
         if (!isInventory) {
           // erp_pj_sync 依 doc_type 篩選
           query = query.eq('doc_type', meta.label).order('doc_no', { ascending: true })
-          if (isPoTab && poStatusFilter) {
+          if ((isPoTab || isPrTab) && poStatusFilter) {
             query = query.eq('status', poStatusFilter)
           }
           if (keyword.trim()) {
@@ -682,7 +706,7 @@ function SyncCard({ docKey }: SyncCardProps) {
     } finally {
       setLoadingRecords(false)
     }
-  }, [isSoTab, isMoTab, isMaterialPrepTab, isCustomerTab, isPoTab, meta.label, moStatusFilter, soStatusFilter, poStatusFilter])
+  }, [isSoTab, isMoTab, isMaterialPrepTab, isCustomerTab, isPoTab, isPrTab, meta.label, moStatusFilter, soStatusFilter, poStatusFilter])
 
   useEffect(() => { void fetchRecords() }, [fetchRecords])
 
@@ -1051,7 +1075,7 @@ ${poPages}
 
   const handleSync = async () => {
     const cfg = configRef.current
-    const isHardcodedTab = isMaterialPrepTab || isSoTab || isMoTab || isInventoryTab || isCustomerTab || isPoTab
+    const isHardcodedTab = isMaterialPrepTab || isSoTab || isMoTab || isInventoryTab || isCustomerTab || isPoTab || isPrTab
     if (!isHardcodedTab && !cfg.table.trim()) {
       setMessage('請先填入 ARGO TABLE 名稱')
       setMessageOk(false)
@@ -1175,6 +1199,8 @@ ${poPages}
         if (!result.detailAuthorized) setMessageOk(false)
       } else if (isMaterialPrepTab) {
         setMessage(`✅ 已同步 ${result.syncedCount ?? 0} 筆批備料單明細（共 ${result.headerCount ?? 0} 張備料單）`)
+      } else if (isPrTab) {
+        setMessage(`✅ 已同步 ${result.syncedCount ?? 0} 筆請購明細（表頭 ${result.totalHdrRows ?? 0} 張 / 明細 ${result.totalDtlRows ?? 0} 筆）`)
       } else if (isPoTab) {
         setMessage(`✅ 已同步 ${result.syncedCount ?? 0} 筆採購明細（表頭 ${result.totalHdrRows ?? 0} 張 / 明細 ${result.totalDtlRows ?? 0} 筆）`)
       } else {
@@ -1497,6 +1523,27 @@ ${poPages}
               ))}
             </div>
           )}
+          {isPrTab && (
+            <div className="flex gap-1">
+              {(['OPEN', 'HOLD', 'CLOSE', null] as const).map((s) => (
+                <button
+                  key={String(s)}
+                  type="button"
+                  onClick={() => handlePoStatusFilter(s)}
+                  className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                    poStatusFilter === s
+                      ? s === 'OPEN'  ? 'bg-green-700 text-white'
+                        : s === 'HOLD'  ? 'bg-yellow-700 text-white'
+                        : s === 'CLOSE' ? 'bg-slate-600 text-white'
+                        : 'bg-cyan-700 text-white'
+                      : 'border border-slate-700 bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {s ?? '全部'}
+                </button>
+              ))}
+            </div>
+          )}
           {(isSoTab || isMoTab || isMaterialPrepTab) && totalCount !== null && (
             <span className="text-xs text-slate-500 ml-auto">
               共 {totalCount.toLocaleString()} 筆
@@ -1646,7 +1693,7 @@ ${poPages}
                     </td>
                     <td className="px-3 py-2 text-center text-slate-400">{r.line_no || '—'}</td>
                     <td className="px-3 py-2 font-mono text-slate-200">{r.mbp_part ?? '—'}</td>
-                    <td className="px-3 py-2 text-slate-200 max-w-[200px] truncate" title={r.description ?? ''}>{r.description ?? '—'}</td>
+                    <td className="px-3 py-2 text-slate-200 max-w-[200px]"><div className="line-clamp-2" title={r.description ?? ''}>{r.description ?? '—'}</div></td>
                     <td className="px-3 py-2 text-right text-slate-200">{r.order_qty_oru > 0 ? r.order_qty_oru.toLocaleString() : '—'}</td>
                     <td className="px-3 py-2 text-yellow-400/80">{r.duedate?.slice(0, 10) ?? '—'}</td>
                     <td className="px-3 py-2">
@@ -1870,9 +1917,9 @@ ${poPages}
                     <th className="px-3 py-2 text-right text-slate-400 font-medium">在途數量</th>
                     <th className="px-3 py-2 text-left text-slate-400 font-medium">單位</th>
                     <th className="px-3 py-2 text-right text-slate-400 font-medium">實際數量</th>
-                  </>) : (isPoTab || isSubcontractTab) ? (<>
+                  </>) : (isPoTab || isPrTab || isSubcontractTab) ? (<>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium whitespace-nowrap">狀態</th>
-                  <th className="px-3 py-2 text-left text-slate-400 font-medium whitespace-nowrap">{isPoTab ? '採購單號' : '製令單號'}</th>
+                  <th className="px-3 py-2 text-left text-slate-400 font-medium whitespace-nowrap">{isPrTab ? '請購單號' : isPoTab ? '採購單號' : '製令單號'}</th>
                   <th className="px-2 py-2 text-center text-slate-400 font-medium whitespace-nowrap">序號</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium whitespace-nowrap">貨號／品名規格</th>
                   <th className="px-2 py-2 text-right text-slate-400 font-medium whitespace-nowrap">數量</th>
@@ -1909,7 +1956,7 @@ ${poPages}
                       <td className="px-3 py-2 text-slate-400">{inv.unit_of_measure ?? '—'}</td>
                       <td className="px-3 py-2 text-slate-400">{inv.physical_count > 0 ? inv.physical_count.toLocaleString() : '0'}</td>
                     </tr>
-                  )})() : (isPoTab || isSubcontractTab) ? (
+                  )})() : (isPoTab || isPrTab || isSubcontractTab) ? (
                     <tr key={r.id} className="border-b border-slate-800/50 hover:bg-slate-900/40">
                       <td className="px-3 py-2">
                         {r.status ? (
@@ -1924,7 +1971,7 @@ ${poPages}
                       <td className="px-2 py-2 text-center text-slate-400 font-mono">{r.sub_no || '—'}</td>
                       <td className="px-3 py-2 max-w-[200px]">
                         <div className="font-mono text-purple-300 whitespace-nowrap">{r.item_code || '—'}</div>
-                        <div className="text-slate-400 text-xs truncate" title={r.description ?? ''}>{r.description || ''}</div>
+                        <div className="text-slate-400 text-xs line-clamp-2" title={r.description ?? ''}>{r.description || ''}</div>
                       </td>
                       <td className="px-2 py-2 text-right text-slate-300">{r.qty > 0 ? r.qty.toLocaleString() : '—'}</td>
                       <td className="px-2 py-2 text-slate-400">{r.unit || '—'}</td>
@@ -1954,7 +2001,7 @@ ${poPages}
                       <td className="px-3 py-2 font-mono text-cyan-300">{r.doc_no}</td>
                       <td className="px-3 py-2 text-slate-400">{r.sub_no || '—'}</td>
                       <td className="px-3 py-2 font-mono text-slate-300">{r.item_code ?? '—'}</td>
-                      <td className="px-3 py-2 text-slate-300 max-w-[160px] truncate">{r.description ?? '—'}</td>
+                      <td className="px-3 py-2 text-slate-300 max-w-[160px]"><div className="line-clamp-2">{r.description ?? '—'}</div></td>
                       <td className="px-3 py-2 text-right text-slate-300">{r.qty > 0 ? r.qty.toLocaleString() : '—'}</td>
                       <td className="px-3 py-2 text-slate-400">{r.unit ?? '—'}</td>
                       <td className="px-3 py-2">
@@ -2107,6 +2154,7 @@ ${poPages}
 const TABS: { key: DocTypeKey; label: string }[] = [
   { key: 'sales', label: '銷售訂單' },
   { key: 'mo', label: '製令單號' },
+  { key: 'pr', label: '請購單號' },
   { key: 'po', label: '採購單號' },
   { key: 'subcontract', label: '委外製令' },
   { key: 'inventory', label: '倉庫庫存' },
@@ -2143,6 +2191,9 @@ export default function ErpSyncPage() {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync_so' }) })
         } else if (tab.key === 'mo') {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync_mo' }) })
+        } else if (tab.key === 'pr') {
+          res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'sync_pr' }) })
         } else if (tab.key === 'po') {
           res = await fetch('/api/argoerp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'sync_po' }) })
@@ -2180,6 +2231,7 @@ export default function ErpSyncPage() {
         } else {
           let msg = ''
           if (tab.key === 'sales') msg = `已同步 ${result.syncedCount ?? 0} 筆（ARGO ${result.totalRows ?? 0} 筆）`
+          else if (tab.key === 'pr') msg = `已同步 ${result.syncedCount ?? 0} 筆請購明細（表頭 ${result.totalHdrRows ?? 0} 張 / 明細 ${result.totalDtlRows ?? 0} 筆）`
           else if (tab.key === 'po') msg = `已同步 ${result.syncedCount ?? 0} 筆採購明細（表頭 ${result.totalHdrRows ?? 0} 張 / 明細 ${result.totalDtlRows ?? 0} 筆）`
           else if (tab.key === 'mo') msg = `已同步 ${result.syncedCount ?? 0} 筆（表頭 ${result.headerCount ?? 0}，明細 ${result.detailTotal ?? 0}）`
           else if (tab.key === 'material_prep') msg = `已同步 ${result.syncedCount ?? 0} 筆（表頭 ${result.headerCount ?? 0} 張，明細 ${result.detailTotal ?? 0} 筆）`
@@ -2296,7 +2348,7 @@ export default function ErpSyncPage() {
       </div>
 
       {/* Content */}
-      <SyncCard key={activeTab} docKey={activeTab} />
+      <SyncCard key={`${activeTab}-${syncAllLastTime?.getTime() ?? 0}`} docKey={activeTab} />
     </div>
   )
 }

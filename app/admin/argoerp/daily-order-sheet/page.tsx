@@ -788,12 +788,13 @@ export default function DailyOrderSheetPage() {
         .from('erp_pj_sync')
         .select('doc_no, sub_no, item_code, qty, status, extra')
         .eq('doc_type', '採購單號')
+        .eq('status', 'OPEN')
         .eq('customer_vendor', 'C01510')
         .in('item_code', itemCodes)
         .order('doc_no', { ascending: false }) // 最新採購單優先
       if (error) throw error
 
-      // 候選池：OPEN 優先，其餘維持 doc_no desc 排序
+      // 候選池：僅 OPEN 狀態
       type Candidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
       const pool: Candidate[] = (poRows ?? [])
         .map(r => ({
@@ -805,11 +806,6 @@ export default function DailyOrderSheetPage() {
           extra:     (r.extra ?? null) as Record<string, unknown> | null,
           _used:     false,
         }))
-        .sort((a, b) => {
-          if (a.status === 'OPEN' && b.status !== 'OPEN') return -1
-          if (a.status !== 'OPEN' && b.status === 'OPEN') return 1
-          return 0 // 維持 doc_no desc
-        })
 
       const next: SheetRow[] = sheetRows.map(row => {
         if (row.factory !== 'C') return row
@@ -880,6 +876,81 @@ export default function DailyOrderSheetPage() {
       setTimeout(() => setSaveMsg(''), 6000)
     } finally { setSyncingPo(false) }
   }, [sheetRows, selectedDate, currentRawText])
+
+  // ---- 漏單檢測：跨所有日期，匯出未比對到製令且未比對到採購單的列 ----
+  const [exportingMissing, setExportingMissing] = useState(false)
+
+  const handleMissingExport = useCallback(async () => {
+    const ok = confirm(
+      '⚠️ 漏單檢測說明\n\n' +
+      '此功能以「目前資料庫內的比對狀態」為準。\n\n' +
+      '建議執行前先完成：\n' +
+      '  1. ERP 同步頁面 → 全同步（MO / PO / PR）\n' +
+      '  2. 各日出單表 → 一鍵全同步\n\n' +
+      '確定以目前資料直接匯出？'
+    )
+    if (!ok) return
+    setExportingMissing(true)
+    setSaveMsg('')
+    try {
+      type RawRow = Record<string, unknown>
+      const { data, error } = await supabase
+        .from('daily_order_sheets')
+        .select('sheet_date, rows')
+        .order('sheet_date', { ascending: false })
+      if (error) throw error
+
+      const missing: Array<{ sheet_date: string } & RawRow> = []
+      for (const sheet of (data ?? [])) {
+        const rows = Array.isArray(sheet.rows) ? (sheet.rows as RawRow[]) : []
+        for (const row of rows) {
+          const hasMo  = row.mo_status === '已匯入製令'
+          const hasPo  = row.po_status === 'matched' && !!row.po_number
+          if (!hasMo && !hasPo) {
+            missing.push({ sheet_date: sheet.sheet_date, ...row })
+          }
+        }
+      }
+
+      const headers = ['出單日期', '工單編號', '單據種類', '生產廠別', '客戶', '品項編碼', '品名/規格', '備註', '數量', '交付日期', '製令狀態', '製令單號', '採購單號', '採購序號']
+      const csvRows = missing.map(r => [
+        r.sheet_date,
+        r.order_number ?? '',
+        r.doc_type ?? '',
+        r.factory ?? '',
+        r.customer ?? '',
+        r.item_code ?? '',
+        r.item_name ?? '',
+        r.note ?? '',
+        r.quantity ?? '',
+        r.delivery_date ?? '',
+        r.mo_status ?? '',
+        r.mo_number ?? '',
+        r.po_number ?? '',
+        r.po_sub_no ?? '',
+      ])
+
+      const bom = '\uFEFF'
+      const csvContent = bom + [
+        headers.map(h => `"${h}"`).join(','),
+        ...csvRows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')),
+      ].join('\n')
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `漏單檢測_${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      setSaveMsg(`✅ 漏單匯出完成，共 ${missing.length} 筆`)
+      setTimeout(() => setSaveMsg(''), 5000)
+    } catch (e) {
+      setSaveMsg(`❌ 漏單匯出失敗：${e}`)
+    } finally {
+      setExportingMissing(false)
+    }
+  }, [])
 
   // ---- 一鍵全同步（序號比對 → 製令同步 → 採購比對）一次完成，只儲存一次 ----
   const [syncingAll, setSyncingAll] = useState(false)
@@ -1040,6 +1111,7 @@ export default function DailyOrderSheetPage() {
             .from('erp_pj_sync')
             .select('doc_no, sub_no, item_code, qty, status, extra')
             .eq('doc_type', '採購單號')
+            .eq('status', 'OPEN')
             .eq('customer_vendor', 'C01510')
             .in('item_code', itemCodes)
             .order('doc_no', { ascending: false })
@@ -1051,7 +1123,6 @@ export default function DailyOrderSheetPage() {
               qty: Number(r.qty ?? 0), status: r.status,
               extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
             }))
-            .sort((a, b) => (a.status === 'OPEN' && b.status !== 'OPEN') ? -1 : (a.status !== 'OPEN' && b.status === 'OPEN') ? 1 : 0)
           currentRows = currentRows.map(row => {
             if (row.factory !== 'C') return row
             if (!row.item_code) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
@@ -1103,6 +1174,230 @@ export default function DailyOrderSheetPage() {
       setSyncingAll(false)
     }
   }, [sheetRows, selectedDate, currentRawText])
+
+  // ---- 全日期批次比對（跨所有日期重新跑 MO + PO 比對後儲存）----
+  const [batchSyncing, setBatchSyncing] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<string>('')
+
+  const runBatchAllDatesSync = useCallback(async () => {
+    const ok = confirm(
+      '⚠️ 全日期批次比對\n\n' +
+      '將對所有日期的出單表重新執行 MO 比對 + 採購單比對，並逐張寫回資料庫。\n\n' +
+      '建議先完成 ERP 同步頁面的全同步（MO / PO / PR），再執行本操作。\n\n' +
+      '確定執行？'
+    )
+    if (!ok) return
+    setBatchSyncing(true)
+    setBatchProgress('')
+    setSaveMsg('')
+    try {
+      // 1. 一次抓全部 SO 明細（所有比對的依據）
+      const { data: allSoLines, error: soErr } = await supabase
+        .from('erp_so_lines')
+        .select('project_id, line_no, mbp_part, order_qty_oru, pdl_seq')
+      if (soErr) throw soErr
+      const soProjectIds = new Set((allSoLines ?? []).map(l => l.project_id))
+      const candidateMap = new Map<string, Array<{ line_no: string; pdl_seq: number | null }>>()
+      for (const line of (allSoLines ?? [])) {
+        const qty = Number(line.order_qty_oru ?? 0)
+        const key = `${line.project_id}|${line.mbp_part ?? ''}|${qty}`
+        if (!candidateMap.has(key)) candidateMap.set(key, [])
+        candidateMap.get(key)!.push({ line_no: String(line.line_no ?? ''), pdl_seq: line.pdl_seq != null ? Number(line.pdl_seq) : null })
+      }
+      for (const arr of candidateMap.values()) arr.sort((a, b) => (Number(a.line_no) || 0) - (Number(b.line_no) || 0))
+
+      // 2. 一次抓全部 MO 相關資料
+      const { data: allMoLogs, error: moErr } = await supabase
+        .from('argoerp_mo_upload_log')
+        .select('mo_number, source_order, product_code, planned_qty, uploaded_at')
+        .order('uploaded_at', { ascending: false })
+      if (moErr) throw moErr
+      const rawLogMoNumbers = [...new Set(
+        (allMoLogs ?? []).map(l => l.mo_number).filter((n): n is string => !!n?.startsWith('MO'))
+      )]
+      let activeMoNumbers = new Set(rawLogMoNumbers)
+      if (rawLogMoNumbers.length > 0) {
+        const { data: summaryRows } = await supabase
+          .from('argoerp_mo_summary').select('mo_number').in('mo_number', rawLogMoNumbers)
+        activeMoNumbers = new Set((summaryRows ?? []).map(r => r.mo_number))
+      }
+      const moMap = new Map<string, { mo_number: string }>()
+      for (const log of (allMoLogs ?? [])) {
+        if (!log.mo_number?.startsWith('MO') || !activeMoNumbers.has(log.mo_number)) continue
+        const qty = String(log.planned_qty ?? '').trim()
+        const k1 = `${log.source_order}|${log.product_code}|${qty}`
+        const k2 = `${log.source_order}|${log.product_code}`
+        if (!moMap.has(k1)) moMap.set(k1, { mo_number: log.mo_number })
+        if (!moMap.has(k2)) moMap.set(k2, { mo_number: log.mo_number })
+      }
+      const { data: allErpMo, error: erpErr } = await supabase
+        .from('erp_mo_lines')
+        .select('project_id, source_order, mbp_part, order_qty, line_no')
+      if (erpErr) throw erpErr
+      const erpMoMap = new Map<string, string>()
+      const erpMoBaseMap = new Map<string, string[]>()
+      const erpMoBySourceOrder = new Map<string, Set<string>>()
+      for (const mo of (allErpMo ?? [])) {
+        if (!mo.source_order || !mo.mbp_part || !mo.project_id?.startsWith('MO')) continue
+        if (mo.line_no != null) {
+          const lineNoStr = String(parseInt(String(mo.line_no), 10)).padStart(2, '0')
+          const seqKey = `${mo.source_order}|${mo.mbp_part}|${lineNoStr}`
+          if (!erpMoMap.has(seqKey)) erpMoMap.set(seqKey, mo.project_id)
+        }
+        const baseKey = `${mo.source_order}|${mo.mbp_part}`
+        const arr = erpMoBaseMap.get(baseKey) ?? []
+        if (!arr.includes(mo.project_id)) erpMoBaseMap.set(baseKey, [...arr, mo.project_id])
+        const moSet = erpMoBySourceOrder.get(mo.source_order) ?? new Set<string>()
+        moSet.add(mo.project_id)
+        erpMoBySourceOrder.set(mo.source_order, moSet)
+      }
+      const { data: allPrepLogs, error: prepErr } = await supabase
+        .from('argoerp_material_prep_log')
+        .select('mo_number, status, logged_at')
+        .order('logged_at', { ascending: false })
+      if (prepErr) throw prepErr
+      const prepMap = new Map<string, '已備料' | '無需備料'>()
+      for (const log of (allPrepLogs ?? [])) {
+        if (!prepMap.has(log.mo_number)) prepMap.set(log.mo_number, log.status as '已備料' | '無需備料')
+      }
+      const { data: allErpPrep } = await supabase.from('erp_material_prep_lines').select('mo_number')
+      const erpPrepSet = new Set<string>((allErpPrep ?? []).map((l: { mo_number: string }) => l.mo_number).filter(Boolean))
+
+      // 3. 一次抓全部 OPEN 採購單 pool（供所有日期比對用）
+      const { data: allPoRows, error: poErr } = await supabase
+        .from('erp_pj_sync')
+        .select('doc_no, sub_no, item_code, qty, status, extra')
+        .eq('doc_type', '採購單號')
+        .eq('status', 'OPEN')
+        .eq('customer_vendor', 'C01510')
+        .order('doc_no', { ascending: false })
+      if (poErr) throw poErr
+      type Candidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; extra: Record<string, unknown> | null; _used: boolean }
+      const globalPoPool: Candidate[] = (allPoRows ?? []).map(r => ({
+        doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
+        qty: Number(r.qty ?? 0), extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
+      }))
+
+      // 4. 逐張出單表處理
+      const { data: allSheets, error: sheetsErr } = await supabase
+        .from('daily_order_sheets')
+        .select('sheet_date, rows, raw_text')
+        .order('sheet_date', { ascending: false })
+      if (sheetsErr) throw sheetsErr
+
+      const sheets = allSheets ?? []
+      let totalUpdated = 0
+
+      for (let si = 0; si < sheets.length; si++) {
+        const sheet = sheets[si]
+        const sheetDate = sheet.sheet_date as string
+        setBatchProgress(`${sheetDate}（${si + 1} / ${sheets.length}）`)
+        let rows: SheetRow[] = Array.isArray(sheet.rows) ? (sheet.rows as SheetRow[]) : []
+        if (rows.length === 0) continue
+
+        // Step A: 序號比對
+        const orderNumbers = [...new Set(rows.map(r => r.order_number).filter(Boolean))]
+        const usageCounter = new Map<string, number>()
+        rows = rows.map(src => {
+          if (!src.order_number || !soProjectIds.has(src.order_number))
+            return { ...src, match_status: 'no_order' as const, match_line_no: null, match_pdl_seq: null, match_reason: '無對應來源單號' }
+          const qty = parseFloat(String(src.quantity).replace(/,/g, '')) || 0
+          const key = `${src.order_number}|${src.item_code}|${qty}`
+          const candidates = candidateMap.get(key) ?? []
+          if (candidates.length === 0)
+            return { ...src, match_status: 'no_qty_match' as const, match_line_no: null, match_pdl_seq: null, match_reason: '有來源單號但無對應數量' }
+          const used = usageCounter.get(key) ?? 0
+          const candidate = candidates[Math.min(used, candidates.length - 1)]
+          usageCounter.set(key, used + 1)
+          return { ...src, match_status: 'matched' as const, match_line_no: candidate.line_no, match_pdl_seq: candidate.pdl_seq, match_reason: '' }
+        })
+
+        // Step B: MO 比對
+        rows = rows.map(r => {
+          const matchSeq = r.match_line_no != null ? String(parseInt(r.match_line_no, 10)).padStart(2, '0') : null
+          if (r.mo_number?.startsWith('MO')) {
+            const erpMosForOrder = erpMoBySourceOrder.get(r.order_number)
+            if (erpMosForOrder && !erpMosForOrder.has(r.mo_number))
+              return { ...r, mo_number: undefined, mo_status: null as null, material_prep_status: null as null }
+            if (!matchSeq) return r
+            const erpConfirm = erpMoMap.get(`${r.order_number}|${r.item_code}|${matchSeq}`)
+            if (!erpConfirm || erpConfirm === r.mo_number) return r
+            return { ...r, mo_number: erpConfirm, mo_status: '已匯入製令' as const }
+          }
+          const qty = String(r.quantity).trim()
+          if (matchSeq) {
+            const erpHit = erpMoMap.get(`${r.order_number}|${r.item_code}|${matchSeq}`)
+            if (erpHit) return { ...r, mo_number: erpHit, mo_status: '已匯入製令' as const }
+          }
+          const logHit = moMap.get(`${r.order_number}|${r.item_code}|${qty}`) ?? moMap.get(`${r.order_number}|${r.item_code}`)
+          if (logHit) {
+            const erpMosForOrder = erpMoBySourceOrder.get(r.order_number)
+            const stillInArgo = !erpMosForOrder || erpMosForOrder.has(logHit.mo_number)
+            if (stillInArgo && (!matchSeq || logHit.mo_number.slice(-2) === matchSeq))
+              return { ...r, mo_number: logHit.mo_number, mo_status: '已匯入製令' as const }
+          }
+          const baseHits = erpMoBaseMap.get(`${r.order_number}|${r.item_code}`) ?? []
+          if (baseHits.length === 1) return { ...r, mo_number: baseHits[0], mo_status: '已匯入製令' as const }
+          if (r.mo_number && !r.mo_number.startsWith('MO'))
+            return { ...r, mo_number: undefined, mo_status: null as null, material_prep_status: null as null }
+          return r
+        })
+
+        // Step B2: 批備料狀態
+        for (let i = 0; i < rows.length; i++) {
+          const moNo = rows[i].mo_number
+          if (!moNo) continue
+          if (erpPrepSet.has(moNo)) rows[i] = { ...rows[i], material_prep_status: '已批備料' }
+          else if (prepMap.has(moNo)) rows[i] = { ...rows[i], material_prep_status: prepMap.get(moNo)! }
+        }
+
+        // Step C: 採購單比對（每張獨立 pool，避免跨日期搶佔）
+        const sheetPoPool: Candidate[] = globalPoPool.map(c => ({ ...c, _used: false }))
+        if (rows.some(r => r.factory === 'C')) {
+          rows = rows.map(row => {
+            if (row.factory !== 'C') return row
+            if (!row.item_code) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' as const }
+            const qty = parseFloat(String(row.quantity).replace(/,/g, '')) || 0
+            const matchLineNo = (row.match_line_no ?? '').trim()
+            let hitIdx = sheetPoPool.findIndex(c =>
+              !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
+              String(c.extra?.MBP_LOT_NO ?? '').trim() === (row.order_number ?? '').trim()
+            )
+            if (hitIdx === -1 && matchLineNo)
+              hitIdx = sheetPoPool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.TPN_PART_NO ?? '') === matchLineNo)
+            if (hitIdx === -1)
+              hitIdx = sheetPoPool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? ''))
+            if (hitIdx === -1)
+              hitIdx = sheetPoPool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && !String(c.extra?.MBP_LOT_NO ?? '').trim())
+            if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' as const }
+            sheetPoPool[hitIdx]._used = true
+            return { ...row, po_number: sheetPoPool[hitIdx].doc_no, po_sub_no: sheetPoPool[hitIdx].sub_no, po_status: 'matched' as const }
+          })
+        }
+
+        // Step D: 寫回 DB
+        await fetch('/api/argoerp/daily-order-sheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sheet_date: sheetDate, raw_text: sheet.raw_text ?? '', rows }),
+        })
+        totalUpdated++
+
+        // 若剛好是目前選取的日期，同步更新頁面 state
+        if (sheetDate === selectedDate) setSheetRows(rows)
+      }
+
+      setBatchProgress('')
+      setSaveMsg(`✅ 批次比對完成，共更新 ${totalUpdated} 張出單表`)
+      setTimeout(() => setSaveMsg(''), 8000)
+    } catch (e) {
+      setBatchProgress('')
+      setSaveMsg(`❌ 批次比對失敗：${e instanceof Error ? e.message : String(e)}`)
+      setTimeout(() => setSaveMsg(''), 6000)
+    } finally {
+      setBatchSyncing(false)
+    }
+  }, [selectedDate])
 
   // ---- 切換廠別 ----
   const handleChangeFactory = useCallback((idx: number, factory: 'T' | 'C' | 'O') => {
@@ -1177,6 +1472,33 @@ export default function DailyOrderSheetPage() {
                 className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-cyan-500"
               />
             </div>
+            {/* 全日期批次比對 + 漏單檢測 — 跨所有日期，不需選取特定日 */}
+            {availableSheets.length > 0 && (
+              <>
+                <button
+                  onClick={() => void runBatchAllDatesSync()}
+                  disabled={batchSyncing || exportingMissing}
+                  className="px-4 py-2 rounded-lg bg-violet-900/60 border border-violet-700/50 hover:bg-violet-800 disabled:bg-slate-700 disabled:text-slate-500 disabled:border-slate-600 text-violet-200 text-sm font-medium transition-colors flex items-center gap-1.5"
+                  title="對所有日期的出單表重新執行 MO + 採購單比對，並寫回資料庫"
+                >
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                  </svg>
+                  {batchSyncing ? (batchProgress ? `比對中 ${batchProgress}` : '比對中…') : '🔁 全日期批次比對'}
+                </button>
+                <button
+                  onClick={() => void handleMissingExport()}
+                  disabled={exportingMissing || batchSyncing}
+                  className="px-4 py-2 rounded-lg bg-orange-900/60 border border-orange-700/50 hover:bg-orange-800 disabled:bg-slate-700 disabled:text-slate-500 disabled:border-slate-600 text-orange-200 text-sm font-medium transition-colors flex items-center gap-1.5"
+                  title="掃描所有日期的出單表，匯出未比對到製令且未比對到採購單的漏單"
+                >
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                  </svg>
+                  {exportingMissing ? '檢測中…' : '⚠ 漏單檢測'}
+                </button>
+              </>
+            )}
             {hasData && (
               <>
                 <button
