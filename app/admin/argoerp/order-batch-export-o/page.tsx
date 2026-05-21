@@ -4,8 +4,9 @@
  * 出單表➜委外採購
  * ArgoERP IFAF024 — 採購訂單（PO）介面
  *
- * 結構：一張採購單（主表）+ 多筆明細（來自每日出單表委外欄）
- * 與製令匯出不同，PO 有獨立表頭欄位，所有細項共用同一個 PROJECT_ID
+ * 一物一單：每個委外品項各自產生一張採購單
+ * 採購單號格式：POO + 销售訂單數字部分 + 2位 SO 序號（match_line_no）
+ * 例：销售訂單 WO240001 第3序號列 → POO24000103
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -24,13 +25,14 @@ interface SourceRow {
   item_code: string; item_name: string; note: string
   quantity: string; delivery_date: string; plate_count: string
   upload_ro: string; order_status: string; pm_note: string
+  match_line_no?: string | null
 }
 
+/** 共用表頭設定（不含 project_id — 每筆各自產生） */
 interface PoHeader {
-  project_id:     string
   modify_ver:     string
   begin_date:     string
-  hold_status:    'OPEN' | 'HOLD' | 'CLOSE'
+  hold_status:    'OPEN' | 'HOLD' | 'CLOSE' | 'UNSIGNED'
   tpn_partner_id: string
   department:     string
   sales_id:       string
@@ -79,15 +81,32 @@ function fmtDate(d: Date) {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
 }
 
-function genPoNo() {
-  const d = new Date()
-  return `POO${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}01`
+/** 從銷售訂單號取出數字部分，例：WO240001 → 240001 */
+function extractOrderNums(orderNo: string): string {
+  return orderNo.replace(/\D/g, '')
+}
+
+/** 為每筆來源列自動產生一物一單的採購單號
+ *  最後兩碼 = match_line_no（SO 序號）；無序號時用逐游計數器補上 */
+function genRowPoNos(rows: SourceRow[]): string[] {
+  const counters = new Map<string, number>()
+  return rows.map(row => {
+    const nums = extractOrderNums(row.order_number)
+    const lineNo = row.match_line_no != null ? parseInt(row.match_line_no, 10) : NaN
+    if (!isNaN(lineNo) && lineNo > 0) {
+      return `POO${nums}${String(lineNo).padStart(2, '0')}`
+    }
+    // fallback: sequential counter
+    const count = (counters.get(nums) ?? 0) + 1
+    counters.set(nums, count)
+    return `POO${nums}${String(count).padStart(2, '0')}`
+  })
 }
 
 function makeDefaultHeader(): PoHeader {
   return {
-    project_id: genPoNo(), modify_ver: '1', begin_date: fmtDate(new Date()),
-    hold_status: 'OPEN', tpn_partner_id: '42828690', department: 'M1100',
+    modify_ver: '1', begin_date: fmtDate(new Date()),
+    hold_status: 'UNSIGNED', tpn_partner_id: '42828690', department: 'M1100',
     sales_id: '10149', po_type: 'GENERAL', payment_term: 'PM30',
     payment_mode: 'T', currency: 'CNY', exchange_rate: '4', tax_rate: '0',
   }
@@ -99,6 +118,7 @@ function makeDefaultHeader(): PoHeader {
 export default function PoBatchExportOPage() {
   const [sourceRows, setSourceRows] = useState<SourceRow[]>([])
   const [lineEdits, setLineEdits]   = useState<LineEdit[]>([])
+  const [rowPoNos, setRowPoNos]     = useState<string[]>([])   // 一物一單 — 逐列採購單號
   const [header, setHeader]         = useState<PoHeader>(makeDefaultHeader)
   const [headerOpen, setHeaderOpen] = useState(true)
 
@@ -107,24 +127,23 @@ export default function PoBatchExportOPage() {
   const [pickerDate, setPickerDate]       = useState('')
   const [loadedDate, setLoadedDate]       = useState<string | null>(null)
 
-  const [exportFmt, setExportFmt] = useState<'csv' | 'xlsx'>('csv')
-  const [importing, setImporting] = useState(false)
-  const [matching, setMatching]   = useState(false)
-  const [matchResults, setMatchResults] = useState<MatchResult[]>([])
-  const [msg, setMsg]             = useState('')
-  const [bulkPrice, setBulkPrice] = useState('')
-  const [poSearchId, setPoSearchId]   = useState('')
-  const [poSearching, setPoSearching] = useState(false)
-  const [poSyncRows, setPoSyncRows]   = useState<Array<Record<string, unknown>> | null>(null)
+  const [importing, setImporting]         = useState(false)
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number; errors: string[] } | null>(null)
+  const [matching, setMatching]           = useState(false)
+  const [matchResults, setMatchResults]   = useState<MatchResult[]>([])
+  const [msg, setMsg]                     = useState('')
+  const [bulkPrice, setBulkPrice]         = useState('')
+  const [poSearchId, setPoSearchId]       = useState('')
+  const [poSearching, setPoSearching]     = useState(false)
+  const [poSyncRows, setPoSyncRows]       = useState<Array<Record<string, unknown>> | null>(null)
 
-  // ── Init from localStorage（僅還原表頭設定，不還原資料列）──
+  // ── Init from localStorage（僅還原表頭設定）──
   useEffect(() => {
     try {
       const h = localStorage.getItem(HEADER_KEY)
       if (h) {
         const saved = JSON.parse(h)
         const def = makeDefaultHeader()
-        // merge: 對空字串欄位也用預設值覆蓋
         const merged: PoHeader = { ...def, ...saved }
         for (const k of Object.keys(def) as (keyof PoHeader)[]) {
           if ((saved[k] ?? '') === '') (merged as unknown as Record<string, unknown>)[k] = def[k]
@@ -136,8 +155,8 @@ export default function PoBatchExportOPage() {
 
   useEffect(() => {
     if (sourceRows.length > 0)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ rows: sourceRows, edits: lineEdits, date: loadedDate }))
-  }, [sourceRows, lineEdits, loadedDate])
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ rows: sourceRows, edits: lineEdits, poNos: rowPoNos, date: loadedDate }))
+  }, [sourceRows, lineEdits, rowPoNos, loadedDate])
 
   useEffect(() => { localStorage.setItem(HEADER_KEY, JSON.stringify(header)) }, [header])
 
@@ -164,11 +183,11 @@ export default function PoBatchExportOPage() {
       const r = await fetch(`/api/argoerp/daily-order-sheet?date=${date}`)
       const j = await r.json()
       if (!j.success || !j.sheet) { alert(`找不到 ${date} 的出單表`); return }
-      type SheetRowRaw = SourceRow & { po_status?: string; po_number?: string | null }
+      type SheetRowRaw = SourceRow & { po_status?: string; po_number?: string | null; match_line_no?: string | null }
       const allORows = (j.sheet.rows ?? []).filter((x: SheetRowRaw) => x.factory === 'O')
-      const rows: SourceRow[] = allORows.filter((x: SheetRowRaw) =>
-        !x.po_number && x.po_status !== 'matched'
-      )
+      const rows: SourceRow[] = allORows
+        .filter((x: SheetRowRaw) => !x.po_number && x.po_status !== 'matched')
+        .map((x: SheetRowRaw) => ({ ...x, match_line_no: x.match_line_no ?? null }))
       if (allORows.length === 0) {
         alert(`${date} 出單表中沒有委外廠訂單`)
         return
@@ -178,18 +197,23 @@ export default function PoBatchExportOPage() {
         return
       }
       setSourceRows(rows)
-      setLineEdits(rows.map((row) => ({ ...DEF_EDIT, lot_no: row.order_number })))
+      setLineEdits(rows.map((row) => ({
+        ...DEF_EDIT,
+        lot_no: row.order_number,
+        so_line_no: row.match_line_no ? String(parseInt(row.match_line_no, 10)) : '',
+      })))
+      setRowPoNos(genRowPoNos(rows))
       setMatchResults([])
       setLoadedDate(date)
     } catch (e) { alert(`載入失敗：${e}`) }
   }, [])
 
-  // ── Build ERP payload (memoized) ──
+  // ── Build ERP payload — 一物一單，LINE_NO 固定 1 ──
   const payload = useMemo<Array<Record<string, string>>>(() => {
     return sourceRows.map((row, i) => {
       const e = lineEdits[i] ?? DEF_EDIT
       const rec: Record<string, string> = {}
-      rec['PROJECT_ID']                  = header.project_id
+      rec['PROJECT_ID']                  = rowPoNos[i] ?? ''
       rec['MODIFY_VER']                  = header.modify_ver
       rec['BEGIN_DATE']                  = header.begin_date
       rec['HOLD_STATUS']                 = header.hold_status
@@ -202,37 +226,35 @@ export default function PoBatchExportOPage() {
       rec['CURRENCY']                    = header.currency
       rec['EXCHANGE_RATE']               = header.exchange_rate
       rec['TAX_RATE']                    = header.tax_rate
-      rec['LINE_NO']                     = String(i + 1)
+      rec['LINE_NO']                     = '1'   // 一物一單固定 1
       rec['MBP_PART']                    = row.item_code
       rec['MBP_VER']                     = e.mbp_ver || '1'
       rec['ORDER_QTY_ORU']               = row.quantity
       rec['UNIT_OF_MEASURE_ORU']         = e.uom || 'PCS'
       rec['UNIT_PRICE_ORU']              = e.unit_price || '0'
       rec['DUEDATE']                     = row.delivery_date
-      if ((e.lot_no ?? '').trim())              rec['MBP_LOT_NO']               = e.lot_no.trim()
+      if ((e.lot_no ?? '').trim())       rec['MBP_LOT_NO']               = e.lot_no.trim()
       const remark = [row.item_name, row.note].filter(Boolean).join(' ')
       if (remark)                        rec['REMARK']                   = remark
-      if ((e.remark2 ?? '').trim())             rec['REMARK2']                  = e.remark2.trim()
+      if ((e.remark2 ?? '').trim())      rec['REMARK2']                  = e.remark2.trim()
       rec['SO_PROJECT_ID']               = row.order_number
-      if ((e.packing ?? '').trim())    rec['PACKING']     = e.packing.trim()
-      if ((e.so_line_no ?? '').trim()) {
-        rec['TPN_PART_NO'] = e.so_line_no.trim()
-      }
+      if ((e.packing ?? '').trim())      rec['PACKING']                  = e.packing.trim()
+      if ((e.so_line_no ?? '').trim())   rec['TPN_PART_NO']              = e.so_line_no.trim()
       return rec
     })
-  }, [sourceRows, lineEdits, header])
+  }, [sourceRows, lineEdits, rowPoNos, header])
 
-  // ── Export CSV / XLSX ──
-  const doExport = useCallback(() => {
+  // ── Export CSV / XLSX（批次匯出，每列為一張獨立採購單）──
+  const doExport = useCallback((fmt: 'csv' | 'xlsx' = 'csv') => {
     if (payload.length === 0) return
     const now = new Date()
     const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
-    const fn = `ArgoERP_委外採購單_${header.project_id}_${ts}`
+    const fn = `ArgoERP_委外採購單_BATCH_${loadedDate ?? ts}_${ts}`
     const dataRows = payload.map(r => ERP_KEYS.map(k => r[k] ?? ''))
-    if (exportFmt === 'xlsx') {
+    if (fmt === 'xlsx') {
       const ws = XLSX.utils.aoa_to_sheet([[...ERP_KEYS], ...dataRows])
       const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, ws, '採購單')
+      XLSX.utils.book_append_sheet(wb, ws, '委外採購批次')
       XLSX.writeFile(wb, `${fn}.xlsx`)
     } else {
       const lines = [[...ERP_KEYS].join(','), ...dataRows.map(row =>
@@ -244,39 +266,54 @@ export default function PoBatchExportOPage() {
       const a = document.createElement('a'); a.href = url; a.download = `${fn}.csv`; a.click()
       URL.revokeObjectURL(url)
     }
-  }, [payload, exportFmt, header.project_id])
+  }, [payload, loadedDate])
 
-  // ── Import to ERP ──
+  // ── Import to ERP — 逐張採購單送出 ──
   const handleImport = useCallback(async () => {
-    if (!header.project_id.trim()) { alert('請填寫採購單號'); return }
     if (!header.tpn_partner_id.trim()) { alert('請填寫廠商編號'); return }
     if (payload.length === 0) { alert('尚無明細資料'); return }
+    const emptyPoNos = rowPoNos.slice(0, payload.length).filter(p => !p.trim())
+    if (emptyPoNos.length > 0) { alert(`有 ${emptyPoNos.length} 筆採購單號為空，請確認`); return }
+    if (!confirm(`確認逐張匯入 ${payload.length} 張委外採購單至 ArgoERP？`)) return
+
     setImporting(true); setMsg('')
-    try {
-      const res = await fetch('/api/argoerp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'import', interfaceId: 'IFAF024', data: payload }),
-      })
-      const result = await res.json()
-      if (res.ok && result?.success) {
-        const m = `✅ 採購單 ${header.project_id} 已匯入 ERP（${payload.length} 筆明細）`
-        setMsg(m); alert(m)
-        setSourceRows([]); setLineEdits([]); setLoadedDate(null)
-        localStorage.removeItem(STORAGE_KEY)
-      } else {
-        const raw = typeof result?.rawText === 'string'
-          ? result.rawText.slice(0, 500)
-          : JSON.stringify(result?.apiResult ?? '').slice(0, 500)
-        throw new Error(`${result?.error || `HTTP ${res.status}`}\n\n【ARGO 回應】\n${raw}`)
+    setImportProgress({ done: 0, total: payload.length, errors: [] })
+    const errors: string[] = []
+
+    for (let i = 0; i < payload.length; i++) {
+      try {
+        const res = await fetch('/api/argoerp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'import', interfaceId: 'IFAF024', data: [payload[i]] }),
+        })
+        const result = await res.json()
+        if (!res.ok || !result?.success) {
+          const raw = typeof result?.rawText === 'string'
+            ? result.rawText.slice(0, 200)
+            : JSON.stringify(result?.apiResult ?? '').slice(0, 200)
+          errors.push(`${rowPoNos[i]}: ${result?.error || `HTTP ${res.status}`} — ${raw}`)
+        }
+      } catch (e) {
+        errors.push(`${rowPoNos[i]}: ${e instanceof Error ? e.message : String(e)}`)
       }
-    } catch (e) {
-      const m = `❌ 匯入失敗：${e instanceof Error ? e.message : String(e)}`
-      setMsg(m); alert(m)
-    } finally {
-      setImporting(false); setTimeout(() => setMsg(''), 10000)
+      setImportProgress({ done: i + 1, total: payload.length, errors: [...errors] })
     }
-  }, [payload, header.project_id, header.tpn_partner_id])
+
+    const successCount = payload.length - errors.length
+    if (errors.length === 0) {
+      const m = `✅ 全部 ${payload.length} 張委外採購單已匯入 ERP`
+      setMsg(m); alert(m)
+      setSourceRows([]); setLineEdits([]); setRowPoNos([]); setLoadedDate(null)
+      localStorage.removeItem(STORAGE_KEY)
+    } else {
+      const m = `⚠️ 匯入完成：${successCount} 成功，${errors.length} 失敗`
+      setMsg(m)
+      alert(`${m}\n\n失敗明細：\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? `\n…（共 ${errors.length} 筆）` : ''}`)
+    }
+    setImporting(false)
+    setTimeout(() => { setImportProgress(null); if (!msg.startsWith('⚠️')) setMsg('') }, 15000)
+  }, [payload, rowPoNos, header.tpn_partner_id, msg])
 
   const setH = useCallback(<K extends keyof PoHeader>(k: K, v: PoHeader[K]) => {
     setHeader(p => ({ ...p, [k]: v }))
@@ -286,6 +323,10 @@ export default function PoBatchExportOPage() {
     setLineEdits(p => p.map((e, j) => j === i ? { ...e, [k]: v } : e))
   }, [])
 
+  const setRowPoNo = useCallback((i: number, v: string) => {
+    setRowPoNos(p => p.map((n, j) => j === i ? v : n))
+  }, [])
+
   const applyBulkPrice = useCallback(() => {
     if (!bulkPrice.trim()) return
     setLineEdits(p => p.map(e => ({ ...e, unit_price: bulkPrice.trim() })))
@@ -293,53 +334,49 @@ export default function PoBatchExportOPage() {
   }, [bulkPrice])
 
   const handleClearAll = useCallback(() => {
-    setSourceRows([]); setLineEdits([]); setMatchResults([]); setLoadedDate(null)
+    setSourceRows([]); setLineEdits([]); setRowPoNos([]); setMatchResults([]); setLoadedDate(null)
+    setImportProgress(null)
     localStorage.removeItem(STORAGE_KEY)
   }, [])
 
-  // ── 移除已匯入項目（比對 erp_pj_sync sub_no = LINE_NO）──
+  // ── 移除已匯入項目（查 erp_pj_sync doc_no IN rowPoNos）──
   const [removingImported, setRemovingImported] = useState(false)
   const removeImported = useCallback(async () => {
-    const pid = header.project_id.trim()
-    if (!pid) { alert('請先填寫採購單號'); return }
     if (sourceRows.length === 0) return
+    const allPoNos = rowPoNos.filter(p => p.trim())
+    if (allPoNos.length === 0) return
     setRemovingImported(true)
     try {
       const { data, error } = await supabase
         .from('erp_pj_sync')
-        .select('sub_no')
+        .select('doc_no')
         .eq('doc_type', '採購單號')
-        .eq('doc_no', pid)
+        .in('doc_no', allPoNos)
       if (error) throw error
-      const imported = data ?? []
-      if (imported.length === 0) {
-        setMsg('⚠️ erp_pj_sync 查無此採購單，請先至 ERP 同步區執行 PO 同步')
+      const importedPoNos = new Set((data ?? []).map(r => String(r.doc_no ?? '').trim()))
+      if (importedPoNos.size === 0) {
+        setMsg('⚠️ erp_pj_sync 查無任何已匯入採購單，請先至 ERP 同步區執行 PO 同步')
         setTimeout(() => setMsg(''), 6000)
         return
       }
-      // sub_no 即 LINE_NO（payload 建立時 i+1）
-      const importedLineNos = new Set(imported.map(r => String(r.sub_no ?? '').trim()))
-      const keepIndices: number[] = []
-      for (let i = 0; i < sourceRows.length; i++) {
-        const lineNo = String(i + 1)
-        if (!importedLineNos.has(lineNo)) keepIndices.push(i)
-      }
+      const keepIndices = sourceRows.map((_, i) => i).filter(i => !importedPoNos.has(rowPoNos[i] ?? ''))
       const removedCount = sourceRows.length - keepIndices.length
       if (removedCount === 0) {
-        setMsg(`ℹ️ 查無已匯入行號（erp_pj_sync 有 ${imported.length} 筆，但 LINE_NO 未對應）`)
+        setMsg(`ℹ️ 查無已匯入行（erp_pj_sync 有 ${importedPoNos.size} 筆採購單，但採購單號未對應）`)
         setTimeout(() => setMsg(''), 6000)
         return
       }
       setSourceRows(prev => keepIndices.map(i => prev[i]))
       setLineEdits(prev => keepIndices.map(i => prev[i] ?? DEF_EDIT))
+      setRowPoNos(prev => keepIndices.map(i => prev[i] ?? ''))
       setMatchResults(prev => keepIndices.map(i => prev[i] ?? { status: null, line_no: null, reason: '' }))
-      setMsg(`✅ 已移除 ${removedCount} 筆已匯入項目（LINE_NO: ${[...importedLineNos].sort().join(', ')}），剩餘 ${keepIndices.length} 筆`)
+      setMsg(`✅ 已移除 ${removedCount} 筆已匯入採購單（${[...importedPoNos].sort().join(', ')}），剩餘 ${keepIndices.length} 筆`)
       setTimeout(() => setMsg(''), 8000)
     } catch (e) {
       setMsg(`❌ 查詢失敗：${e instanceof Error ? e.message : String(e)}`)
       setTimeout(() => setMsg(''), 6000)
     } finally { setRemovingImported(false) }
-  }, [header.project_id, sourceRows])
+  }, [sourceRows, rowPoNos])
 
   // ── 查詢 ERP 同步区採購單 (erp_pj_sync) ──
   const searchPoSync = useCallback(async (q: string) => {
@@ -363,18 +400,16 @@ export default function PoBatchExportOPage() {
     } finally { setPoSearching(false) }
   }, [])
 
-  // ── 回寫採購單號到每日出單表 ──
+  // ── 回寫採購單號到每日出單表（各列使用自己的採購單號）──
   const [syncingPoBack, setSyncingPoBack] = useState(false)
   const syncPoNumberBack = useCallback(async () => {
-    const pid = header.project_id.trim()
-    if (!pid) { alert('請先填寫採購單號'); return }
     if (!loadedDate) { alert('尚未載入出單表日期'); return }
     if (sourceRows.length === 0) return
     setSyncingPoBack(true); setMsg('')
     try {
       const updates = sourceRows
-        .filter(r => r.row_key)
-        .map(r => ({ row_key: r.row_key!, po_number: pid, po_status: 'matched' }))
+        .filter((r, i) => r.row_key && (rowPoNos[i] ?? '').trim())
+        .map((r, i) => ({ row_key: r.row_key!, po_number: rowPoNos[i], po_status: 'matched' }))
       if (updates.length === 0) { setMsg('⚠️ 來源資料無 row_key，無法回寫'); setTimeout(() => setMsg(''), 5000); return }
       const res = await fetch('/api/argoerp/daily-order-sheet', {
         method: 'PATCH',
@@ -383,13 +418,13 @@ export default function PoBatchExportOPage() {
       })
       const j = await res.json()
       if (!j.success) throw new Error(j.error ?? '回寫失敗')
-      setMsg(`✅ 已將 ${updates.length} 筆委外訂單的採購單號（${pid}）回寫至 ${loadedDate} 出單表`)
+      setMsg(`✅ 已將 ${updates.length} 筆委外訂單的採購單號逐列回寫至 ${loadedDate} 出單表`)
       setTimeout(() => setMsg(''), 8000)
     } catch (e) {
       setMsg(`❌ 回寫失敗：${e instanceof Error ? e.message : String(e)}`)
       setTimeout(() => setMsg(''), 6000)
     } finally { setSyncingPoBack(false) }
-  }, [header.project_id, loadedDate, sourceRows])
+  }, [loadedDate, sourceRows, rowPoNos])
 
   // ── 來源序號比對 (erp_so_lines) ──
   const runSerialMatch = useCallback(async () => {
@@ -464,7 +499,10 @@ export default function PoBatchExportOPage() {
         <div className="mb-6 border-b border-slate-800 pb-4 flex flex-col lg:flex-row lg:items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">出單表➜委外採購</h1>
-            <p className="text-slate-400 mt-1 text-sm">ArgoERP — 每日出單表（委外 O）→ IFAF024 採購訂單（PO）｜一張主表 + 多筆明細</p>
+            <p className="text-slate-400 mt-1 text-sm">
+              ArgoERP — 每日出單表（委外 O）→ IFAF024 採購訂單（PO）｜
+              <span className="text-orange-400 font-medium">一物一單</span>：採購單號 = POO + 銷售訂單數字 + 序號
+            </p>
           </div>
           <div className="flex gap-2 flex-wrap items-center">
             {datesLoading ? (
@@ -509,7 +547,9 @@ export default function PoBatchExportOPage() {
                   disabled={importing || matching}
                   className="px-4 py-2 rounded-lg bg-orange-700 hover:bg-orange-600 disabled:bg-slate-700 disabled:text-slate-500 text-white font-semibold transition-colors text-sm"
                 >
-                  {importing ? '匯入中…' : '🚀 匯入 ERP（IFAF024）'}
+                  {importing
+                    ? `匯入中 ${importProgress?.done ?? 0}/${importProgress?.total ?? 0}…`
+                    : `🚀 逐張匯入 ERP（${sourceRows.length} 張）`}
                 </button>
                 <button
                   onClick={handleClearAll}
@@ -529,22 +569,43 @@ export default function PoBatchExportOPage() {
           </div>
         )}
 
-        {/* ── PO Header Config ── */}
+        {/* ── Import progress bar ── */}
+        {importProgress && (
+          <div className="mb-4 bg-slate-900 border border-orange-800/40 rounded-lg px-4 py-3">
+            <div className="flex items-center justify-between mb-2 text-xs text-slate-400">
+              <span>匯入進度：{importProgress.done} / {importProgress.total} 張</span>
+              <span className={importProgress.errors.length > 0 ? 'text-red-400' : 'text-emerald-400'}>
+                {importProgress.errors.length > 0 ? `${importProgress.errors.length} 筆失敗` : '全部成功'}
+              </span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-2">
+              <div
+                className={`h-2 rounded-full transition-all ${importProgress.errors.length > 0 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                style={{ width: `${(importProgress.done / importProgress.total) * 100}%` }}
+              />
+            </div>
+            {importProgress.errors.length > 0 && (
+              <div className="mt-2 text-xs text-red-400 space-y-0.5 max-h-20 overflow-y-auto">
+                {importProgress.errors.map((e, i) => <div key={i}>{e}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── PO 共用表頭設定（不含採購單號 — 一物一單各自產生）── */}
         <div className="mb-6 bg-slate-900 border border-orange-800/40 rounded-lg overflow-hidden">
           <button
             onClick={() => setHeaderOpen(p => !p)}
             className="w-full px-4 py-3 flex items-center justify-between text-left bg-orange-900/20 hover:bg-orange-900/30 transition-colors"
           >
-            <span className="text-sm font-semibold text-orange-300">📋 採購單表頭設定（IFAF024 Header）</span>
+            <span className="text-sm font-semibold text-orange-300">
+              📋 採購單共用表頭設定（IFAF024 Header）
+              <span className="ml-2 text-xs font-normal text-slate-400">採購單號由銷售訂單自動產生，可於明細表逐列修改</span>
+            </span>
             <span className="text-slate-400 text-sm">{headerOpen ? '▲ 收起' : '▼ 展開'}</span>
           </button>
           {headerOpen && (
             <div className="px-4 py-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              <div className="col-span-2 md:col-span-1">
-                <label className="text-xs text-slate-400 block mb-1">採購單號 <span className="text-red-400">*</span></label>
-                <input value={header.project_id} onChange={e => setH('project_id', e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg bg-slate-800 border border-orange-600/60 text-white text-sm focus:outline-none focus:border-orange-400 font-mono" />
-              </div>
               <div>
                 <label className="text-xs text-slate-400 block mb-1">開立日期 <span className="text-red-400">*</span></label>
                 <input value={header.begin_date} onChange={e => setH('begin_date', e.target.value)}
@@ -555,6 +616,7 @@ export default function PoBatchExportOPage() {
                 <label className="text-xs text-slate-400 block mb-1">訂單狀態 <span className="text-red-400">*</span></label>
                 <select value={header.hold_status} onChange={e => setH('hold_status', e.target.value as PoHeader['hold_status'])}
                   className="w-full px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm focus:outline-none">
+                  <option value="UNSIGNED">UNSIGNED</option>
                   <option value="OPEN">OPEN</option>
                   <option value="HOLD">HOLD</option>
                   <option value="CLOSE">CLOSE</option>
@@ -629,13 +691,13 @@ export default function PoBatchExportOPage() {
               <div className={`font-semibold truncate ${loadedDate ? 'text-orange-300' : 'text-slate-600'}`}>{loadedDate ?? '未載入'}</div>
             </div>
             <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-              <div className="text-xs text-slate-500 mb-1">採購單號（PROJECT_ID）</div>
-              <div className="font-mono font-bold text-orange-300 truncate">{header.project_id || '—'}</div>
+              <div className="text-xs text-slate-500 mb-1">模式</div>
+              <div className="font-semibold text-orange-300">一物一單</div>
             </div>
             <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
-              <div className="text-xs text-slate-500 mb-1">明細筆數</div>
+              <div className="text-xs text-slate-500 mb-1">待匯採購單數</div>
               <div className={`font-bold ${sourceRows.length > 0 ? 'text-orange-300' : 'text-slate-600'}`}>
-                {sourceRows.length} <span className="text-slate-500 font-normal text-xs">筆</span>
+                {sourceRows.length} <span className="text-slate-500 font-normal text-xs">張</span>
               </div>
             </div>
             <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2">
@@ -652,24 +714,44 @@ export default function PoBatchExportOPage() {
           <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-700 bg-orange-900/20 flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-sm font-semibold text-orange-300">
-                採購明細（{sourceRows.length} 筆）
-                <span className="text-xs text-slate-400 font-normal ml-2">橘色欄位可逐列編輯</span>
+                採購明細（{sourceRows.length} 張，一物一單）
+                <span className="text-xs text-slate-400 font-normal ml-2">採購單號可逐列修改</span>
               </h2>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400">批量設定單價：</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => void removeImported()}
+                  disabled={removingImported || importing}
+                  className="px-3 py-1 rounded bg-slate-700 border border-slate-600 text-slate-300 hover:bg-slate-600 disabled:opacity-40 transition-colors text-xs"
+                >
+                  {removingImported ? '查詢中…' : '移除已匯入'}
+                </button>
+                <button
+                  onClick={() => void syncPoNumberBack()}
+                  disabled={syncingPoBack || importing}
+                  className="px-3 py-1 rounded bg-sky-900/50 border border-sky-700/50 text-sky-300 hover:bg-sky-800/50 disabled:opacity-40 transition-colors text-xs"
+                >
+                  {syncingPoBack ? '回寫中…' : '📝 回寫採購單號'}
+                </button>
+                <button
+                  onClick={() => doExport('csv')}
+                  className="px-3 py-1 rounded bg-slate-700 border border-slate-600 text-slate-300 hover:bg-slate-600 transition-colors text-xs"
+                >
+                  ↓ CSV
+                </button>
+                <span className="text-xs text-slate-500">批量單價：</span>
                 <input
                   value={bulkPrice}
                   onChange={e => setBulkPrice(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && applyBulkPrice()}
-                  placeholder="輸入單價"
-                  className="w-24 px-2 py-1 rounded bg-slate-800 border border-orange-700/60 text-orange-200 text-xs text-right focus:outline-none focus:border-orange-400"
+                  placeholder="單價"
+                  className="w-20 px-2 py-1 rounded bg-slate-800 border border-orange-700/60 text-orange-200 text-xs text-right focus:outline-none focus:border-orange-400"
                 />
                 <button
                   onClick={applyBulkPrice}
                   disabled={!bulkPrice.trim()}
                   className="px-3 py-1 rounded bg-orange-800/70 border border-orange-700/50 text-orange-200 hover:bg-orange-700 disabled:opacity-40 transition-colors text-xs"
                 >
-                  套用全部
+                  套用
                 </button>
               </div>
             </div>
@@ -677,22 +759,30 @@ export default function PoBatchExportOPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-800/80 border-b border-slate-700">
-                    <th className="px-2 py-3 text-center text-slate-500 font-mono text-xs w-10">#</th>
+                    <th className="px-2 py-3 text-center text-slate-500 font-mono text-xs w-8">#</th>
+                    <th className="px-3 py-3 text-left text-orange-300 font-medium text-xs whitespace-nowrap">採購單號 *</th>
                     <th className="px-3 py-3 text-left text-slate-300 font-medium text-xs whitespace-nowrap">銷售訂單</th>
                     <th className="px-3 py-3 text-center text-indigo-300 font-medium text-xs whitespace-nowrap">比對序號</th>
-                    <th className="px-3 py-3 text-center text-sky-300 font-medium text-xs whitespace-nowrap">SO序號 *</th>
+                    <th className="px-3 py-3 text-center text-sky-300 font-medium text-xs whitespace-nowrap">SO序號</th>
                     <th className="px-3 py-3 text-left text-slate-300 font-medium text-xs whitespace-nowrap">貨號</th>
                     <th className="px-3 py-3 text-left text-slate-300 font-medium text-xs">品名/規格 / 批號</th>
                     <th className="px-3 py-3 text-right text-slate-300 font-medium text-xs whitespace-nowrap">數量</th>
                     <th className="px-3 py-3 text-center text-orange-300 font-medium text-xs whitespace-nowrap">單位</th>
                     <th className="px-3 py-3 text-left text-slate-300 font-medium text-xs whitespace-nowrap">交貨日</th>
-                    <th className="px-3 py-3 text-left text-orange-300 font-medium text-xs whitespace-nowrap">備註2 / 包裝方式</th>
+                    <th className="px-3 py-3 text-left text-orange-300 font-medium text-xs whitespace-nowrap">備註2 / 包裝</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sourceRows.map((row, i) => (
                     <tr key={i} className={`border-b border-slate-800/50 ${i % 2 === 0 ? '' : 'bg-slate-900/40'} hover:bg-slate-800/50`}>
                       <td className="px-2 py-1.5 text-center text-slate-500 font-mono text-xs">{i + 1}</td>
+                      <td className="px-1 py-1">
+                        <input
+                          value={rowPoNos[i] ?? ''}
+                          onChange={e => setRowPoNo(i, e.target.value)}
+                          className="w-36 px-2 py-1 rounded bg-slate-800 border border-orange-600/60 text-orange-200 text-xs font-mono focus:outline-none focus:border-orange-400"
+                        />
+                      </td>
                       <td className="px-3 py-1.5 font-mono text-xs text-slate-300 whitespace-nowrap">{row.order_number || '—'}</td>
                       <td className="px-3 py-1.5 text-center">
                         {matchResults[i]?.status === 'matched' && matchResults[i].line_no ? (
@@ -707,10 +797,10 @@ export default function PoBatchExportOPage() {
                       </td>
                       <td className="px-1 py-1">
                         <input value={lineEdits[i]?.so_line_no ?? ''} onChange={e => setLE(i, 'so_line_no', e.target.value)}
-                          className="w-16 px-2 py-1 rounded bg-slate-800 border border-sky-700/50 text-sky-200 text-xs text-center focus:outline-none focus:border-sky-400" />
+                          className="w-14 px-2 py-1 rounded bg-slate-800 border border-sky-700/50 text-sky-200 text-xs text-center focus:outline-none focus:border-sky-400" />
                       </td>
                       <td className="px-3 py-1.5 font-mono text-xs text-slate-300 whitespace-nowrap">{row.item_code || '—'}</td>
-                      <td className="px-3 py-1.5 max-w-[240px]">
+                      <td className="px-3 py-1.5 max-w-[220px]">
                         <div className="text-xs text-slate-300 truncate" title={[row.item_name, row.note].filter(Boolean).join(' ')}>
                           {[row.item_name, row.note].filter(Boolean).join(' ') || '—'}
                         </div>
@@ -721,16 +811,16 @@ export default function PoBatchExportOPage() {
                       <td className="px-3 py-1.5 text-right text-xs text-slate-300 whitespace-nowrap">{row.quantity}</td>
                       <td className="px-1 py-1">
                         <input value={lineEdits[i]?.uom ?? 'PCS'} onChange={e => setLE(i, 'uom', e.target.value)}
-                          className="w-16 px-2 py-1 rounded bg-slate-800 border border-orange-700/40 text-white text-xs text-center focus:outline-none focus:border-orange-400" />
+                          className="w-14 px-2 py-1 rounded bg-slate-800 border border-orange-700/40 text-white text-xs text-center focus:outline-none focus:border-orange-400" />
                       </td>
                       <td className="px-3 py-1.5 text-xs text-yellow-400/80 whitespace-nowrap">{row.delivery_date || '—'}</td>
                       <td className="px-1 py-1.5">
                         <input value={lineEdits[i]?.remark2 ?? ''} onChange={e => setLE(i, 'remark2', e.target.value)}
                           placeholder="備註2…"
-                          className="w-32 px-2 py-1 rounded bg-slate-800 border border-orange-700/40 text-white text-xs focus:outline-none focus:border-orange-400" />
+                          className="w-28 px-2 py-1 rounded bg-slate-800 border border-orange-700/40 text-white text-xs focus:outline-none focus:border-orange-400" />
                         <input value={lineEdits[i]?.packing ?? ''} onChange={e => setLE(i, 'packing', e.target.value)}
                           placeholder="包裝方式…"
-                          className="mt-1 w-32 px-2 py-1 rounded bg-slate-800 border border-sky-700/40 text-sky-200 text-xs focus:outline-none focus:border-sky-400" />
+                          className="mt-1 w-28 px-2 py-1 rounded bg-slate-800 border border-sky-700/40 text-sky-200 text-xs focus:outline-none focus:border-sky-400" />
                       </td>
                     </tr>
                   ))}
@@ -741,7 +831,10 @@ export default function PoBatchExportOPage() {
         ) : (
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-12 text-center">
             <p className="text-slate-500">尚無明細，請選擇出單日期並載入</p>
-            <p className="text-slate-600 text-xs mt-2">自動篩選廠別「委外（O）」且尚未有採購單紀錄的訂單；每天所有委外訂單共用一張採購單</p>
+            <p className="text-slate-600 text-xs mt-2">
+              自動篩選廠別「委外（O）」且尚未有採購單紀錄的訂單<br />
+              每個品項自動產生獨立採購單號：POO + 銷售訂單數字 + 序號（01、02…）
+            </p>
           </div>
         )}
 
@@ -751,30 +844,30 @@ export default function PoBatchExportOPage() {
             <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-400 mb-2">IFAF024 欄位對應說明</summary>
             <div className="bg-slate-900/50 border border-orange-800/20 rounded-lg p-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                <div className="col-span-full text-orange-300 font-semibold mb-1">表頭（Header）— 全部明細共用</div>
+                <div className="col-span-full text-orange-300 font-semibold mb-1">表頭（Header）— 一物一單，每筆各自一張採購單</div>
                 {[
-                  ['PROJECT_ID', '採購單號（手動設定）'],
+                  ['PROJECT_ID', '採購單號（POO+銷售訂單數字+序號，可逐列修改）'],
                   ['MODIFY_VER', '變更版本（預設 1）'],
-                  ['BEGIN_DATE', '開立日期（手動設定）'],
+                  ['BEGIN_DATE', '開立日期（共用設定）'],
                   ['HOLD_STATUS', '訂單狀態（預設 OPEN）'],
-                  ['TPN_PARTNER_ID', '廠商編號（手動設定）'],
-                  ['SEG_SEGMENT_NO_DEPARTMENT', '部門（預設 M1100）'],
-                  ['SALES_ID', '業務員（手動設定）'],
+                  ['TPN_PARTNER_ID', '廠商編號（共用設定）'],
+                  ['SEG_SEGMENT_NO_DEPARTMENT', '部門（共用設定）'],
+                  ['SALES_ID', '業務員（共用設定）'],
                   ['PO_TYPE', '訂單類別（GENERAL）'],
-                  ['PAYMENT_TERM', '付款條件（手動設定）'],
+                  ['PAYMENT_TERM', '付款條件（共用設定）'],
                   ['PAYMENT_MODE', '付款方式（T=T/T）'],
-                  ['CURRENCY', '幣別（NTD）'],
-                  ['EXCHANGE_RATE', '匯率（1）'],
-                  ['TAX_RATE', '稅率（0.05）'],
+                  ['CURRENCY', '幣別'],
+                  ['EXCHANGE_RATE', '匯率'],
+                  ['TAX_RATE', '稅率'],
                 ].map(([k, v]) => (
                   <div key={k} className="flex gap-2">
                     <span className="text-slate-500 w-36 shrink-0 font-mono">{k}</span>
                     <span className="text-orange-300">{v}</span>
                   </div>
                 ))}
-                <div className="col-span-full text-orange-300 font-semibold mt-3 mb-1">明細（Line）— 每筆出單表各一列</div>
+                <div className="col-span-full text-orange-300 font-semibold mt-3 mb-1">明細（Line）— 固定 LINE_NO=1（一物一單）</div>
                 {[
-                  ['LINE_NO', '序號（自動遞增）'],
+                  ['LINE_NO', '固定 1（每張採購單僅一筆明細）'],
                   ['MBP_PART', '品項編碼'],
                   ['ORDER_QTY_ORU', '數量'],
                   ['UNIT_OF_MEASURE_ORU', '採購單位（可逐列修改）'],
@@ -810,7 +903,7 @@ export default function PoBatchExportOPage() {
               {!poSearching && poSyncRows !== null && poSyncRows.length > 0 && (
                 <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-900/40 border border-emerald-700/50 text-emerald-300">✓ {poSyncRows.length} 筆</span>
               )}
-              <p className="text-xs text-slate-500 w-full mt-0">查詢 erp_pj_sync，doc_type=採購單號</p>
+              <p className="text-xs text-slate-500 w-full mt-0">查詢 erp_pj_sync，doc_type=採購單號；輸入前綴 POO 可查詢全部委外採購單</p>
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -818,34 +911,22 @@ export default function PoBatchExportOPage() {
                 value={poSearchId}
                 onChange={e => setPoSearchId(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && void searchPoSync(poSearchId)}
-                placeholder="輸入採購單號…"
+                placeholder="輸入採購單號前綴…"
                 className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm w-48 focus:outline-none focus:border-orange-400 font-mono placeholder:text-slate-500"
               />
               <button
-                onClick={() => {
-                  const q = poSearchId.trim() || header.project_id
-                  setPoSearchId(q)
-                  void searchPoSync(q)
-                }}
-                disabled={poSearching}
+                onClick={() => void searchPoSync(poSearchId)}
+                disabled={poSearching || !poSearchId.trim()}
                 className="px-4 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm font-medium transition-colors"
               >
                 {poSearching ? '查詢中…' : '查詢'}
               </button>
-              {header.project_id && poSearchId !== header.project_id && (
-                <button
-                  onClick={() => { setPoSearchId(header.project_id); void searchPoSync(header.project_id) }}
-                  className="px-3 py-1.5 rounded-lg bg-orange-900/40 border border-orange-700/50 text-orange-300 hover:bg-orange-800/50 text-xs transition-colors whitespace-nowrap"
-                >
-                  帶入 {header.project_id}
-                </button>
-              )}
             </div>
           </div>
 
           {poSyncRows === null ? (
             <div className="px-4 py-8 text-center text-slate-600 text-sm">
-              請輸入採購單號後點「查詢」，或點「帶入」自動填入目前表頭採購單號
+              請輸入採購單號（或前綴如 POO）後點「查詢」
             </div>
           ) : poSyncRows.length === 0 ? (
             <div className="px-4 py-8 text-center text-slate-500 text-sm">

@@ -287,7 +287,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { action, data, interfaceId } = body as {
-      action: 'import' | 'query' | 'sync_inventory' | 'sync_customer' | 'fetch_po_pdl_links' | 'explore_so_columns' | 'test_so_detail' | 'test_po_detail' | 'sync_so' | 'sync_mo' | 'sync_pj' | 'sync_po' | 'sync_bom_units' | 'sync_material_prep'
+      action: 'import' | 'query' | 'sync_inventory' | 'sync_customer' | 'fetch_po_pdl_links' | 'explore_so_columns' | 'test_so_detail' | 'test_po_detail' | 'sync_so' | 'sync_mo' | 'sync_pj' | 'sync_po' | 'sync_pr' | 'sync_bom_units' | 'sync_material_prep'
       data?: Record<string, unknown>[]
       interfaceId?: string
     }
@@ -913,6 +913,117 @@ export async function POST(request: NextRequest) {
       })
     }
 
+
+    if (action === 'sync_pr') {
+      // ── 請購單同步（PJ_APPLYPROJECT + PJ_APPLYPROJECTDETAIL 兩段式，JS 端 JOIN）──────────────
+
+      // Step 1: 查 PJ_APPLYPROJECT（表頭）
+      const prHeaderSparam = JSON.stringify({
+        APIKEY1: keys.APIKEY1, APIKEY2: keys.APIKEY2, APIKEY3: keys.APIKEY3,
+        SEGMENT,
+        TABLE: 'PJ_APPLYPROJECT',
+        SHOWNULLCOLUMN: 'N',
+        CUSTOMCOLUMN: 'PROJECT_ID,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK',
+      })
+      const prHdrRes = await fetch(`${API_BASE}/S_QUERY`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sparam: prHeaderSparam }),
+      })
+      const { parsed: parsedPrHdr, rawText: rawPrHdr } = await readApiResponse(prHdrRes)
+      if (!prHdrRes.ok || !isArgoSuccess(parsedPrHdr)) {
+        return NextResponse.json({ status: 'error', error: extractApiError(parsedPrHdr) || 'PJ_APPLYPROJECT query failed', rawText: rawPrHdr }, { status: 502 })
+      }
+      const prHdrRows = findObjectRows(parsedPrHdr)
+      if (prHdrRows.length === 0) {
+        return NextResponse.json({ status: 'error', error: 'PJ_APPLYPROJECT 查無請購表頭' }, { status: 422 })
+      }
+
+      // 建 header map：PROJECT_ID → header row
+      const prHdrMap = new Map<string, Record<string, unknown>>()
+      for (const row of prHdrRows) {
+        const pid = String(getRecordValue(row, 'PROJECT_ID') ?? '').trim()
+        if (pid) prHdrMap.set(pid, row)
+      }
+
+      // Step 2: 查 PJ_APPLYPROJECTDETAIL（明細）
+      const prDtlSparam = JSON.stringify({
+        APIKEY1: keys.APIKEY1, APIKEY2: keys.APIKEY2, APIKEY3: keys.APIKEY3,
+        SEGMENT,
+        TABLE: 'PJ_APPLYPROJECTDETAIL',
+        SHOWNULLCOLUMN: 'Y',
+        CUSTOMCOLUMN: 'PJT_PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,CURRENCY',
+        LINE_NO: '>= 1',
+      })
+      const prDtlRes = await fetch(`${API_BASE}/S_QUERY`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sparam: prDtlSparam }),
+      })
+      const { parsed: parsedPrDtl, rawText: rawPrDtl } = await readApiResponse(prDtlRes)
+      if (!prDtlRes.ok || !isArgoSuccess(parsedPrDtl)) {
+        return NextResponse.json({ status: 'error', error: extractApiError(parsedPrDtl) || 'PJ_APPLYPROJECTDETAIL query failed', rawText: rawPrDtl }, { status: 502 })
+      }
+      const prDtlRows = findObjectRows(parsedPrDtl)
+
+      if (prDtlRows.length === 0) {
+        return NextResponse.json({ status: 'error', error: 'PJ_APPLYPROJECTDETAIL 查無明細' }, { status: 422 })
+      }
+
+      const prSyncedAt = new Date().toISOString()
+
+      // 合併：去重 project_id + line_no，只保留有表頭的明細
+      const prDedupe = new Map<string, { dtl: Record<string, unknown>; hdr: Record<string, unknown> }>()
+      for (const dtl of prDtlRows) {
+        const pid  = String(getRecordValue(dtl, 'PJT_PROJECT_ID') ?? '').trim()
+        const line = String(getRecordValue(dtl, 'LINE_NO') ?? '').trim()
+        const hdr  = prHdrMap.get(pid)
+        if (!hdr) continue
+        const key = `${pid}|${line}`
+        if (!prDedupe.has(key)) prDedupe.set(key, { dtl, hdr })
+      }
+
+      const prSyncRows = Array.from(prDedupe.values()).map(({ dtl, hdr }) => ({
+        doc_type:        '請購單號',
+        doc_no:          String(getRecordValue(hdr, 'PROJECT_ID') ?? '').trim(),
+        sub_no:          String(getRecordValue(dtl, 'LINE_NO') ?? '').trim(),
+        item_code:       String(getRecordValue(dtl, 'MBP_PART') ?? '').trim() || null,
+        description:     String(getRecordValue(hdr, 'REMARK') ?? '').trim() || null,
+        qty:             toNumber(getRecordValue(dtl, 'ORDER_QTY_ORU')),
+        unit:            String(getRecordValue(dtl, 'UNIT_OF_MEASURE_ORU') ?? '').trim() || null,
+        status:          String(getRecordValue(hdr, 'HOLD_STATUS') ?? '').trim() || null,
+        start_date:      String(getRecordValue(hdr, 'APPLY_DATE') ?? '').trim() || null,
+        end_date:        String(getRecordValue(dtl, 'DUEDATE') ?? '').trim() || null,
+        customer_vendor: String(getRecordValue(hdr, 'SEG_SEGMENT_NO_DEPARTMENT') ?? '').trim() || null,
+        remark:          String(getRecordValue(dtl, 'CURRENCY') ?? '').trim() || null,
+        extra: {
+          MBP_VER:    String(getRecordValue(dtl, 'MBP_VER') ?? '').trim() || null,
+          MBP_LOT_NO: String(getRecordValue(dtl, 'MBP_LOT_NO') ?? '').trim() || null,
+          HDR_REMARK: String(getRecordValue(hdr, 'REMARK') ?? '').trim() || null,
+        },
+        synced_at: prSyncedAt,
+      }))
+
+      try {
+        const supabaseAdmin = getSupabaseAdminClient()
+        const { error: clearError } = await supabaseAdmin.from('erp_pj_sync').delete().eq('doc_type', '請購單號')
+        if (clearError) throw clearError
+        const batchSize = 500
+        for (let i = 0; i < prSyncRows.length; i += batchSize) {
+          const chunk = prSyncRows.slice(i, i + batchSize)
+          const { error: insertError } = await supabaseAdmin.from('erp_pj_sync').insert(chunk)
+          if (insertError) throw insertError
+        }
+      } catch (err) {
+        const message = err instanceof Error ? formatSupabaseAdminError(err.message) : '寫入 erp_pj_sync 失敗'
+        return NextResponse.json({ status: 'error', error: message }, { status: 500 })
+      }
+
+      return NextResponse.json({
+        status: 'ok',
+        syncedCount: prSyncRows.length,
+        totalHdrRows: prHdrRows.length,
+        totalDtlRows: prDtlRows.length,
+      })
+    }
 
     if (action === 'sync_mo') {
       // ── 製令同步 ────────────────────────────────────────────

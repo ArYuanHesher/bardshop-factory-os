@@ -763,100 +763,102 @@ export default function DailyOrderSheetPage() {
     }
   }, [sheetRows, selectedDate, currentRawText])
 
-  // ---- 常平採購單比對：對 erp_pj_sync 以 item_code + qty 比對 factory=C 列 ----
+  // ---- 採購單比對：對 erp_pj_sync 以 item_code + qty 比對 factory=C（常平）及 factory=O（委外）列 ----
   const [syncingPo, setSyncingPo] = useState(false)
+
+  // 共用配對邏輯（C 與 O 均適用）
+  type PoCandidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
+  const matchPoRows = (rows: SheetRow[], pool: PoCandidate[], factory: 'C' | 'O'): SheetRow[] =>
+    rows.map(row => {
+      if (row.factory !== factory) return row
+      if (!row.item_code) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
+      const qty = parseFloat(String(row.quantity).replace(/,/g, '')) || 0
+      const matchLineNo = (row.match_line_no ?? '').trim()
+      // 第一優先：料號 + 數量 + SO_PROJECT_ID === 銷售訂單號（委外 PO 用此欄位記錄來源單）
+      let hitIdx = pool.findIndex(c =>
+        !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
+        String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? '')
+      )
+      // 第二優先：料號 + 數量 + MBP_LOT_NO === 銷售訂單號（常平 PO 批號即 SO 單號）
+      if (hitIdx === -1)
+        hitIdx = pool.findIndex(c =>
+          !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
+          String(c.extra?.MBP_LOT_NO ?? '').trim() === (row.order_number ?? '').trim()
+        )
+      // 第三優先：料號 + 數量 + TPN_PART_NO === match_line_no
+      if (hitIdx === -1 && matchLineNo)
+        hitIdx = pool.findIndex(c =>
+          !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
+          String(c.extra?.TPN_PART_NO ?? '') === matchLineNo
+        )
+      // fallback：僅料號 + 數量，且 MBP_LOT_NO 為空（有批號的PO已明確屬於特定SO，不得跨SO誤配）
+      if (hitIdx === -1)
+        hitIdx = pool.findIndex(c =>
+          !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
+          !String(c.extra?.MBP_LOT_NO ?? '').trim()
+        )
+      if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
+      pool[hitIdx]._used = true
+      return { ...row, po_number: pool[hitIdx].doc_no, po_sub_no: pool[hitIdx].sub_no, po_status: 'matched' }
+    })
 
   const runPoMatch = useCallback(async () => {
     const cRows = sheetRows.filter(r => r.factory === 'C')
-    if (cRows.length === 0) {
-      setSaveMsg('ℹ️ 本日出單表無常平廠列')
+    const oRows = sheetRows.filter(r => r.factory === 'O')
+    if (cRows.length === 0 && oRows.length === 0) {
+      setSaveMsg('ℹ️ 本日出單表無常平／委外廠列')
       setTimeout(() => setSaveMsg(''), 4000)
       return
     }
     setSyncingPo(true)
     setSaveMsg('')
     try {
-      // 只取有品項編碼的列
-      const itemCodes = [...new Set(cRows.map(r => r.item_code).filter(Boolean))]
-      if (itemCodes.length === 0) {
-        setSaveMsg('ℹ️ 常平廠列無品項編碼，無法比對')
-        setTimeout(() => setSaveMsg(''), 4000)
-        setSyncingPo(false)
-        return
+      let next: SheetRow[] = sheetRows
+
+      // ── 常平（C01510）──
+      if (cRows.length > 0) {
+        const itemCodes = [...new Set(cRows.map(r => r.item_code).filter(Boolean))]
+        if (itemCodes.length > 0) {
+          const { data: poRows, error } = await supabase
+            .from('erp_pj_sync')
+            .select('doc_no, sub_no, item_code, qty, status, extra')
+            .eq('doc_type', '採購單號')
+            .eq('status', 'OPEN')
+            .eq('customer_vendor', 'C01510')
+            .in('item_code', itemCodes)
+            .order('doc_no', { ascending: false })
+          if (error) throw error
+          const pool: PoCandidate[] = (poRows ?? []).map(r => ({
+            doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
+            qty: Number(r.qty ?? 0), status: r.status,
+            extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
+          }))
+          next = matchPoRows(next, pool, 'C')
+        }
       }
-      const { data: poRows, error } = await supabase
-        .from('erp_pj_sync')
-        .select('doc_no, sub_no, item_code, qty, status, extra')
-        .eq('doc_type', '採購單號')
-        .eq('status', 'OPEN')
-        .eq('customer_vendor', 'C01510')
-        .in('item_code', itemCodes)
-        .order('doc_no', { ascending: false }) // 最新採購單優先
-      if (error) throw error
 
-      // 候選池：僅 OPEN 狀態
-      type Candidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
-      const pool: Candidate[] = (poRows ?? [])
-        .map(r => ({
-          doc_no:    r.doc_no,
-          sub_no:    r.sub_no,
-          item_code: r.item_code,
-          qty:       Number(r.qty ?? 0),
-          status:    r.status,
-          extra:     (r.extra ?? null) as Record<string, unknown> | null,
-          _used:     false,
-        }))
+      // ── 委外（42828690）──
+      if (oRows.length > 0) {
+        const itemCodesO = [...new Set(oRows.map(r => r.item_code).filter(Boolean))]
+        if (itemCodesO.length > 0) {
+          const { data: poRowsO, error: errO } = await supabase
+            .from('erp_pj_sync')
+            .select('doc_no, sub_no, item_code, qty, status, extra')
+            .eq('doc_type', '採購單號')
+            .eq('status', 'OPEN')
+            .eq('customer_vendor', '42828690')
+            .in('item_code', itemCodesO)
+            .order('doc_no', { ascending: false })
+          if (errO) throw errO
+          const poolO: PoCandidate[] = (poRowsO ?? []).map(r => ({
+            doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
+            qty: Number(r.qty ?? 0), status: r.status,
+            extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
+          }))
+          next = matchPoRows(next, poolO, 'O')
+        }
+      }
 
-      const next: SheetRow[] = sheetRows.map(row => {
-        if (row.factory !== 'C') return row
-        // 品項編碼為空 → 無法比對，避免誤配
-        if (!row.item_code) {
-          return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
-        }
-        const qty = parseFloat(String(row.quantity).replace(/,/g, '')) || 0
-        const matchLineNo = (row.match_line_no ?? '').trim()
-
-        // 第一優先：料號 + 數量 + 批號（MBP_LOT_NO）=== 銷售訂單號（最精確，PO 批號即 SO 單號）
-        let hitIdx = pool.findIndex(c =>
-          !c._used &&
-          (c.item_code ?? '') === row.item_code &&
-          c.qty === qty &&
-          String(c.extra?.MBP_LOT_NO ?? '').trim() === (row.order_number ?? '').trim()
-        )
-        // 第二優先：料號 + 數量 + TPN_PART_NO === match_line_no
-        if (hitIdx === -1 && matchLineNo) {
-          hitIdx = pool.findIndex(c =>
-            !c._used &&
-            (c.item_code ?? '') === row.item_code &&
-            c.qty === qty &&
-            String(c.extra?.TPN_PART_NO ?? '') === matchLineNo
-          )
-        }
-        // 第三優先：料號 + 數量 + SO_PROJECT_ID === 銷售訂單號
-        if (hitIdx === -1) {
-          hitIdx = pool.findIndex(c =>
-            !c._used &&
-            (c.item_code ?? '') === row.item_code &&
-            c.qty === qty &&
-            String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? '')
-          )
-        }
-        // fallback：僅料號 + 數量，且 MBP_LOT_NO 為空（有批號的PO已明確屬於特定SO，不得跨SO誤配）
-        if (hitIdx === -1) {
-          hitIdx = pool.findIndex(c =>
-            !c._used &&
-            (c.item_code ?? '') === row.item_code &&
-            c.qty === qty &&
-            !String(c.extra?.MBP_LOT_NO ?? '').trim()
-          )
-        }
-        if (hitIdx === -1) {
-          return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
-        }
-        pool[hitIdx]._used = true
-        const hit = pool[hitIdx]
-        return { ...row, po_number: hit.doc_no, po_sub_no: hit.sub_no, po_status: 'matched' }
-      })
       setSheetRows(next)
 
       // 立即儲存
@@ -867,9 +869,14 @@ export default function DailyOrderSheetPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || `HTTP ${res.status}`)
-      const matched = next.filter(r => r.factory === 'C' && r.po_status === 'matched').length
-      const noMatch = next.filter(r => r.factory === 'C' && r.po_status === 'no_match').length
-      setSaveMsg(`✅ 採購單比對完成：已比對 ${matched} 筆${noMatch > 0 ? `，未找到 ${noMatch} 筆` : ''}`)
+      const cMatched = next.filter(r => r.factory === 'C' && r.po_status === 'matched').length
+      const cNoMatch = next.filter(r => r.factory === 'C' && r.po_status === 'no_match').length
+      const oMatched = next.filter(r => r.factory === 'O' && r.po_status === 'matched').length
+      const oNoMatch = next.filter(r => r.factory === 'O' && r.po_status === 'no_match').length
+      const parts: string[] = []
+      if (cRows.length > 0) parts.push(`常平 ${cMatched}/${cRows.length}${cNoMatch > 0 ? `（未配 ${cNoMatch}）` : ''}`)
+      if (oRows.length > 0) parts.push(`委外 ${oMatched}/${oRows.length}${oNoMatch > 0 ? `（未配 ${oNoMatch}）` : ''}`)
+      setSaveMsg(`✅ 採購單比對完成：${parts.join('　')}`)
       setTimeout(() => setSaveMsg(''), 6000)
     } catch (e) {
       setSaveMsg(`❌ 採購單比對失敗：${e instanceof Error ? e.message : String(e)}`)
@@ -1100,53 +1107,59 @@ export default function DailyOrderSheetPage() {
       const newMo = currentRows.filter((r, i) => r.mo_number && !prevRows[i]?.mo_number).length
       const batchPrepCount = currentRows.filter(r => r.material_prep_status === '已批備料').length
 
-      // ── Step 3: 常平採購單比對（只在有 C 列時執行）──────────
+      // ── Step 3: 採購單比對（常平 C01510 + 委外 42828690）────
       const hasCRows = currentRows.some(r => r.factory === 'C')
+      const hasORows = currentRows.some(r => r.factory === 'O')
       let poMatched = 0
-      if (hasCRows) {
+      let oPoMatched = 0
+      if (hasCRows || hasORows) {
         setSaveMsg('⏳ 全同步進行中：比對採購單…')
-        const itemCodes = [...new Set(currentRows.filter(r => r.factory === 'C').map(r => r.item_code).filter(Boolean))]
-        if (itemCodes.length > 0) {
-          const { data: poRows, error: poErr } = await supabase
-            .from('erp_pj_sync')
-            .select('doc_no, sub_no, item_code, qty, status, extra')
-            .eq('doc_type', '採購單號')
-            .eq('status', 'OPEN')
-            .eq('customer_vendor', 'C01510')
-            .in('item_code', itemCodes)
-            .order('doc_no', { ascending: false })
-          if (poErr) throw poErr
-          type AllSyncCandidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
-          const pool: AllSyncCandidate[] = (poRows ?? [])
-            .map(r => ({
+        type AllSyncCandidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
+
+        // 常平（C）
+        if (hasCRows) {
+          const itemCodes = [...new Set(currentRows.filter(r => r.factory === 'C').map(r => r.item_code).filter(Boolean))]
+          if (itemCodes.length > 0) {
+            const { data: poRows, error: poErr } = await supabase
+              .from('erp_pj_sync')
+              .select('doc_no, sub_no, item_code, qty, status, extra')
+              .eq('doc_type', '採購單號')
+              .eq('status', 'OPEN')
+              .eq('customer_vendor', 'C01510')
+              .in('item_code', itemCodes)
+              .order('doc_no', { ascending: false })
+            if (poErr) throw poErr
+            const pool: AllSyncCandidate[] = (poRows ?? []).map(r => ({
               doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
               qty: Number(r.qty ?? 0), status: r.status,
               extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
             }))
-          currentRows = currentRows.map(row => {
-            if (row.factory !== 'C') return row
-            if (!row.item_code) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
-            const qty = parseFloat(String(row.quantity).replace(/,/g, '')) || 0
-            const matchLineNo = (row.match_line_no ?? '').trim()
-            // 第一優先：料號 + 數量 + MBP_LOT_NO === 銷售訂單號
-            let hitIdx = pool.findIndex(c =>
-              !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
-              String(c.extra?.MBP_LOT_NO ?? '').trim() === (row.order_number ?? '').trim()
-            )
-            // 第二優先：料號 + 數量 + TPN_PART_NO === match_line_no
-            if (hitIdx === -1 && matchLineNo)
-              hitIdx = pool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.TPN_PART_NO ?? '') === matchLineNo)
-            // 第三優先：料號 + 數量 + SO_PROJECT_ID === 銷售訂單號
-            if (hitIdx === -1)
-              hitIdx = pool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? ''))
-            // fallback：僅料號 + 數量，且 MBP_LOT_NO 為空
-            if (hitIdx === -1)
-              hitIdx = pool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && !String(c.extra?.MBP_LOT_NO ?? '').trim())
-            if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
-            pool[hitIdx]._used = true
-            return { ...row, po_number: pool[hitIdx].doc_no, po_sub_no: pool[hitIdx].sub_no, po_status: 'matched' }
-          })
-          poMatched = currentRows.filter(r => r.factory === 'C' && r.po_status === 'matched').length
+            currentRows = matchPoRows(currentRows, pool, 'C')
+            poMatched = currentRows.filter(r => r.factory === 'C' && r.po_status === 'matched').length
+          }
+        }
+
+        // 委外（O）
+        if (hasORows) {
+          const itemCodesO = [...new Set(currentRows.filter(r => r.factory === 'O').map(r => r.item_code).filter(Boolean))]
+          if (itemCodesO.length > 0) {
+            const { data: poRowsO, error: poErrO } = await supabase
+              .from('erp_pj_sync')
+              .select('doc_no, sub_no, item_code, qty, status, extra')
+              .eq('doc_type', '採購單號')
+              .eq('status', 'OPEN')
+              .eq('customer_vendor', '42828690')
+              .in('item_code', itemCodesO)
+              .order('doc_no', { ascending: false })
+            if (poErrO) throw poErrO
+            const poolO: AllSyncCandidate[] = (poRowsO ?? []).map(r => ({
+              doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
+              qty: Number(r.qty ?? 0), status: r.status,
+              extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
+            }))
+            currentRows = matchPoRows(currentRows, poolO, 'O')
+            oPoMatched = currentRows.filter(r => r.factory === 'O' && r.po_status === 'matched').length
+          }
         }
       }
 
@@ -1163,7 +1176,8 @@ export default function DailyOrderSheetPage() {
         `序號比對 ${serialMatched}/${currentRows.length}`,
         `製令連結 +${newMo}`,
         batchPrepCount > 0 ? `已批備料 ${batchPrepCount}` : null,
-        hasCRows ? `採購單 ${poMatched}/${currentRows.filter(r => r.factory === 'C').length}` : null,
+        hasCRows ? `常平採購單 ${poMatched}/${currentRows.filter(r => r.factory === 'C').length}` : null,
+        hasORows ? `委外採購單 ${oPoMatched}/${currentRows.filter(r => r.factory === 'O').length}` : null,
       ].filter(Boolean).join('　')
       setSaveMsg(`✅ 全同步完成：${parts}`)
       setTimeout(() => setSaveMsg(''), 8000)
@@ -1264,6 +1278,9 @@ export default function DailyOrderSheetPage() {
       const erpPrepSet = new Set<string>((allErpPrep ?? []).map((l: { mo_number: string }) => l.mo_number).filter(Boolean))
 
       // 3. 一次抓全部 OPEN 採購單 pool（供所有日期比對用）
+      type Candidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
+
+      // 常平（C01510）
       const { data: allPoRows, error: poErr } = await supabase
         .from('erp_pj_sync')
         .select('doc_no, sub_no, item_code, qty, status, extra')
@@ -1272,10 +1289,23 @@ export default function DailyOrderSheetPage() {
         .eq('customer_vendor', 'C01510')
         .order('doc_no', { ascending: false })
       if (poErr) throw poErr
-      type Candidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; extra: Record<string, unknown> | null; _used: boolean }
       const globalPoPool: Candidate[] = (allPoRows ?? []).map(r => ({
         doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
-        qty: Number(r.qty ?? 0), extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
+        qty: Number(r.qty ?? 0), status: r.status ?? null, extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
+      }))
+
+      // 委外（42828690）
+      const { data: allPoRowsO, error: poErrO } = await supabase
+        .from('erp_pj_sync')
+        .select('doc_no, sub_no, item_code, qty, status, extra')
+        .eq('doc_type', '採購單號')
+        .eq('status', 'OPEN')
+        .eq('customer_vendor', '42828690')
+        .order('doc_no', { ascending: false })
+      if (poErrO) throw poErrO
+      const globalPoPoolO: Candidate[] = (allPoRowsO ?? []).map(r => ({
+        doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
+        qty: Number(r.qty ?? 0), status: r.status ?? null, extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
       }))
 
       // 4. 逐張出單表處理
@@ -1352,27 +1382,15 @@ export default function DailyOrderSheetPage() {
         }
 
         // Step C: 採購單比對（每張獨立 pool，避免跨日期搶佔）
+        // 常平（C）
         const sheetPoPool: Candidate[] = globalPoPool.map(c => ({ ...c, _used: false }))
         if (rows.some(r => r.factory === 'C')) {
-          rows = rows.map(row => {
-            if (row.factory !== 'C') return row
-            if (!row.item_code) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' as const }
-            const qty = parseFloat(String(row.quantity).replace(/,/g, '')) || 0
-            const matchLineNo = (row.match_line_no ?? '').trim()
-            let hitIdx = sheetPoPool.findIndex(c =>
-              !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
-              String(c.extra?.MBP_LOT_NO ?? '').trim() === (row.order_number ?? '').trim()
-            )
-            if (hitIdx === -1 && matchLineNo)
-              hitIdx = sheetPoPool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.TPN_PART_NO ?? '') === matchLineNo)
-            if (hitIdx === -1)
-              hitIdx = sheetPoPool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? ''))
-            if (hitIdx === -1)
-              hitIdx = sheetPoPool.findIndex(c => !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty && !String(c.extra?.MBP_LOT_NO ?? '').trim())
-            if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' as const }
-            sheetPoPool[hitIdx]._used = true
-            return { ...row, po_number: sheetPoPool[hitIdx].doc_no, po_sub_no: sheetPoPool[hitIdx].sub_no, po_status: 'matched' as const }
-          })
+          rows = matchPoRows(rows, sheetPoPool, 'C')
+        }
+        // 委外（O）
+        const sheetPoPoolO: Candidate[] = globalPoPoolO.map(c => ({ ...c, _used: false }))
+        if (rows.some(r => r.factory === 'O')) {
+          rows = matchPoRows(rows, sheetPoPoolO, 'O')
         }
 
         // Step D: 寫回 DB
@@ -1797,7 +1815,7 @@ export default function DailyOrderSheetPage() {
                         const q = searchQuery.trim().toLowerCase()
                         return (r.order_number?.toLowerCase().includes(q)) || (r.mo_number?.toLowerCase().includes(q)) || (r.po_number?.toLowerCase().includes(q))
                       }).map((row, idx) => {
-                        const effectiveStatus = row.mo_status ?? (row.factory === 'C' && row.po_status === 'matched' ? '已匯入採單' : null)
+                        const effectiveStatus = row.mo_status ?? ((row.factory === 'C' || row.factory === 'O') && row.po_status === 'matched' ? '已匯入採單' : null)
                         const statusInfo = effectiveStatus ? STATUS_LABELS[effectiveStatus] : null
                         const sk = row.row_key || String(idx)
                         return (
@@ -1810,6 +1828,8 @@ export default function DailyOrderSheetPage() {
                                 ? 'bg-amber-950/20'
                                 : row.factory === 'C' && row.po_status === 'matched'
                                 ? 'bg-orange-950/20'
+                                : row.factory === 'O' && row.po_status === 'matched'
+                                ? 'bg-purple-950/20'
                                 : 'hover:bg-slate-900/50'
                             }`}
                           >
@@ -1872,14 +1892,18 @@ export default function DailyOrderSheetPage() {
                             <td className="px-3 py-2 text-slate-400 max-w-[120px] truncate" title={row.customer}>{row.customer}</td>
                             <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.delivery_date}</td>
                             <td className="px-3 py-2 font-mono text-xs">
-                              {row.factory === 'C' ? (
+                              {(row.factory === 'C' || row.factory === 'O') ? (
                                 row.po_status === 'matched' && row.po_number ? (
                                   <div>
-                                    <span className="text-orange-300">{row.po_number}</span>
-                                    <span className="text-slate-500 ml-1">#{row.po_sub_no}</span>
+                                    <span className={row.factory === 'C' ? 'text-orange-300' : 'text-purple-300'}>{row.po_number}</span>
+                                    {row.po_sub_no && <span className="text-slate-500 ml-1">#{row.po_sub_no}</span>}
                                   </div>
                                 ) : row.po_status === 'no_match' ? (
-                                  <span className="text-red-400 text-[10px]">無對應採購單</span>
+                                  row.mo_number
+                                    ? <span className="text-violet-300">{row.mo_number}</span>
+                                    : <span className="text-red-400 text-[10px]">無對應採購單</span>
+                                ) : row.mo_number ? (
+                                  <span className="text-violet-300">{row.mo_number}</span>
                                 ) : (
                                   <span className="text-slate-600">—</span>
                                 )

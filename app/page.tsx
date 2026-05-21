@@ -454,7 +454,7 @@ export default function HomePage() {
           </Link>
 
 
-          {/* 2. 資訊看板 (Amber) */}
+          {/* 2. 業務資訊看板 (Amber) */}
           <div
             onClick={() => setShowInfoModal(true)}
             onMouseEnter={() => setIsHovered('estimation')}
@@ -475,7 +475,7 @@ export default function HomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
               </svg>
             </div>
-            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-amber-400 transition-colors">資訊看板</h2>
+            <h2 className="text-base md:text-xl font-bold text-white mb-1 md:mb-2 group-hover:text-amber-400 transition-colors">業務資訊看板</h2>
             <p className="text-slate-500 text-[10px] md:text-xs mb-3 md:mb-6 group-hover:text-slate-300 px-1 md:px-2 hidden md:block">
               各部門訊息交流與公告。<br/>(Info Board)
             </p>
@@ -812,45 +812,54 @@ export default function HomePage() {
             <div className="bg-amber-800 p-4 flex justify-between items-center border-b border-amber-700">
               <h3 className="text-white font-bold flex items-center gap-2">
                 <span className="w-2 h-6 bg-amber-400 rounded-full"></span>
-                資訊看板
+                業務資訊看板
               </h3>
               <button onClick={() => setShowInfoModal(false)} className="text-amber-400 hover:text-white transition-colors">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
             <div className="p-6 flex flex-col gap-4">
+              {/* 發單記錄查詢 */}
               <div
-                className="bg-amber-700/20 border border-amber-600 rounded-xl p-5 cursor-pointer hover:bg-amber-700/40 transition-all flex items-center gap-4"
-                onClick={() => { setShowInfoModal(false); router.push('/info-board?flow=bizChange'); }}
+                className="bg-amber-500/10 border border-amber-400 rounded-xl p-5 cursor-pointer hover:bg-amber-500/20 transition-all flex items-center gap-4"
+                onClick={() => { setShowInfoModal(false); router.push('/info-board/order-records'); }}
               >
-                <div className="text-3xl">✏️</div>
+                <div className="text-3xl">🔍</div>
                 <div className="flex-1">
-                  <div className="text-amber-400 font-bold text-lg mb-1">業務改單表</div>
-                  <div className="text-xs text-slate-300">業務改單請求、變更紀錄</div>
+                  <div className="text-amber-300 font-bold text-lg mb-1">發單記錄查詢</div>
+                  <div className="text-xs text-slate-300">依工單／品項查詢歷史發單紀錄</div>
                 </div>
-                <span className="px-3 py-1 rounded border border-amber-600 text-amber-300 text-xs font-mono bg-amber-900/30">前往 →</span>
+                <span className="px-3 py-1 rounded border border-amber-500 text-amber-300 text-xs font-mono bg-amber-900/30">前往 →</span>
               </div>
-              <div
-                className="bg-amber-700/20 border border-amber-600 rounded-xl p-5 cursor-pointer hover:bg-amber-700/40 transition-all flex items-center gap-4"
-                onClick={() => { setShowInfoModal(false); router.push('/info-board/schedule'); }}
-              >
-                <div className="text-3xl">📅</div>
+
+              {/* 維修中 — 業務改單表 */}
+              <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-5 flex items-center gap-4 opacity-50 cursor-not-allowed select-none">
+                <div className="text-3xl grayscale">✏️</div>
                 <div className="flex-1">
-                  <div className="text-amber-400 font-bold text-lg mb-1">產期詢問/預留</div>
-                  <div className="text-xs text-slate-300">產期詢問登記及預留產程</div>
+                  <div className="text-slate-400 font-bold text-lg mb-1">業務改單表</div>
+                  <div className="text-xs text-slate-500">業務改單請求、變更紀錄</div>
                 </div>
-                <span className="px-3 py-1 rounded border border-amber-600 text-amber-300 text-xs font-mono bg-amber-900/30">前往 →</span>
+                <span className="px-3 py-1 rounded border border-slate-600 text-slate-500 text-xs font-mono bg-slate-800">🔧 維修中</span>
               </div>
-              <div
-                className="bg-amber-700/20 border border-amber-600 rounded-xl p-5 cursor-pointer hover:bg-amber-700/40 transition-all flex items-center gap-4"
-                onClick={() => { setShowInfoModal(false); router.push('/info-board?flow=stOrder'); }}
-              >
-                <div className="text-3xl">📦</div>
+
+              {/* 維修中 — 產期詢問/預留 */}
+              <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-5 flex items-center gap-4 opacity-50 cursor-not-allowed select-none">
+                <div className="text-3xl grayscale">📅</div>
                 <div className="flex-1">
-                  <div className="text-amber-400 font-bold text-lg mb-1">常平訂單</div>
-                  <div className="text-xs text-slate-300">常平訂單處理與追蹤</div>
+                  <div className="text-slate-400 font-bold text-lg mb-1">產期詢問/預留</div>
+                  <div className="text-xs text-slate-500">產期詢問登記及預留產程</div>
                 </div>
-                <span className="px-3 py-1 rounded border border-amber-600 text-amber-300 text-xs font-mono bg-amber-900/30">前往 →</span>
+                <span className="px-3 py-1 rounded border border-slate-600 text-slate-500 text-xs font-mono bg-slate-800">🔧 維修中</span>
+              </div>
+
+              {/* 維修中 — 常平訂單 */}
+              <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-5 flex items-center gap-4 opacity-50 cursor-not-allowed select-none">
+                <div className="text-3xl grayscale">📦</div>
+                <div className="flex-1">
+                  <div className="text-slate-400 font-bold text-lg mb-1">常平訂單</div>
+                  <div className="text-xs text-slate-500">常平訂單處理與追蹤</div>
+                </div>
+                <span className="px-3 py-1 rounded border border-slate-600 text-slate-500 text-xs font-mono bg-slate-800">🔧 維修中</span>
               </div>
             </div>
           </div>

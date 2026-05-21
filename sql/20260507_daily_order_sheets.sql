@@ -26,7 +26,7 @@ COMMENT ON COLUMN public.daily_order_sheets.rows
 
 -- RLS：允許已認證及匿名使用者讀寫（後台使用）
 ALTER TABLE public.daily_order_sheets ENABLE ROW LEVEL SECURITY;
-
+ 
 CREATE POLICY "allow_all_daily_order_sheets"
   ON public.daily_order_sheets
   FOR ALL
