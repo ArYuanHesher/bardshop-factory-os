@@ -862,10 +862,17 @@ function SyncCard({ docKey }: SyncCardProps) {
   }
 
   // SO 列印（當頁）
-  const handlePoDocPrint = (targetDocNo: string) => {
+  const handlePoDocPrint = async (targetDocNo: string) => {
+    // 從 DB 重新取得該採購單的所有明細（避免分頁遺漏）
+    const { data: allLines } = await supabase
+      .from('erp_pj_sync')
+      .select('*')
+      .eq('doc_no', targetDocNo)
+    if (!allLines || allLines.length === 0) return
+
     // Group records by doc_no (single doc)
     const grouped = new Map<string, typeof records>()
-    for (const r of records.filter(rec => rec.doc_no === targetDocNo)) {
+    for (const r of allLines as PjRecord[]) {
       if (!grouped.has(r.doc_no)) grouped.set(r.doc_no, [])
       grouped.get(r.doc_no)!.push(r)
     }
@@ -1989,7 +1996,7 @@ ${poPages}
                         <td className="px-2 py-2 text-center">
                           <button
                             type="button"
-                            onClick={() => handlePoDocPrint(r.doc_no)}
+                            onClick={() => void handlePoDocPrint(r.doc_no)}
                             className="flex items-center gap-0.5 rounded border border-slate-600 bg-slate-800 px-2 py-0.5 text-xs text-sky-400 hover:bg-slate-700"
                           >
                             <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6v-8z" /></svg>
