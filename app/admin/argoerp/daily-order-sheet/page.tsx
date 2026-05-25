@@ -837,7 +837,7 @@ export default function DailyOrderSheetPage() {
           (!String(c.extra?.SO_PROJECT_ID ?? '').trim() || String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? '')) &&
           isPoRecent(c)
         )
-      if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
+      if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match', mo_status: null }
       pool[hitIdx]._used = true
       return { ...row, po_number: pool[hitIdx].doc_no, po_sub_no: pool[hitIdx].sub_no, po_status: 'matched' }
     })
