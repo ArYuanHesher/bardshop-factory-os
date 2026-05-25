@@ -815,11 +815,13 @@ export default function DailyOrderSheetPage() {
           !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
           String(c.extra?.TPN_PART_NO ?? '') === matchLineNo
         )
-      // fallback：僅料號 + 數量，且 MBP_LOT_NO 為空（有批號的PO已明確屬於特定SO，不得跨SO誤配）
+      // fallback：僅料號 + 數量，且 MBP_LOT_NO 為空，且 SO_PROJECT_ID 也為空或與本列一致
+      // （有批號或有其他SO來源的PO已明確屬於特定SO，不得跨SO誤配）
       if (hitIdx === -1)
         hitIdx = pool.findIndex(c =>
           !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
-          !String(c.extra?.MBP_LOT_NO ?? '').trim()
+          !String(c.extra?.MBP_LOT_NO ?? '').trim() &&
+          (!String(c.extra?.SO_PROJECT_ID ?? '').trim() || String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? ''))
         )
       if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
       pool[hitIdx]._used = true
@@ -1981,9 +1983,7 @@ export default function DailyOrderSheetPage() {
                                   </div>
                                 ) : row.po_status === 'no_match' ? (
                                   <div>
-                                    {row.mo_number
-                                      ? <span className="text-violet-300">{row.mo_number}</span>
-                                      : <span className="text-red-400 text-[10px]">無對應採購單</span>}
+                                    <span className="text-red-400 text-[10px]">無對應採購單</span>
                                     {row.factory === 'O' && (
                                       <div className="mt-1">
                                         <button

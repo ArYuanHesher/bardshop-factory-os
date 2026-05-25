@@ -439,9 +439,7 @@ export default function OrderRecordsPage() {
                 {row.po_sub_no && <span className="text-slate-500 ml-1">#{row.po_sub_no}</span>}
               </div>
             ) : row.po_status === 'no_match' ? (
-              row.mo_number
-                ? <button onClick={() => setPjModalDocNo(row.mo_number!)} className="text-violet-300 hover:text-violet-100 hover:underline underline-offset-2">{row.mo_number}</button>
-                : <span className="text-red-400 text-[10px]">無對應採購單</span>
+              <span className="text-red-400 text-[10px]">無對應採購單</span>
             ) : row.mo_number ? (
               <button onClick={() => setPjModalDocNo(row.mo_number!)} className="text-violet-300 hover:text-violet-100 hover:underline underline-offset-2">{row.mo_number}</button>
             ) : (
