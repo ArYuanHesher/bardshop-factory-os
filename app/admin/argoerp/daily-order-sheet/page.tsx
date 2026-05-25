@@ -790,9 +790,22 @@ export default function DailyOrderSheetPage() {
   const [syncingPo, setSyncingPo] = useState(false)
 
   // 共用配對邏輯（C 與 O 均適用）
-  type PoCandidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
-  const matchPoRows = (rows: SheetRow[], pool: PoCandidate[], factory: 'C' | 'O'): SheetRow[] =>
-    rows.map(row => {
+  type PoCandidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; start_date: string | null; extra: Record<string, unknown> | null; _used: boolean }
+  const matchPoRows = (rows: SheetRow[], pool: PoCandidate[], factory: 'C' | 'O', sheetDate: string): SheetRow[] => {
+    // fallback 日期門檻：PO 開單日距出單表日期不得超過 6 個月，防止舊 PO 誤配新單
+    const sheetMs = new Date(sheetDate).getTime()
+    const SIX_MONTHS_MS = 6 * 30 * 24 * 60 * 60 * 1000
+    const isPoRecent = (c: PoCandidate): boolean => {
+      if (c.start_date) return sheetMs - new Date(c.start_date).getTime() <= SIX_MONTHS_MS
+      // 從 doc_no 解析（格式 POYYMM...）
+      if (/^[A-Z]{2}\d{6}/.test(c.doc_no)) {
+        const year = 2000 + parseInt(c.doc_no.slice(2, 4), 10)
+        const month = parseInt(c.doc_no.slice(4, 6), 10) - 1
+        return sheetMs - new Date(year, month, 1).getTime() <= SIX_MONTHS_MS
+      }
+      return true
+    }
+    return rows.map(row => {
       if (row.factory !== factory) return row
       if (row.po_status === 'no_po') return row  // 使用者已標記無須採購，保留
       if (!row.item_code) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
@@ -815,18 +828,20 @@ export default function DailyOrderSheetPage() {
           !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
           String(c.extra?.TPN_PART_NO ?? '') === matchLineNo
         )
-      // fallback：僅料號 + 數量，且 MBP_LOT_NO 為空，且 SO_PROJECT_ID 也為空或與本列一致
-      // （有批號或有其他SO來源的PO已明確屬於特定SO，不得跨SO誤配）
+      // fallback：僅料號 + 數量，且 MBP_LOT_NO 為空，且 SO_PROJECT_ID 也為空或一致，
+      // 且 PO 開單日距出單表日期不超過 6 個月（防止舊年份 PO 誤配新訂單）
       if (hitIdx === -1)
         hitIdx = pool.findIndex(c =>
           !c._used && (c.item_code ?? '') === row.item_code && c.qty === qty &&
           !String(c.extra?.MBP_LOT_NO ?? '').trim() &&
-          (!String(c.extra?.SO_PROJECT_ID ?? '').trim() || String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? ''))
+          (!String(c.extra?.SO_PROJECT_ID ?? '').trim() || String(c.extra?.SO_PROJECT_ID ?? '') === (row.order_number ?? '')) &&
+          isPoRecent(c)
         )
       if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
       pool[hitIdx]._used = true
       return { ...row, po_number: pool[hitIdx].doc_no, po_sub_no: pool[hitIdx].sub_no, po_status: 'matched' }
     })
+  }
 
   const runPoMatch = useCallback(async () => {
     const cRows = sheetRows.filter(r => r.factory === 'C')
@@ -847,7 +862,7 @@ export default function DailyOrderSheetPage() {
         if (itemCodes.length > 0) {
           const { data: poRows, error } = await supabase
             .from('erp_pj_sync')
-            .select('doc_no, sub_no, item_code, qty, status, extra')
+            .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
             .eq('doc_type', '採購單號')
             .eq('status', 'OPEN')
             .eq('customer_vendor', 'C01510')
@@ -857,9 +872,10 @@ export default function DailyOrderSheetPage() {
           const pool: PoCandidate[] = (poRows ?? []).map(r => ({
             doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
             qty: Number(r.qty ?? 0), status: r.status,
+            start_date: (r.start_date as string | null) ?? null,
             extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
           }))
-          next = matchPoRows(next, pool, 'C')
+          next = matchPoRows(next, pool, 'C', selectedDate)
         }
       }
 
@@ -869,7 +885,7 @@ export default function DailyOrderSheetPage() {
         if (itemCodesO.length > 0) {
           const { data: poRowsO, error: errO } = await supabase
             .from('erp_pj_sync')
-            .select('doc_no, sub_no, item_code, qty, status, extra')
+            .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
             .eq('doc_type', '採購單號')
             .eq('status', 'OPEN')
             .eq('customer_vendor', '42828690')
@@ -879,9 +895,10 @@ export default function DailyOrderSheetPage() {
           const poolO: PoCandidate[] = (poRowsO ?? []).map(r => ({
             doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
             qty: Number(r.qty ?? 0), status: r.status,
+            start_date: (r.start_date as string | null) ?? null,
             extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
           }))
-          next = matchPoRows(next, poolO, 'O')
+          next = matchPoRows(next, poolO, 'O', selectedDate)
         }
       }
 
@@ -1141,7 +1158,7 @@ export default function DailyOrderSheetPage() {
       let oPoMatched = 0
       if (hasCRows || hasORows) {
         setSaveMsg('⏳ 全同步進行中：比對採購單…')
-        type AllSyncCandidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
+        type AllSyncCandidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; start_date: string | null; extra: Record<string, unknown> | null; _used: boolean }
 
         // 常平（C）
         if (hasCRows) {
@@ -1149,7 +1166,7 @@ export default function DailyOrderSheetPage() {
           if (itemCodes.length > 0) {
             const { data: poRows, error: poErr } = await supabase
               .from('erp_pj_sync')
-              .select('doc_no, sub_no, item_code, qty, status, extra')
+              .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
               .eq('doc_type', '採購單號')
               .eq('status', 'OPEN')
               .eq('customer_vendor', 'C01510')
@@ -1159,9 +1176,10 @@ export default function DailyOrderSheetPage() {
             const pool: AllSyncCandidate[] = (poRows ?? []).map(r => ({
               doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
               qty: Number(r.qty ?? 0), status: r.status,
+              start_date: (r.start_date as string | null) ?? null,
               extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
             }))
-            currentRows = matchPoRows(currentRows, pool, 'C')
+            currentRows = matchPoRows(currentRows, pool, 'C', selectedDate)
             poMatched = currentRows.filter(r => r.factory === 'C' && r.po_status === 'matched').length
           }
         }
@@ -1172,7 +1190,7 @@ export default function DailyOrderSheetPage() {
           if (itemCodesO.length > 0) {
             const { data: poRowsO, error: poErrO } = await supabase
               .from('erp_pj_sync')
-              .select('doc_no, sub_no, item_code, qty, status, extra')
+              .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
               .eq('doc_type', '採購單號')
               .eq('status', 'OPEN')
               .eq('customer_vendor', '42828690')
@@ -1182,9 +1200,10 @@ export default function DailyOrderSheetPage() {
             const poolO: AllSyncCandidate[] = (poRowsO ?? []).map(r => ({
               doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
               qty: Number(r.qty ?? 0), status: r.status,
+              start_date: (r.start_date as string | null) ?? null,
               extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
             }))
-            currentRows = matchPoRows(currentRows, poolO, 'O')
+            currentRows = matchPoRows(currentRows, poolO, 'O', selectedDate)
             oPoMatched = currentRows.filter(r => r.factory === 'O' && r.po_status === 'matched').length
           }
         }
@@ -1322,12 +1341,12 @@ export default function DailyOrderSheetPage() {
       const erpPrepSet = new Set<string>((allErpPrep ?? []).map((l: { mo_number: string }) => l.mo_number).filter(Boolean))
 
       // 3. 一次抓全部 OPEN 採購單 pool（供所有日期比對用）
-      type Candidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; extra: Record<string, unknown> | null; _used: boolean }
+      type Candidate = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; start_date: string | null; extra: Record<string, unknown> | null; _used: boolean }
 
       // 常平（C01510）
       const { data: allPoRows, error: poErr } = await supabase
         .from('erp_pj_sync')
-        .select('doc_no, sub_no, item_code, qty, status, extra')
+        .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
         .eq('doc_type', '採購單號')
         .eq('status', 'OPEN')
         .eq('customer_vendor', 'C01510')
@@ -1335,13 +1354,15 @@ export default function DailyOrderSheetPage() {
       if (poErr) throw poErr
       const globalPoPool: Candidate[] = (allPoRows ?? []).map(r => ({
         doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
-        qty: Number(r.qty ?? 0), status: r.status ?? null, extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
+        qty: Number(r.qty ?? 0), status: r.status ?? null,
+        start_date: (r.start_date as string | null) ?? null,
+        extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
       }))
 
       // 委外（42828690）
       const { data: allPoRowsO, error: poErrO } = await supabase
         .from('erp_pj_sync')
-        .select('doc_no, sub_no, item_code, qty, status, extra')
+        .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
         .eq('doc_type', '採購單號')
         .eq('status', 'OPEN')
         .eq('customer_vendor', '42828690')
@@ -1349,7 +1370,9 @@ export default function DailyOrderSheetPage() {
       if (poErrO) throw poErrO
       const globalPoPoolO: Candidate[] = (allPoRowsO ?? []).map(r => ({
         doc_no: r.doc_no, sub_no: r.sub_no, item_code: r.item_code,
-        qty: Number(r.qty ?? 0), status: r.status ?? null, extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
+        qty: Number(r.qty ?? 0), status: r.status ?? null,
+        start_date: (r.start_date as string | null) ?? null,
+        extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false,
       }))
 
       // 4. 逐張出單表處理
@@ -1429,12 +1452,12 @@ export default function DailyOrderSheetPage() {
         // 常平（C）
         const sheetPoPool: Candidate[] = globalPoPool.map(c => ({ ...c, _used: false }))
         if (rows.some(r => r.factory === 'C')) {
-          rows = matchPoRows(rows, sheetPoPool, 'C')
+          rows = matchPoRows(rows, sheetPoPool, 'C', sheetDate)
         }
         // 委外（O）
         const sheetPoPoolO: Candidate[] = globalPoPoolO.map(c => ({ ...c, _used: false }))
         if (rows.some(r => r.factory === 'O')) {
-          rows = matchPoRows(rows, sheetPoPoolO, 'O')
+          rows = matchPoRows(rows, sheetPoPoolO, 'O', sheetDate)
         }
 
         // Step D: 寫回 DB
