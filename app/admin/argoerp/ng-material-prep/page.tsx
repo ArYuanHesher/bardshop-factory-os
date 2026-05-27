@@ -232,6 +232,26 @@ export default function NgMaterialPrepPage() {
 
       const merged = [...((summaryData ?? []) as MoRecord[]), ...fallbackRecords]
       merged.sort((a, b) => a.mo_number.localeCompare(b.mo_number))
+
+      // 4. 以 argoerp_material_prep_log 的最新記錄覆寫備料狀態（最準確）
+      if (merged.length > 0) {
+        const allMoNums = merged.map(m => m.mo_number)
+        const { data: prepLogData } = await supabase
+          .from('argoerp_material_prep_log')
+          .select('mo_number, status, logged_at')
+          .in('mo_number', allMoNums)
+          .order('logged_at', { ascending: false })
+
+        const latestStatusMap = new Map<string, string>()
+        for (const r of (prepLogData ?? []) as Array<{ mo_number: string; status: string; logged_at: string }>) {
+          if (!latestStatusMap.has(r.mo_number)) latestStatusMap.set(r.mo_number, r.status)
+        }
+        for (const mo of merged) {
+          const s = latestStatusMap.get(mo.mo_number)
+          if (s) mo.prep_status = s as MoRecord['prep_status']
+        }
+      }
+
       setMoList(merged)
     } catch (e) {
       setSoError(e instanceof Error ? e.message : '搜尋失敗')
