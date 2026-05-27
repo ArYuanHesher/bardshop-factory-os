@@ -405,6 +405,23 @@ export default function DailyOrderSheetPage() {
           ;(j.assignments as { mo_number: string; machine: string }[]).forEach(a => {
             if (a.machine) map[a.mo_number] = a.machine
           })
+
+          // 對 argoerp_mo_machine_assign 查無機台的製令，以 assigned_machine 自動補填
+          const fallback: { mo_number: string; machine: string }[] = []
+          for (const r of sheetRows) {
+            if (r.mo_number && r.assigned_machine && !map[r.mo_number]) {
+              map[r.mo_number] = r.assigned_machine
+              fallback.push({ mo_number: r.mo_number, machine: r.assigned_machine })
+            }
+          }
+          if (fallback.length > 0) {
+            fetch('/api/argoerp/mo-machine-assign', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ assignments: fallback }),
+            }).catch(() => {})
+          }
+
           setMoMachines(map)
         }
       })
