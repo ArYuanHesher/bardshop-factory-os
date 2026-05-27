@@ -186,15 +186,53 @@ export default function NgMaterialPrepPage() {
       })
 
       // 載入相關製令
+      // 雙來源：erp_mo_lines（ARGO 同步，有 source_order）+ argoerp_mo_summary（系統匯入，有完整欄位）
       setMoLoading(true)
-      const { data: moData, error: moErr } = await supabase
+
+      // 1. 先從 erp_mo_lines 查出所有屬於此 SO 的 MO 號碼（source_order = SO project_id）
+      const { data: moLinesData } = await supabase
+        .from('erp_mo_lines')
+        .select('project_id, mbp_part, order_qty, source_order')
+        .eq('source_order', q)
+
+      const moNumbersFromLines = Array.from(new Set(
+        (moLinesData ?? []).map((r: { project_id: string }) => r.project_id).filter(Boolean)
+      ))
+
+      // 2. 再從 argoerp_mo_summary 查（source_order = q 或 mo_number IN ...）
+      let summaryQuery = supabase
         .from('argoerp_mo_summary')
         .select('mo_number, factory, product_code, lot_number, planned_qty, source_order, mo_note, create_date, saved_at, prep_status, plate_count, machine')
-        .eq('source_order', q)
-        .order('mo_number', { ascending: true })
 
+      if (moNumbersFromLines.length > 0) {
+        summaryQuery = summaryQuery.or(`source_order.eq.${q},mo_number.in.(${moNumbersFromLines.join(',')})`)
+      } else {
+        summaryQuery = summaryQuery.eq('source_order', q)
+      }
+      const { data: summaryData, error: moErr } = await summaryQuery.order('mo_number', { ascending: true })
       if (moErr) throw moErr
-      setMoList((moData ?? []) as MoRecord[])
+
+      const summaryMoNumbers = new Set((summaryData ?? []).map((r: { mo_number: string }) => r.mo_number))
+
+      // 3. 對 argoerp_mo_summary 完全查無的 MO，從 erp_mo_lines 補建 fallback 記錄
+      const fallbackMoMap = new Map<string, { mbp_part: string | null; order_qty: number }>()
+      for (const r of (moLinesData ?? []) as Array<{ project_id: string; mbp_part: string | null; order_qty: number }>) {
+        if (!summaryMoNumbers.has(r.project_id) && !fallbackMoMap.has(r.project_id)) {
+          fallbackMoMap.set(r.project_id, { mbp_part: r.mbp_part, order_qty: r.order_qty })
+        }
+      }
+      const fallbackRecords: MoRecord[] = Array.from(fallbackMoMap.entries()).map(([moNum, info]) => ({
+        mo_number: moNum,
+        factory: moNum.startsWith('MOT') ? 'T' : moNum.startsWith('MOC') ? 'C' : 'O',
+        product_code: info.mbp_part ?? '',
+        planned_qty: String(info.order_qty ?? ''),
+        source_order: q,
+        prep_status: null,
+      }))
+
+      const merged = [...((summaryData ?? []) as MoRecord[]), ...fallbackRecords]
+      merged.sort((a, b) => a.mo_number.localeCompare(b.mo_number))
+      setMoList(merged)
     } catch (e) {
       setSoError(e instanceof Error ? e.message : '搜尋失敗')
     } finally {
