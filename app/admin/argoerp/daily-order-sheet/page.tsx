@@ -2116,7 +2116,20 @@ export default function DailyOrderSheetPage() {
                               {row.mo_number ? (
                                 <select
                                   value={moMachines[row.mo_number] || ''}
-                                  onChange={e => setMoMachine(row.mo_number!, e.target.value)}
+                                  onChange={async e => {
+                                    const machine = e.target.value
+                                    await setMoMachine(row.mo_number!, machine)
+                                    // 同步回寫 sheetRows 並立即儲存（與 row-level 機台行為一致）
+                                    setSheetRows(prev => {
+                                      const next = prev.map(r => r.mo_number === row.mo_number ? { ...r, machine } : r)
+                                      fetch('/api/argoerp/daily-order-sheet', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ sheet_date: selectedDate, raw_text: currentRawText, rows: next }),
+                                      }).catch(() => {})
+                                      return next
+                                    })
+                                  }}
                                   className="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-cyan-500 min-w-[90px]"
                                 >
                                   <option value="">— —</option>
