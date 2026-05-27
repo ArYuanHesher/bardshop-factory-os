@@ -406,12 +406,15 @@ export default function DailyOrderSheetPage() {
             if (a.machine) map[a.mo_number] = a.machine
           })
 
-          // 對 argoerp_mo_machine_assign 查無機台的製令，以 assigned_machine 自動補填
+          // 對 argoerp_mo_machine_assign 查無機台的製令，以 sheetRows.machine（已存）或 assigned_machine（原始貼上）補填
           const fallback: { mo_number: string; machine: string }[] = []
           for (const r of sheetRows) {
-            if (r.mo_number && r.assigned_machine && !map[r.mo_number]) {
-              map[r.mo_number] = r.assigned_machine
-              fallback.push({ mo_number: r.mo_number, machine: r.assigned_machine })
+            if (r.mo_number && !map[r.mo_number]) {
+              const fallbackMachine = r.machine || r.assigned_machine
+              if (fallbackMachine) {
+                map[r.mo_number] = fallbackMachine
+                fallback.push({ mo_number: r.mo_number, machine: fallbackMachine })
+              }
             }
           }
           if (fallback.length > 0) {
