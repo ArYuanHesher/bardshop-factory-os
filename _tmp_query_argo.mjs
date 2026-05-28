@@ -12,21 +12,19 @@ if (!keyData) process.exit(1);
 const { APIKEY1: k1, APIKEY2: k2, APIKEY3: k3 } = keyData.RESULT;
 console.log('Keys OK');
 
-// 抓特定採購單 PO26042836 的明細，看所有欄位
-const d = await post(API_BASE + '/S_QUERY', {
-  sparam: JSON.stringify({
-    APIKEY1: k1, APIKEY2: k2, APIKEY3: k3,
-    SEGMENT, TABLE: 'PJ_PROJECTDETAIL',
-    SHOWNULLCOLUMN: 'Y',
-    PJT_PROJECT_ID: "= 'PO26042836'",
-    LINE_NO: '>= 1',
-  }),
+// 確認 MM_BOM_STRUCTURE 用 CUSTOMCOLUMN 還是不帶的回傳結果
+const base = { APIKEY1: k1, APIKEY2: k2, APIKEY3: k3, SEGMENT };
+
+// 方法 A：不帶 CUSTOMCOLUMN（測試時成功的寫法）
+const rA = await post(API_BASE + '/S_QUERY', {
+  sparam: JSON.stringify({ ...base, TABLE: 'MM_BOM_STRUCTURE', SHOWNULLCOLUMN: 'N', MBP_PART: 'IS NOT NULL', ROWNUM: '<= 2' })
 });
-const rows = d && Array.isArray(d.RESULT) ? d.RESULT : [];
-console.log(`Rows: ${rows.length}`);
-if (rows.length > 0) {
-  console.log('\nAll columns:', Object.keys(rows[0]).join(', '));
-  console.log('\nFull row[0]:', JSON.stringify(rows[0], null, 2));
-} else {
-  console.log('Error/empty:', JSON.stringify(d)?.slice(0, 500));
-}
+console.log('A (no customColumn):', JSON.stringify(rA?.RESULT?.[0]).slice(0,200));
+
+// 方法 B：帶 CUSTOMCOLUMN（目前 route.ts 寫法）
+const rB = await post(API_BASE + '/S_QUERY', {
+  sparam: JSON.stringify({ ...base, TABLE: 'MM_BOM_STRUCTURE', SHOWNULLCOLUMN: 'N',
+    CUSTOMCOLUMN: 'MBP_PART,MBP_VER,MBP_CHILD_PART,MBP_CHILD_VER,LINE_NO,CHILD_QTY,CHILD_SCRAP,LOT_CHILD_QTY,LOT_BASE',
+    MBP_PART: 'IS NOT NULL', ROWNUM: '<= 2' })
+});
+console.log('B (with customColumn):', JSON.stringify(rB).slice(0,300));
