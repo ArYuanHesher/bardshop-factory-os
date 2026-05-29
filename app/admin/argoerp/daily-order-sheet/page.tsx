@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../../../lib/supabaseClient'
 import SoOrderModal from '../../../../components/SoOrderModal'
+import PoOrderModal from '../../../../components/PoOrderModal'
 
 // ===== 舊系統入庫紀錄比對 =====
 interface LegacyReceiptRow {
@@ -49,7 +50,8 @@ export interface SheetRow extends SourceRow {
   // 常平採購單比對結果（對應 erp_pj_sync）
   po_number?: string | null
   po_sub_no?: string | null
-  po_status?: 'matched' | 'no_match' | 'no_po' | null
+  po_status?: 'matched' | 'no_match' | 'no_po' | 'qty_mismatch' | null
+  po_qty_erp?: number | null  // ERP 採購單數量（僅 qty_mismatch 時有值，供人工判斷用）
   // 序號比對結果（對應 erp_so_lines）
   match_status?: MatchStatus | null
   match_line_no?: string | null
@@ -260,6 +262,7 @@ export default function DailyOrderSheetPage() {
     ...cOrders.filter(r => !pinnedCOrderKeys.has(`${r.doc_no}|${r.sub_no}`)),
   ]
   const [soModalId, setSoModalId] = useState<string | null>(null)
+  const [poModalId, setPoModalId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFactory, setActiveFactory] = useState<'ALL' | 'T' | 'C' | 'O'>('ALL')
   const [globalSearch, setGlobalSearch] = useState('')
@@ -845,10 +848,10 @@ export default function DailyOrderSheetPage() {
           String(c.extra?.MBP_LOT_NO ?? '').trim() === (row.order_number ?? '').trim()
         )
       // 第三優先：料號 + TPN_PART_NO === match_line_no + SO_PROJECT_ID / MBP_LOT_NO 指向同一工單
-      // 僅委外（O）適用：常平 PO 的 TPN_PART_NO 是行號，會與 SO 序號碰巧相同而誤配
-      // 委外需同時確認 SO_PROJECT_ID 或 MBP_LOT_NO 指向同一工單（避免行號碰巧相符）
-      // 注意：此優先不要求 qty 完全相符，因 ERP 採購單 qty 可能與出單表數量不同（如留樣分批）
-      if (hitIdx === -1 && matchLineNo && factory === 'O')
+      // 僅委外（O）適用；此優先不要求 qty 完全相符（ERP 採購單 qty 可能與出單表分批不同）
+      // → qty 相符：直接 matched；qty 不符：標記 qty_mismatch 供人工確認
+      let p3QtyMismatch = false
+      if (hitIdx === -1 && matchLineNo && factory === 'O') {
         hitIdx = pool.findIndex(c =>
           !c._used && (c.item_code ?? '') === row.item_code &&
           String(c.extra?.TPN_PART_NO ?? '') === matchLineNo &&
@@ -857,6 +860,8 @@ export default function DailyOrderSheetPage() {
             String(c.extra?.MBP_LOT_NO ?? '').trim() === (row.order_number ?? '').trim()
           )
         )
+        if (hitIdx !== -1 && pool[hitIdx].qty !== qty) p3QtyMismatch = true
+      }
       // fallback：僅料號 + 數量，且 MBP_LOT_NO 為空，且 SO_PROJECT_ID 也為空或一致，
       // 且 PO 開單日距出單表日期不超過 6 個月（防止舊年份 PO 誤配新訂單）
       // 常平（C）與委外（O）都有明確的批號/來源訂單可比對，不走此 fallback
@@ -869,6 +874,8 @@ export default function DailyOrderSheetPage() {
         )
       if (hitIdx === -1) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match', mo_status: null }
       pool[hitIdx]._used = true
+      if (p3QtyMismatch)
+        return { ...row, po_number: pool[hitIdx].doc_no, po_sub_no: pool[hitIdx].sub_no, po_status: 'qty_mismatch', po_qty_erp: pool[hitIdx].qty }
       return { ...row, po_number: pool[hitIdx].doc_no, po_sub_no: pool[hitIdx].sub_no, po_status: 'matched' }
     })
   }
@@ -1516,6 +1523,31 @@ export default function DailyOrderSheetPage() {
 
   // ---- 切換廠別 ----
   // ---- 標記/取消 無須採購（O廠列）----
+  const handleConfirmQtyMismatch = useCallback(async (rowKey: string, confirm: boolean) => {
+    const next: SheetRow[] = sheetRows.map(r => {
+      if ((r.row_key || '') !== rowKey) return r
+      if (confirm) return { ...r, po_status: 'matched' as const, po_qty_erp: null }
+      return { ...r, po_status: 'no_match' as const, po_number: null, po_sub_no: null, po_qty_erp: null }
+    })
+    setSheetRows(next)
+    setSaving(true)
+    try {
+      const res = await fetch('/api/argoerp/daily-order-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheet_date: selectedDate, raw_text: currentRawText, rows: next }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || `HTTP ${res.status}`)
+      setSaveMsg(confirm ? '✅ 已確認採購單配對' : '✅ 已取消配對')
+      setTimeout(() => setSaveMsg(''), 2000)
+    } catch (e) {
+      setSaveMsg(`❌ 儲存失敗：${e}`)
+    } finally {
+      setSaving(false)
+    }
+  }, [sheetRows, selectedDate, currentRawText])
+
   const handleToggleNoPo = useCallback(async (rowKey: string) => {
     const next: SheetRow[] = sheetRows.map(r => {
       if ((r.row_key || '') !== rowKey) return r
@@ -2054,8 +2086,32 @@ export default function DailyOrderSheetPage() {
                               {(row.factory === 'C' || row.factory === 'O') ? (
                                 row.po_status === 'matched' && row.po_number ? (
                                   <div>
-                                    <span className={row.factory === 'C' ? 'text-orange-300' : 'text-purple-300'}>{row.po_number}</span>
+                                    <button
+                                      onClick={() => setPoModalId(row.po_number!)}
+                                      className={`hover:underline underline-offset-2 text-left ${row.factory === 'C' ? 'text-orange-300 hover:text-orange-100' : 'text-purple-300 hover:text-purple-100'}`}
+                                    >{row.po_number}</button>
                                     {row.po_sub_no && <span className="text-slate-500 ml-1">#{row.po_sub_no}</span>}
+                                  </div>
+                                ) : row.po_status === 'qty_mismatch' && row.po_number ? (
+                                  <div>
+                                    <button
+                                      onClick={() => setPoModalId(row.po_number!)}
+                                      className="text-amber-300 hover:text-amber-100 hover:underline underline-offset-2 text-left"
+                                    >{row.po_number}</button>
+                                    {row.po_sub_no && <span className="text-slate-500 ml-1">#{row.po_sub_no}</span>}
+                                    <div className="mt-1 px-1.5 py-0.5 rounded border text-[10px] bg-amber-950/40 text-amber-300 border-amber-700/50 inline-block">
+                                      ⚠ 數量不符 ERP:{row.po_qty_erp ?? '?'} / 出單:{row.quantity}
+                                    </div>
+                                    <div className="mt-1 flex gap-1">
+                                      <button
+                                        onClick={() => void handleConfirmQtyMismatch(sk, true)}
+                                        className="px-1.5 py-0.5 rounded border text-[10px] bg-emerald-900/40 text-emerald-300 border-emerald-700/50 hover:bg-emerald-800/60 transition-colors"
+                                      >✓ 確認</button>
+                                      <button
+                                        onClick={() => void handleConfirmQtyMismatch(sk, false)}
+                                        className="px-1.5 py-0.5 rounded border text-[10px] bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700 transition-colors"
+                                      >✕ 取消</button>
+                                    </div>
                                   </div>
                                 ) : row.po_status === 'no_po' ? (
                                   <div className="flex items-center gap-1.5">
@@ -2374,6 +2430,7 @@ export default function DailyOrderSheetPage() {
         </div>
       </div>
       <SoOrderModal projectId={soModalId} onClose={() => setSoModalId(null)} />
+      <PoOrderModal docNo={poModalId} onClose={() => setPoModalId(null)} />
 
       {/* 舊系統入庫比對 Modal */}
       {legacyModal && (

@@ -1086,11 +1086,15 @@ export default function OrderBatchExportPage() {
             if (hitIdx === -1) return { ...row, po_status: 'no_match' }
             const delivDateStr = String(row.delivery_date ?? sDate).replace(/\//g, '-')
             pool[hitIdx]._used = true
+            const p3Mismatch = fac === 'O' && matchLineNo &&
+              String(pool[hitIdx].extra?.TPN_PART_NO ?? '') === matchLineNo &&
+              pool[hitIdx].qty !== qty
             return {
               ...row,
               po_number: pool[hitIdx].doc_no,
               po_sub_no: pool[hitIdx].sub_no,
-              po_status: 'matched',
+              po_status: p3Mismatch ? 'qty_mismatch' : 'matched',
+              po_qty_erp: p3Mismatch ? pool[hitIdx].qty : null,
               po_start_date: pool[hitIdx].start_date,
               po_extra: pool[hitIdx].extra,
               delivery_date: delivDateStr || sDate,
