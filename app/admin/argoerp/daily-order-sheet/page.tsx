@@ -52,6 +52,7 @@ export interface SheetRow extends SourceRow {
   po_sub_no?: string | null
   po_status?: 'matched' | 'no_match' | 'no_po' | 'qty_mismatch' | null
   po_qty_erp?: number | null  // ERP 採購單數量（僅 qty_mismatch 時有值，供人工判斷用）
+  po_confirmed?: boolean      // 使用者已人工確認採購單，同步時不覆蓋
   // 序號比對結果（對應 erp_so_lines）
   match_status?: MatchStatus | null
   match_line_no?: string | null
@@ -832,7 +833,8 @@ export default function DailyOrderSheetPage() {
     }
     return rows.map(row => {
       if (row.factory !== factory) return row
-      if (row.po_status === 'no_po') return row  // 使用者已標記無須採購，保留
+      if (row.po_status === 'no_po') return row       // 使用者已標記無須採購，保留
+      if (row.po_confirmed && row.po_number) return row // 使用者已人工確認採購單，保留
       if (!row.item_code) return { ...row, po_number: null, po_sub_no: null, po_status: 'no_match' }
       const qty = parseFloat(String(row.quantity).replace(/,/g, '')) || 0
       const matchLineNo = (row.match_line_no ?? '').trim()
@@ -1526,8 +1528,8 @@ export default function DailyOrderSheetPage() {
   const handleConfirmQtyMismatch = useCallback(async (rowKey: string, confirm: boolean) => {
     const next: SheetRow[] = sheetRows.map(r => {
       if ((r.row_key || '') !== rowKey) return r
-      if (confirm) return { ...r, po_status: 'matched' as const, po_qty_erp: null }
-      return { ...r, po_status: 'no_match' as const, po_number: null, po_sub_no: null, po_qty_erp: null }
+      if (confirm) return { ...r, po_status: 'matched' as const, po_qty_erp: null, po_confirmed: true }
+      return { ...r, po_status: 'no_match' as const, po_number: null, po_sub_no: null, po_qty_erp: null, po_confirmed: false }
     })
     setSheetRows(next)
     setSaving(true)

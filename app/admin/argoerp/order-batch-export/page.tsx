@@ -1054,7 +1054,8 @@ export default function OrderBatchExportPage() {
         const matchPoRows = (rRows: DR[], pool: PoC[], fac: 'C' | 'O', sDate: string): DR[] => {
           return rRows.map(row => {
             if (row.factory !== fac) return row
-            if (row.po_status === 'matched') return row
+            if (row.po_status === 'no_po') return row
+            if (row.po_confirmed && row.po_number) return row  // 使用者已人工確認採購單，保留
             const itemCode = row.item_code as string
             const qty = parseFloat(String(row.quantity ?? '').replace(/,/g, '')) || 0
             const matchLineNo = String(row.match_line_no ?? '').trim()
