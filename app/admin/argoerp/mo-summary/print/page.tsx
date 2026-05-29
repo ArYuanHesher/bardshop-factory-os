@@ -320,17 +320,14 @@ function PoCard({
           <SectionTitle color="#222">採購資訊</SectionTitle>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <tbody>
-              {([
-                ['來源訂單', mo.source_order],
-                ['項號',     lineNo ?? null],
-                ['採購貨號', mo.product_code],
-                ['採購數量', mo.planned_qty ?? null],
-              ] as [string, string | null | undefined][]).map(([label, val]) => (
-                <tr key={label} style={{ height: '38px' }}>
-                  <td style={labelTd}>{label}</td>
-                  <td style={valueTd}>{val || '—'}</td>
-                </tr>
-              ))}
+              <tr style={{ height: '76px' }}>
+                <td style={{ ...labelTd, verticalAlign: 'middle' }}>來源訂單</td>
+                <td style={{ ...valueTd, fontSize: '24px', fontWeight: 600, verticalAlign: 'middle' }}>{mo.source_order || '—'}</td>
+              </tr>
+              <tr style={{ height: '76px' }}>
+                <td style={{ ...labelTd, verticalAlign: 'middle' }}>採購數量</td>
+                <td style={{ ...valueTd, fontSize: '24px', fontWeight: 600, verticalAlign: 'middle' }}>{mo.planned_qty || '—'}</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -362,11 +359,14 @@ function PoCard({
         </div>
       </div>
 
-      {/* ── 採購備註（品名規格 + SO 備註/包裝）── */}
+      {/* ── 採購備註內容（無標題，直接接在採購資訊/交期資訊下方）── */}
       <div className="mo-section" style={{ marginBottom: '10px' }}>
-        <SectionTitle color="#222">採購備註</SectionTitle>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <tbody>
+            <tr>
+              <td style={labelTd}>採購貨號</td>
+              <td style={{ ...valueTd, fontSize: '13px' }}>{mo.product_code || '—'}</td>
+            </tr>
             <tr>
               <td style={{ ...labelTd, whiteSpace: 'normal' }}>品名規格</td>
               <td style={{ ...valueTd, fontSize: '13px' }}>{mo.mo_note || '—'}</td>
