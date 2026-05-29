@@ -260,6 +260,7 @@ function PoCard({
         boxSizing: 'border-box', boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
         fontFamily: 'Arial, "Microsoft JhengHei", "PingFang TC", sans-serif',
         color: '#111',
+        display: 'flex', flexDirection: 'column', minHeight: 'calc(297mm - 16mm)',
       }}
     >
       {/* ── 頁首（採購單號 ｜ 採購單標題 ｜ 供應廠別）── */}
@@ -462,16 +463,8 @@ function PoCard({
         )}
       </div>
 
-      {/* ── 備註欄 ── */}
-      <div style={{ marginBottom: '10px' }}>
-        <SectionTitle color="#222">備註欄</SectionTitle>
-        <div style={{ border: '1px solid #ccc', padding: '4px 8px', minHeight: '56px' }}>
-          &nbsp;
-        </div>
-      </div>
-
       {/* ── 作業確認 ── */}
-      <div className="mo-card-footer">
+      <div className="mo-card-footer" style={{ marginTop: 'auto' }}>
         <SectionTitle color="#222">作業確認</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', border: '1px solid #bbb' }}>
           {['倉管收料', '品檢驗收', '入庫作業', '銷單作業'].map((role, ri) => (
@@ -624,7 +617,9 @@ function MoPrintContent() {
             page-break-after: always;
             break-after: page;
             break-inside: auto;
-            min-height: 0 !important;
+            min-height: calc(297mm - 16mm) !important;
+            display: flex !important;
+            flex-direction: column !important;
           }
           .mo-card:last-child {
             page-break-after: auto;
@@ -635,8 +630,9 @@ function MoPrintContent() {
             break-inside: avoid;
             page-break-inside: avoid;
           }
-          /* 作業確認區塊不被分頁切開 */
+          /* 作業確認永遠底置 */
           .mo-card-footer {
+            margin-top: auto !important;
             break-inside: avoid;
             page-break-inside: avoid;
             break-before: avoid;
@@ -723,6 +719,7 @@ function MoPrintContent() {
                 boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
                 fontFamily: 'Arial, "Microsoft JhengHei", "PingFang TC", sans-serif',
                 color: '#111',
+                display: 'flex', flexDirection: 'column', minHeight: 'calc(297mm - 16mm)',
               }}
             >
               {/* ── 頁首（3欄：製令號+急打樣 ｜ 置中標題 ｜ 廠別+日期）── */}
