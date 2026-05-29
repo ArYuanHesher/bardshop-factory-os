@@ -893,7 +893,7 @@ export default function DailyOrderSheetPage() {
             .from('erp_pj_sync')
             .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
             .eq('doc_type', '採購單號')
-            .eq('status', 'OPEN')
+            .in('status', ['OPEN', 'UNSIGNED'])
             .eq('customer_vendor', 'C01510')
             .in('item_code', itemCodes)
             .order('doc_no', { ascending: false })
@@ -916,7 +916,7 @@ export default function DailyOrderSheetPage() {
             .from('erp_pj_sync')
             .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
             .eq('doc_type', '採購單號')
-            .eq('status', 'OPEN')
+            .in('status', ['OPEN', 'UNSIGNED'])
             .neq('customer_vendor', 'C01510')
             .in('item_code', itemCodesO)
             .order('doc_no', { ascending: false })
@@ -1197,7 +1197,7 @@ export default function DailyOrderSheetPage() {
               .from('erp_pj_sync')
               .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
               .eq('doc_type', '採購單號')
-              .eq('status', 'OPEN')
+              .in('status', ['OPEN', 'UNSIGNED'])
               .eq('customer_vendor', 'C01510')
               .in('item_code', itemCodes)
               .order('doc_no', { ascending: false })
@@ -1221,7 +1221,7 @@ export default function DailyOrderSheetPage() {
               .from('erp_pj_sync')
               .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
               .eq('doc_type', '採購單號')
-              .eq('status', 'OPEN')
+              .in('status', ['OPEN', 'UNSIGNED'])
               .neq('customer_vendor', 'C01510')
               .in('item_code', itemCodesO)
               .order('doc_no', { ascending: false })
@@ -1377,7 +1377,7 @@ export default function DailyOrderSheetPage() {
         .from('erp_pj_sync')
         .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
         .eq('doc_type', '採購單號')
-        .eq('status', 'OPEN')
+        .in('status', ['OPEN', 'UNSIGNED'])
         .eq('customer_vendor', 'C01510')
         .order('doc_no', { ascending: false })
       if (poErr) throw poErr
@@ -1393,7 +1393,7 @@ export default function DailyOrderSheetPage() {
         .from('erp_pj_sync')
         .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
         .eq('doc_type', '採購單號')
-        .eq('status', 'OPEN')
+        .in('status', ['OPEN', 'UNSIGNED'])
         .neq('customer_vendor', 'C01510')
         .order('doc_no', { ascending: false })
       if (poErrO) throw poErrO
@@ -1874,7 +1874,7 @@ export default function DailyOrderSheetPage() {
                 {(['ALL', 'T', 'C', 'O'] as const).map(f => {
                   const count = f === 'ALL' ? sheetRows.length : sheetRows.filter(r => r.factory === f).length
                   if (f !== 'ALL' && count === 0) return null
-                  const label = f === 'ALL' ? '全部' : f === 'T' ? '美日廠' : f === 'C' ? '常平廠' : '委外'
+                  const label = f === 'ALL' ? '全部' : f === 'T' ? '四川廠' : f === 'C' ? '常平廠' : '委外'
                   const colors = f === 'ALL'
                     ? 'bg-slate-700 text-slate-200 border-slate-600'
                     : f === 'T' ? 'bg-cyan-900/60 text-cyan-200 border-cyan-700/60'

@@ -20,6 +20,7 @@ interface SoLine {
   description: string | null
   packing: string | null
   remark2: string | null
+  hold_status: string | null
 }
 
 // ─── 輔助 ─────────────────────────────────────────────
@@ -160,7 +161,7 @@ export default function SoQueryPage() {
 
     const { data, error } = await supabase
       .from('erp_so_lines')
-      .select('id,project_id,begin_date,sales_name,partner_name,tpn_part_no,line_no,mbp_part,duedate,order_qty_oru,unit_of_measure_oru,description,packing,remark2')
+      .select('id,project_id,begin_date,sales_name,partner_name,tpn_part_no,line_no,mbp_part,duedate,order_qty_oru,unit_of_measure_oru,description,packing,remark2,hold_status')
       .in('project_id', ids)
       .order('project_id', { ascending: true })
       .order('line_no',    { ascending: true })
@@ -336,7 +337,16 @@ export default function SoQueryPage() {
                     className="accent-cyan-500 cursor-pointer"
                   />
                 </td>
-                <td className="px-3 py-2 font-mono text-cyan-300 whitespace-nowrap">{r.project_id}</td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                  <span className="font-mono text-cyan-300">{r.project_id}</span>
+                  {r.hold_status && (
+                    <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                      r.hold_status === 'OPEN' ? 'bg-emerald-900/60 text-emerald-400 border border-emerald-700/50' :
+                      r.hold_status === 'UNSIGNED' ? 'bg-amber-900/60 text-amber-400 border border-amber-700/50' :
+                      'bg-slate-800 text-slate-400 border border-slate-600'
+                    }`}>{r.hold_status}</span>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-slate-500">{r.line_no}</td>
                 <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{fmtDate(r.begin_date)}</td>
                 <td className={`px-3 py-2 whitespace-nowrap font-medium ${normalizeDate(r.duedate) && (normalizeDate(r.duedate) ?? '') < today() ? 'text-red-400' : 'text-emerald-400'}`}>

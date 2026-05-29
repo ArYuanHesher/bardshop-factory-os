@@ -616,6 +616,10 @@ export default function OrderBatchExportPage() {
   const [manualMoImporting, setManualMoImporting] = useState(false)
   const [manualMoMsg, setManualMoMsg] = useState('')
 
+  // ---- 匯入後自動同步進度 Modal ----
+  type PostSyncStep = { label: string; status: 'pending' | 'running' | 'done' | 'error' }
+  const [postSyncModal, setPostSyncModal] = useState<{ show: boolean; steps: PostSyncStep[]; error: string | null } | null>(null)
+
   // ---- ERP 销售訂單 比對（品項編碼 + 數量 對源單號 + 行號）----
   const buildSoMatches = useCallback(async (rows: SourceRow[]) => {
     if (rows.length === 0) { setSoMatchResults([]); return }
@@ -859,6 +863,257 @@ export default function OrderBatchExportPage() {
       setTimeout(() => setSaveMsg(''), 5000)
     }
   }, [sourceRows])
+
+  // ---- 匯入成功後自動執行：ERP 同步 → 當日出單表一鍵全同步 ----
+  const runPostImportSync = useCallback(async (factory: 'T' | 'C' | 'O', sheetDate: string) => {
+    const erpSyncAction = factory === 'T' ? 'sync_mo' : 'sync_po'
+    const erpSyncLabel = factory === 'T' ? '同步製令' : '同步採購單'
+    const steps: PostSyncStep[] = [
+      { label: `ERP 同步：${erpSyncLabel}`, status: 'running' },
+      { label: `出單表序號比對（${sheetDate}）`, status: 'pending' },
+      { label: '同步製令 / 批備料狀態', status: 'pending' },
+      { label: '比對採購單', status: 'pending' },
+      { label: '儲存出單表', status: 'pending' },
+    ]
+    const setStep = (idx: number, status: PostSyncStep['status']) =>
+      setPostSyncModal(prev => prev ? {
+        ...prev,
+        steps: prev.steps.map((s, i) => i === idx ? { ...s, status } : s),
+      } : null)
+
+    setPostSyncModal({ show: true, steps, error: null })
+    try {
+      // ── Step 0: ERP 同步 ────────────────────────────────────────
+      const syncRes = await fetch('/api/argoerp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: erpSyncAction }),
+      })
+      const syncJson = await syncRes.json()
+      if (!syncRes.ok || syncJson.status !== 'ok') {
+        throw new Error(`ERP 同步失敗：${String(syncJson.error ?? `HTTP ${syncRes.status}`)}`)
+      }
+      setStep(0, 'done')
+
+      // ── 載入當日出單表 ──────────────────────────────────────────
+      const sheetRes = await fetch(`/api/argoerp/daily-order-sheet?date=${sheetDate}`)
+      const sheetJson = await sheetRes.json()
+      if (!sheetJson.success || !sheetJson.sheet) {
+        for (let i = 1; i < steps.length; i++) setStep(i, 'done')
+        return
+      }
+      type DR = Record<string, unknown>
+      let rows: DR[] = Array.isArray(sheetJson.sheet.rows) ? (sheetJson.sheet.rows as DR[]) : []
+      const rawText: string = (sheetJson.sheet.raw_text as string) ?? ''
+      if (rows.length === 0) {
+        for (let i = 1; i < steps.length; i++) setStep(i, 'done')
+        return
+      }
+
+      // ── Step 1: 序號比對 ─────────────────────────────────────────
+      setStep(1, 'running')
+      const orderNumbers = [...new Set(rows.map(r => r.order_number as string).filter(Boolean))]
+      const { data: soLines } = await supabase
+        .from('erp_so_lines')
+        .select('project_id, line_no, mbp_part, order_qty_oru, pdl_seq')
+        .in('project_id', orderNumbers.length > 0 ? orderNumbers : ['__none__'])
+      const soProjectIds = new Set((soLines ?? []).map((l: { project_id: string }) => l.project_id))
+      const candidateMap = new Map<string, Array<{ line_no: string; pdl_seq: number | null }>>()
+      for (const line of (soLines ?? [])) {
+        const qty = Number((line as { order_qty_oru: unknown }).order_qty_oru ?? 0)
+        const key = `${(line as { project_id: string }).project_id}|${(line as { mbp_part: unknown }).mbp_part ?? ''}|${qty}`
+        if (!candidateMap.has(key)) candidateMap.set(key, [])
+        candidateMap.get(key)!.push({ line_no: String((line as { line_no: unknown }).line_no ?? ''), pdl_seq: (line as { pdl_seq: unknown }).pdl_seq != null ? Number((line as { pdl_seq: unknown }).pdl_seq) : null })
+      }
+      for (const arr of candidateMap.values()) arr.sort((a, b) => (Number(a.line_no) || 0) - (Number(b.line_no) || 0))
+      const usageCounter = new Map<string, number>()
+      rows = rows.map(src => {
+        const orderNo = src.order_number as string
+        const itemCode = src.item_code as string
+        if (!orderNo || !soProjectIds.has(orderNo))
+          return { ...src, match_status: 'no_order', match_line_no: null, match_pdl_seq: null, match_reason: '無對應來源單號' }
+        const qty = parseFloat(String(src.quantity ?? '').replace(/,/g, '')) || 0
+        const key = `${orderNo}|${itemCode}|${qty}`
+        const candidates = candidateMap.get(key) ?? []
+        if (candidates.length === 0)
+          return { ...src, match_status: 'no_qty_match', match_line_no: null, match_pdl_seq: null, match_reason: '有來源單號但無對應數量' }
+        const used = usageCounter.get(key) ?? 0
+        const candidate = candidates[Math.min(used, candidates.length - 1)]
+        usageCounter.set(key, used + 1)
+        return { ...src, match_status: 'matched', match_line_no: candidate.line_no, match_pdl_seq: candidate.pdl_seq, match_reason: '' }
+      })
+      setStep(1, 'done')
+
+      // ── Step 2: MO / 批備料狀態同步 ─────────────────────────────
+      setStep(2, 'running')
+      const noNone = orderNumbers.length > 0 ? orderNumbers : ['__none__']
+      const [{ data: moLogs, error: moErr }, { data: erp_mo, error: erpErr }] = await Promise.all([
+        supabase.from('argoerp_mo_upload_log')
+          .select('mo_number, source_order, product_code, planned_qty, uploaded_at')
+          .in('source_order', noNone)
+          .order('uploaded_at', { ascending: false }),
+        supabase.from('erp_mo_lines')
+          .select('project_id, source_order, mbp_part, order_qty, line_no')
+          .in('source_order', noNone),
+      ])
+      if (moErr) throw moErr
+      if (erpErr) throw erpErr
+      const rawLogMoNumbers = [...new Set(
+        (moLogs ?? []).map((l: { mo_number: string }) => l.mo_number).filter((n): n is string => !!n?.startsWith('MO'))
+      )]
+      let activeMoNumbers = new Set(rawLogMoNumbers)
+      if (rawLogMoNumbers.length > 0) {
+        const { data: summaryRows } = await supabase.from('argoerp_mo_summary').select('mo_number').in('mo_number', rawLogMoNumbers)
+        activeMoNumbers = new Set((summaryRows ?? []).map((r: { mo_number: string }) => r.mo_number))
+      }
+      const moMap = new Map<string, { mo_number: string }>()
+      for (const log of (moLogs ?? [])) {
+        const l = log as { mo_number: string; source_order: string; product_code: string; planned_qty: string }
+        if (!l.mo_number?.startsWith('MO') || !activeMoNumbers.has(l.mo_number)) continue
+        const qty = String(l.planned_qty ?? '').trim()
+        if (!moMap.has(`${l.source_order}|${l.product_code}|${qty}`)) moMap.set(`${l.source_order}|${l.product_code}|${qty}`, { mo_number: l.mo_number })
+        if (!moMap.has(`${l.source_order}|${l.product_code}`)) moMap.set(`${l.source_order}|${l.product_code}`, { mo_number: l.mo_number })
+      }
+      const erpMoMap = new Map<string, string>()
+      const erpMoBaseMap = new Map<string, string[]>()
+      const erpMoBySourceOrder = new Map<string, Set<string>>()
+      for (const mo of (erp_mo ?? [])) {
+        const m = mo as { project_id: string; source_order: string; mbp_part: string; line_no: unknown }
+        if (!m.source_order || !m.mbp_part || !m.project_id?.startsWith('MO')) continue
+        if (m.line_no != null) {
+          const lineNoStr = String(parseInt(String(m.line_no), 10)).padStart(2, '0')
+          const seqKey = `${m.source_order}|${m.mbp_part}|${lineNoStr}`
+          if (!erpMoMap.has(seqKey)) erpMoMap.set(seqKey, m.project_id)
+        }
+        const baseKey = `${m.source_order}|${m.mbp_part}`
+        const arr = erpMoBaseMap.get(baseKey) ?? []
+        if (!arr.includes(m.project_id)) erpMoBaseMap.set(baseKey, [...arr, m.project_id])
+        const moSet = erpMoBySourceOrder.get(m.source_order) ?? new Set<string>()
+        moSet.add(m.project_id); erpMoBySourceOrder.set(m.source_order, moSet)
+      }
+      rows = rows.map(r => {
+        const matchSeq = r.match_line_no != null ? String(parseInt(r.match_line_no as string, 10)).padStart(2, '0') : null
+        const orderNo = r.order_number as string
+        const itemCode = r.item_code as string
+        const moNo = r.mo_number as string | undefined
+        if (moNo?.startsWith('MO')) {
+          const erpMosForOrder = erpMoBySourceOrder.get(orderNo)
+          if (erpMosForOrder && !erpMosForOrder.has(moNo))
+            return { ...r, mo_number: undefined, mo_status: null, material_prep_status: null }
+          if (!matchSeq) return r
+          const erpConfirm = erpMoMap.get(`${orderNo}|${itemCode}|${matchSeq}`)
+          if (!erpConfirm || erpConfirm === moNo) return r
+          return { ...r, mo_number: erpConfirm, mo_status: '已匯入製令' }
+        }
+        if (matchSeq) {
+          const erpHit = erpMoMap.get(`${orderNo}|${itemCode}|${matchSeq}`)
+          if (erpHit) return { ...r, mo_number: erpHit, mo_status: '已匯入製令' }
+        }
+        const qty = String(r.quantity ?? '').trim()
+        const logHit = moMap.get(`${orderNo}|${itemCode}|${qty}`) ?? moMap.get(`${orderNo}|${itemCode}`)
+        if (logHit) {
+          const erpMosForOrder = erpMoBySourceOrder.get(orderNo)
+          const stillInArgo = !erpMosForOrder || erpMosForOrder.has(logHit.mo_number)
+          if (stillInArgo && (!matchSeq || logHit.mo_number.slice(-2) === matchSeq))
+            return { ...r, mo_number: logHit.mo_number, mo_status: '已匯入製令' }
+        }
+        const baseHits = erpMoBaseMap.get(`${orderNo}|${itemCode}`) ?? []
+        if (baseHits.length === 1) return { ...r, mo_number: baseHits[0], mo_status: '已匯入製令' }
+        if (moNo && !moNo.startsWith('MO')) return { ...r, mo_number: undefined, mo_status: null, material_prep_status: null }
+        return r
+      })
+      const moNumbers = [...new Set(rows.map(r => r.mo_number as string).filter((v): v is string => !!v))]
+      if (moNumbers.length > 0) {
+        const [{ data: prepLogs, error: prepErr }, { data: erpPrepLines }] = await Promise.all([
+          supabase.from('argoerp_material_prep_log').select('mo_number, status, logged_at').in('mo_number', moNumbers).order('logged_at', { ascending: false }),
+          supabase.from('erp_material_prep_lines').select('mo_number').in('mo_number', moNumbers),
+        ])
+        if (prepErr) throw prepErr
+        const prepMap = new Map<string, string>()
+        for (const log of (prepLogs ?? [])) {
+          const l = log as { mo_number: string; status: string }
+          if (!prepMap.has(l.mo_number)) prepMap.set(l.mo_number, l.status)
+        }
+        const erpPrepSet = new Set<string>((erpPrepLines ?? []).map((l: { mo_number: string }) => l.mo_number).filter(Boolean))
+        rows = rows.map(r => {
+          const moNo2 = r.mo_number as string | undefined
+          if (!moNo2) return r
+          if (erpPrepSet.has(moNo2)) return { ...r, material_prep_status: '已批備料' }
+          if (prepMap.has(moNo2)) return { ...r, material_prep_status: prepMap.get(moNo2) }
+          return r
+        })
+      }
+      setStep(2, 'done')
+
+      // ── Step 3: 採購單比對 ────────────────────────────────────────
+      setStep(3, 'running')
+      const hasCRows = rows.some(r => r.factory === 'C')
+      const hasORows = rows.some(r => r.factory === 'O')
+      if (hasCRows || hasORows) {
+        type PoC = { doc_no: string; sub_no: string; item_code: string | null; qty: number; status: string | null; start_date: string | null; extra: Record<string, unknown> | null; _used: boolean }
+        const matchPoRows = (rRows: DR[], pool: PoC[], fac: 'C' | 'O', sDate: string): DR[] => {
+          return rRows.map(row => {
+            if (row.factory !== fac) return row
+            if (row.po_status === 'matched') return row
+            const itemCode = row.item_code as string
+            const qty = parseFloat(String(row.quantity ?? '').replace(/,/g, '')) || 0
+            const hitIdx = pool.findIndex(c => !c._used && c.item_code === itemCode && c.qty === qty)
+            if (hitIdx === -1) return { ...row, po_status: 'no_match' }
+            const delivDateStr = String(row.delivery_date ?? sDate).replace(/\//g, '-')
+            pool[hitIdx]._used = true
+            return {
+              ...row,
+              po_number: pool[hitIdx].doc_no,
+              po_sub_no: pool[hitIdx].sub_no,
+              po_status: 'matched',
+              po_start_date: pool[hitIdx].start_date,
+              po_extra: pool[hitIdx].extra,
+              delivery_date: delivDateStr || sDate,
+            }
+          })
+        }
+        if (hasCRows) {
+          const itemCodes = [...new Set(rows.filter(r => r.factory === 'C').map(r => r.item_code as string).filter(Boolean))]
+          if (itemCodes.length > 0) {
+            const { data: poRows } = await supabase.from('erp_pj_sync')
+              .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
+              .eq('doc_type', '採購單號').in('status', ['OPEN', 'UNSIGNED']).eq('customer_vendor', 'C01510').in('item_code', itemCodes).order('doc_no', { ascending: false })
+            const pool: PoC[] = (poRows ?? []).map((r: Record<string, unknown>) => ({ doc_no: r.doc_no as string, sub_no: r.sub_no as string, item_code: r.item_code as string | null, qty: Number(r.qty ?? 0), status: r.status as string | null, start_date: (r.start_date as string | null) ?? null, extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false }))
+            rows = matchPoRows(rows, pool, 'C', sheetDate)
+          }
+        }
+        if (hasORows) {
+          const itemCodesO = [...new Set(rows.filter(r => r.factory === 'O').map(r => r.item_code as string).filter(Boolean))]
+          if (itemCodesO.length > 0) {
+            const { data: poRowsO } = await supabase.from('erp_pj_sync')
+              .select('doc_no, sub_no, item_code, qty, status, start_date, extra')
+              .eq('doc_type', '採購單號').in('status', ['OPEN', 'UNSIGNED']).neq('customer_vendor', 'C01510').in('item_code', itemCodesO).order('doc_no', { ascending: false })
+            const poolO: PoC[] = (poRowsO ?? []).map((r: Record<string, unknown>) => ({ doc_no: r.doc_no as string, sub_no: r.sub_no as string, item_code: r.item_code as string | null, qty: Number(r.qty ?? 0), status: r.status as string | null, start_date: (r.start_date as string | null) ?? null, extra: (r.extra ?? null) as Record<string, unknown> | null, _used: false }))
+            rows = matchPoRows(rows, poolO, 'O', sheetDate)
+          }
+        }
+      }
+      setStep(3, 'done')
+
+      // ── Step 4: 儲存 ─────────────────────────────────────────────
+      setStep(4, 'running')
+      const saveRes = await fetch('/api/argoerp/daily-order-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheet_date: sheetDate, raw_text: rawText, rows }),
+      })
+      const saveJson = await saveRes.json()
+      if (!saveRes.ok || !saveJson.success) throw new Error(saveJson.error || `HTTP ${saveRes.status}`)
+      setStep(4, 'done')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setPostSyncModal(prev => prev ? {
+        ...prev,
+        steps: prev.steps.map(s => s.status === 'running' ? { ...s, status: 'error' } : s),
+        error: msg,
+      } : null)
+    }
+  }, [supabase])
 
   // ---- 匯入 ERP 並儲存至總表 ----
   const handleImportToErp = useCallback(async (factory: 'T' | 'C' | 'O') => {
@@ -1106,7 +1361,10 @@ export default function OrderBatchExportPage() {
 
       const successMsg = `✅ ${factoryLabel(factory)} ${records.length} 筆已匯入 ERP ${targetLabel}並儲存至製令總表`
       setSaveMsg(successMsg)
-      alert(successMsg)
+
+      // ── 匯入成功後自動同步 ──
+      const today = new Date().toISOString().slice(0, 10)
+      void runPostImportSync(factory, today)
 
       setTimeout(() => setSaveMsg(''), 6000)
     } catch (error) {
@@ -1121,7 +1379,7 @@ export default function OrderBatchExportPage() {
     } finally {
       setImportingFactory(null)
     }
-  }, [sourceRows, soMatchResults])
+  }, [sourceRows, soMatchResults, runPostImportSync])
 
   // ---- 匯入前預覽：先跑 prefetch 取得最新 seq，再呈現將產生的製令單號讓使用者確認 ----
   const handleShowPreview = useCallback(async (factory: 'T' | 'C' | 'O') => {
@@ -1312,6 +1570,8 @@ export default function OrderBatchExportPage() {
       alert(successMsg)
       setManualMoMsg(`✅ 已建立 ${records[0]?.mo_number}`)
       setShowManualMoModal(false)
+      const today = new Date().toISOString().slice(0, 10)
+      void runPostImportSync(manualMoForm.factory, today)
       // 重置表單
       setManualMoForm({ order_number: '', line_no: '', item_code: '', item_name: '', quantity: '', delivery_date: '', factory: 'T', customer: '', note: '' })
       setManualMoErrors({})
@@ -1322,7 +1582,7 @@ export default function OrderBatchExportPage() {
     } finally {
       setManualMoImporting(false)
     }
-  }, [manualMoForm])
+  }, [manualMoForm, runPostImportSync])
 
   const handleCheckPoLinks = useCallback(async () => {
     setPoLinksLoading(true)
@@ -2234,6 +2494,74 @@ export default function OrderBatchExportPage() {
         </div>
       )}
       <SoOrderModal projectId={soModalId} onClose={() => setSoModalId(null)} />
+
+      {/* ── 匯入後自動同步進度 Modal（阻擋操作）── */}
+      {postSyncModal?.show && (
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="p-2 rounded-full bg-teal-900/50 text-teal-400">
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-white font-bold text-base">匯入後自動同步中</h3>
+                <p className="text-slate-400 text-xs">全部步驟完成前請勿關閉此視窗</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {postSyncModal.steps.map((step, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="w-6 h-6 flex items-center justify-center shrink-0">
+                    {step.status === 'done' && (
+                      <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                    )}
+                    {step.status === 'running' && (
+                      <svg className="w-5 h-5 text-cyan-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                    )}
+                    {step.status === 'error' && (
+                      <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    )}
+                    {step.status === 'pending' && (
+                      <div className="w-3 h-3 rounded-full border-2 border-slate-600 mx-auto" />
+                    )}
+                  </div>
+                  <span className={`text-sm ${
+                    step.status === 'done' ? 'text-emerald-400' :
+                    step.status === 'running' ? 'text-cyan-300 font-medium' :
+                    step.status === 'error' ? 'text-red-400' :
+                    'text-slate-500'
+                  }`}>{step.label}</span>
+                </div>
+              ))}
+            </div>
+
+            {postSyncModal.error && (
+              <div className="mt-4 p-3 bg-red-950/40 border border-red-700/50 rounded-lg text-red-300 text-xs">
+                <p className="font-semibold mb-1">錯誤</p>
+                <p>{postSyncModal.error}</p>
+              </div>
+            )}
+
+            {(postSyncModal.steps.every(s => s.status === 'done') || !!postSyncModal.error) && (
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => setPostSyncModal(null)}
+                  className="px-5 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium transition-colors"
+                >
+                  關閉
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -21,6 +21,7 @@ interface SoLine {
   remark2: string | null
   tpn_part_no: string | null
   grade: string | null
+  hold_status: string | null
   synced_at: string
 }
 
@@ -258,7 +259,16 @@ export default function SoSyncPage() {
               >
                 {/* 訂單編號 / 開立日期 */}
                 <td className="px-3 py-2">
-                  <div className="font-mono text-teal-400 text-sm">{row.project_id}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-teal-400 text-sm">{row.project_id}</span>
+                    {row.hold_status && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                        row.hold_status === 'OPEN' ? 'bg-emerald-900/60 text-emerald-400 border border-emerald-700/50' :
+                        row.hold_status === 'UNSIGNED' ? 'bg-amber-900/60 text-amber-400 border border-amber-700/50' :
+                        'bg-gray-800 text-gray-400 border border-gray-600'
+                      }`}>{row.hold_status}</span>
+                    )}
+                  </div>
                   <div className="text-xs text-gray-500 mt-0.5">{row.begin_date ?? '—'}</div>
                 </td>
 

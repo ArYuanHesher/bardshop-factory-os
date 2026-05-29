@@ -612,6 +612,7 @@ export async function POST(request: NextRequest) {
         SHOWNULLCOLUMN: 'N',
         CUSTOMCOLUMN: 'PROJECT_ID,BEGIN_DATE,HOLD_STATUS,TPN_PARTNER_ID,SALES_NAME,PARTNER_NAME',
         PJT_TYPE: "= 'SO'",
+        HOLD_STATUS: "IN ('OPEN','UNSIGNED')",
       })
 
       const soHeaderRes = await fetch(`${API_BASE}/S_QUERY`, {
