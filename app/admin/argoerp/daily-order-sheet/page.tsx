@@ -2231,16 +2231,14 @@ export default function DailyOrderSheetPage() {
                                   onChange={async e => {
                                     const machine = e.target.value
                                     await setMoMachine(row.mo_number!, machine)
-                                    // 同步回寫 sheetRows 並立即儲存（與 row-level 機台行為一致）
-                                    setSheetRows(prev => {
-                                      const next = prev.map(r => r.mo_number === row.mo_number ? { ...r, machine } : r)
-                                      fetch('/api/argoerp/daily-order-sheet', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ sheet_date: selectedDate, raw_text: currentRawText, rows: next }),
-                                      }).catch(() => {})
-                                      return next
-                                    })
+                                    // 同步更新本地 sheetRows 狀態
+                                    setSheetRows(prev => prev.map(r => r.mo_number === row.mo_number ? { ...r, machine } : r))
+                                    // 用 PATCH 只更新機台欄位，避免全量覆蓋其他欄位
+                                    await fetch('/api/argoerp/daily-order-sheet', {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ sheet_date: selectedDate, updates: [{ row_key: row.row_key, machine }] }),
+                                    }).catch(() => {})
                                   }}
                                   className="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-cyan-500 min-w-[90px]"
                                 >
@@ -2253,13 +2251,12 @@ export default function DailyOrderSheetPage() {
                                   onChange={async e => {
                                     const machine = e.target.value
                                     setRowMachines(prev => ({ ...prev, [row.row_key]: machine }))
-                                    // 回寫 sheetRows 並立即儲存
-                                    const next = sheetRows.map(r => r.row_key === row.row_key ? { ...r, machine } : r)
-                                    setSheetRows(next)
+                                    setSheetRows(prev => prev.map(r => r.row_key === row.row_key ? { ...r, machine } : r))
+                                    // 用 PATCH 只更新機台欄位，避免全量覆蓋其他欄位
                                     await fetch('/api/argoerp/daily-order-sheet', {
-                                      method: 'POST',
+                                      method: 'PATCH',
                                       headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ sheet_date: selectedDate, raw_text: currentRawText, rows: next }),
+                                      body: JSON.stringify({ sheet_date: selectedDate, updates: [{ row_key: row.row_key, machine }] }),
                                     }).catch(() => {})
                                   }}
                                   className="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-cyan-500 min-w-[90px]"

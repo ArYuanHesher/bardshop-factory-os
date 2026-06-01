@@ -165,6 +165,7 @@ export async function PATCH(request: NextRequest) {
       if (upd.argo_slip_no !== undefined) merged.argo_slip_no = upd.argo_slip_no
       if (upd.po_number !== undefined) merged.po_number = upd.po_number
       if (upd.po_status !== undefined) merged.po_status = upd.po_status
+      if ((upd as Record<string, unknown>).machine !== undefined) merged.machine = (upd as Record<string, unknown>).machine
       return merged
     })
 
