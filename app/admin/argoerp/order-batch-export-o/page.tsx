@@ -617,9 +617,6 @@ export default function PoBatchExportOPage() {
                 <select value={header.hold_status} onChange={e => setH('hold_status', e.target.value as PoHeader['hold_status'])}
                   className="w-full px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-white text-sm focus:outline-none">
                   <option value="UNSIGNED">UNSIGNED</option>
-                  <option value="OPEN">OPEN</option>
-                  <option value="HOLD">HOLD</option>
-                  <option value="CLOSE">CLOSE</option>
                 </select>
               </div>
               <div>
