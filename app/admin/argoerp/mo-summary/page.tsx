@@ -215,6 +215,8 @@ export default function MoSummaryPage() {
   // 篩選
   const filtered = records
     .filter(r => {
+      // 常平(C)、委外(O) 採購單只顯示 UNSIGNED 狀態
+      if ((r.factory === 'C' || r.factory === 'O') && r.mo_status !== 'UNSIGNED') return false
       if (printFilter === 'printed')  return (moPrintRecords[r.mo_number]?.length ?? 0) > 0
       if (printFilter === 'unprinted') return (moPrintRecords[r.mo_number]?.length ?? 0) === 0
       return true
