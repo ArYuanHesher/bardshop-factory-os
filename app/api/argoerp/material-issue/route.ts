@@ -6,6 +6,21 @@ interface IssueBody {
   line_no?: number
 }
 
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const slipNos = (searchParams.get('slip_nos') ?? '').split(',').map(s => s.trim()).filter(Boolean)
+  if (slipNos.length === 0) return NextResponse.json({ issued: [] })
+
+  const supabase = getSupabaseAdminClient()
+  const { data, error } = await supabase
+    .from('erp_material_issue_status')
+    .select('slip_no, line_no')
+    .in('slip_no', slipNos)
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ issued: data ?? [] })
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json() as IssueBody
   const { slip_no, line_no } = body

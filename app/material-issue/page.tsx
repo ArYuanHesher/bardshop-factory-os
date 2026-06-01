@@ -248,15 +248,13 @@ export default function MaterialIssuePage() {
 
       const prepLines = (prepLinesResult.data ?? []) as PrepLine[]
 
-      // 3.5. Load issued status
+      // 3.5. Load issued status (via API to bypass RLS on erp_material_issue_status)
       const slipNos = [...new Set(prepLines.map(l => l.slip_no).filter(Boolean))] as string[]
       const newIssuedSet = new Set<string>()
       if (slipNos.length > 0) {
-        const { data: issueData } = await supabase
-          .from('erp_material_issue_status')
-          .select('slip_no, line_no')
-          .in('slip_no', slipNos)
-        for (const r of (issueData ?? []) as Array<{ slip_no: string; line_no: number }>) {
+        const issueRes = await fetch(`/api/argoerp/material-issue?slip_nos=${slipNos.join(',')}`)
+        const issueJson = await issueRes.json() as { issued?: Array<{ slip_no: string; line_no: number }> }
+        for (const r of (issueJson.issued ?? [])) {
           newIssuedSet.add(`${r.slip_no}:${r.line_no}`)
         }
       }
