@@ -572,7 +572,13 @@ export default function MaterialPrepPage() {
             .filter(r => r.mo_number && (r.material_prep_status === '已備料' || r.material_prep_status === '無需備料' || r.material_prep_status === '已批備料'))
             .map(r => r.mo_number!)
         )
-        const moNumbersForBom = moNumbers.filter(mo => !moToSlipFromPrepLines[mo] && !sheetDoneMos.has(mo))
+        // 同時排除 summaryMap 已標記為已備料/無需備料 的製令
+        const summaryDoneMos = new Set(
+          Object.entries(summaryMap)
+            .filter(([, s]) => s === '已備料' || s === '無需備料')
+            .map(([mo]) => mo)
+        )
+        const moNumbersForBom = moNumbers.filter(mo => !moToSlipFromPrepLines[mo] && !sheetDoneMos.has(mo) && !summaryDoneMos.has(mo))
         await loadMoRecords(moNumbersForBom, loadedRows)
       } else {
         setMoSummaryMap({})
