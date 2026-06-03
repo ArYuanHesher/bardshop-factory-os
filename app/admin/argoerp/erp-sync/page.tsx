@@ -2463,3 +2463,5 @@ export default function ErpSyncPage() {
     </div>
   )
 }
+
+export { ErpSyncPage }

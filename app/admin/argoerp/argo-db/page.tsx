@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../../../lib/supabaseClient'
+import { ErpSyncPage } from '../erp-sync/page'
 
-export default function ArgoDBGatePage() {
+export default function ArgoDBPage() {
   const router = useRouter()
-  const [checking, setChecking] = useState(true)
-  const [denied, setDenied] = useState(false)
+  const [status, setStatus] = useState<'checking' | 'allowed' | 'denied'>('checking')
 
   useEffect(() => {
     const check = async () => {
@@ -24,42 +24,25 @@ export default function ArgoDBGatePage() {
         let memberData: { is_admin: boolean | null; permissions: string[] | null } | null = null
 
         if (authUserId) {
-          const { data } = await supabase
-            .from('members')
-            .select('is_admin, permissions')
-            .eq('auth_user_id', authUserId)
-            .maybeSingle()
+          const { data } = await supabase.from('members').select('is_admin, permissions').eq('auth_user_id', authUserId).maybeSingle()
           memberData = data
         }
-
         if (!memberData && email) {
-          const { data } = await supabase
-            .from('members')
-            .select('is_admin, permissions')
-            .eq('email', email)
-            .maybeSingle()
+          const { data } = await supabase.from('members').select('is_admin, permissions').eq('email', email).maybeSingle()
           memberData = data
         }
 
         const isAdmin = Boolean(memberData?.is_admin)
         const permissions: string[] = Array.isArray(memberData?.permissions) ? memberData!.permissions! : []
-        const hasAccess = isAdmin || permissions.includes('argo_db')
-
-        if (hasAccess) {
-          router.replace('/admin/argoerp/erp-sync')
-        } else {
-          setDenied(true)
-          setChecking(false)
-        }
+        setStatus(isAdmin || permissions.includes('argo_db') ? 'allowed' : 'denied')
       } catch {
-        setDenied(true)
-        setChecking(false)
+        setStatus('denied')
       }
     }
     void check()
   }, [router])
 
-  if (checking) {
+  if (status === 'checking') {
     return (
       <div className="min-h-screen bg-[#050b14] flex items-center justify-center">
         <div className="text-cyan-400 font-mono text-sm animate-pulse">驗證權限中...</div>
@@ -67,7 +50,7 @@ export default function ArgoDBGatePage() {
     )
   }
 
-  if (denied) {
+  if (status === 'denied') {
     return (
       <div className="min-h-screen bg-[#050b14] flex items-center justify-center font-sans">
         <div className="bg-slate-900 border border-red-800 rounded-2xl p-10 max-w-md w-full text-center shadow-2xl">
@@ -88,5 +71,5 @@ export default function ArgoDBGatePage() {
     )
   }
 
-  return null
+  return <ErpSyncPage />
 }
