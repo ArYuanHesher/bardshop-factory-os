@@ -765,12 +765,12 @@ export default function HomePage() {
           </Link>
 
           {/* ARGO資料庫 (Orange-Red) */}
-          <Link href="/admin/argoerp/argo-db"
+          <Link href="/argo-db"
             onClick={guardFeatureAccess('argo_db', 'ARGO資料庫')}
             onMouseEnter={() => setIsHovered('none')}
             onMouseLeave={() => setIsHovered('none')}
             className={`
-              group relative h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
+              group relative order-12 h-40 md:h-60 lg:h-64 rounded-2xl border border-slate-700 bg-slate-900/40 backdrop-blur-sm 
               flex flex-col items-center justify-center text-center p-3 md:p-6 transition-all duration-500 cursor-pointer
               hover:border-orange-500 hover:bg-slate-800/60 hover:shadow-[0_0_30px_rgba(249,115,22,0.15)]
               ${canArgoDB ? '' : 'opacity-50 grayscale'}
