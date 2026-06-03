@@ -75,6 +75,7 @@ export default function TeamPage() {
         { key: 'qa', label: '品保專區 (QA)' },
         { key: 'production_admin', label: '生產管理 (Production Admin)' },
         { key: 'system_settings', label: '系統設定 (System Settings)' },
+        { key: 'argo_db', label: 'ARGO資料庫 (ARGO Database)' },
       ]
     }
   ]
