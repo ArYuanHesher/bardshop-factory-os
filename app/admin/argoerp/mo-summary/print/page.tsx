@@ -436,7 +436,7 @@ function PoCard({
                   const luom = line.unit_of_measure_oru || line.unit_of_measure || ''
                   const td: React.CSSProperties = { border: '1px solid #e2e4e8', padding: '3px 5px', wordBreak: 'break-word', overflowWrap: 'break-word' }
                   return (
-                    <tr key={line.line_no} style={{ background: isThis ? '#fef3c7' : 'white', fontWeight: isThis ? 600 : 400 }}>
+                    <tr key={line.line_no} style={{ background: isThis ? '#f3f4f6' : 'white', fontWeight: isThis ? 600 : 400 }}>
                       <td style={{ ...td, textAlign: 'center', whiteSpace: 'nowrap' }}>{lno}{isThis ? ' ★' : ''}</td>
                       <td style={td}>
                         <div style={{ fontWeight: isThis ? 700 : 500 }}>{line.mbp_part || line.part || '—'}</div>
@@ -444,7 +444,7 @@ function PoCard({
                       </td>
                       <td style={td}>{lqty != null ? `${lqty} ${luom}`.trim() : '—'}</td>
                       <td style={td}>{line.packing || '—'}</td>
-                      <td style={{ ...td, textAlign: 'center', whiteSpace: 'nowrap', color: line.grade ? '#7c3aed' : '#9ca3af', fontWeight: line.grade ? 600 : 400 }}>{line.grade || '—'}</td>
+                      <td style={{ ...td, textAlign: 'center', whiteSpace: 'nowrap', color: line.grade ? '#000' : '#6b7280', fontWeight: line.grade ? 600 : 400 }}>{line.grade || '—'}</td>
                     </tr>
                   )
                 }) : (
