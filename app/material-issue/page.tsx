@@ -887,7 +887,8 @@ export default function MaterialIssuePage() {
       {/* Print styles */}
       <style jsx global>{`
         @media print {
-          html { filter: grayscale(100%); }
+          html { -webkit-filter: grayscale(100%) !important; filter: grayscale(100%) !important; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           body { background: white !important; color: black !important; }
           .no-print { display: none !important; }
           button, select, input[type="text"] { display: none !important; }

@@ -605,7 +605,8 @@ function MoPrintContent() {
         @media print {
           .mo-toolbar { display: none !important; }
           .no-print { display: none !important; }
-          html { filter: grayscale(100%); }
+          html { -webkit-filter: grayscale(100%) !important; filter: grayscale(100%) !important; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           html, body { background: white !important; color: black !important; }
           /* 隱藏 admin layout 的裝飾背景層 */
           body > * { background: white !important; }
