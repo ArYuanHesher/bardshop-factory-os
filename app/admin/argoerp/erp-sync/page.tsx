@@ -510,6 +510,8 @@ function SyncCard({ docKey }: SyncCardProps) {
   const [customerRecords, setCustomerRecords] = useState<CustomerRecord[]>([])
   const [materialPrepPage, setMaterialPrepPage] = useState(1)
   const [moStatusFilter, setMoStatusFilter] = useState<'OPEN' | 'HOLD' | 'CLOSE' | null>('OPEN')
+  const [moBeginDateFrom, setMoBeginDateFrom] = useState('')
+  const [moBeginDateTo, setMoBeginDateTo] = useState('')
   const [poStatusFilter, setPoStatusFilter] = useState<'OPEN' | 'HOLD' | 'CLOSE' | null>('OPEN')
 
   // 手動新增製令 modal state
@@ -646,6 +648,12 @@ function SyncCard({ docKey }: SyncCardProps) {
         if (moStatusFilter) {
           query = query.eq('hold_status', moStatusFilter)
         }
+        if (moBeginDateFrom) {
+          query = query.gte('mo_begin_date', moBeginDateFrom)
+        }
+        if (moBeginDateTo) {
+          query = query.lte('mo_begin_date', moBeginDateTo)
+        }
         if (keyword.trim()) {
           const kw = keyword.trim()
           query = query.or(
@@ -717,7 +725,7 @@ function SyncCard({ docKey }: SyncCardProps) {
     } finally {
       setLoadingRecords(false)
     }
-  }, [isSoTab, isMoTab, isMaterialPrepTab, isCustomerTab, isPoTab, isPrTab, meta.label, moStatusFilter, soStatusFilter, poStatusFilter])
+  }, [isSoTab, isMoTab, isMaterialPrepTab, isCustomerTab, isPoTab, isPrTab, meta.label, moStatusFilter, moBeginDateFrom, moBeginDateTo, soStatusFilter, poStatusFilter])
 
   useEffect(() => { void fetchRecords() }, [fetchRecords])
 
@@ -763,6 +771,8 @@ function SyncCard({ docKey }: SyncCardProps) {
       .select('hold_status,project_id,source_order,line_no,mbp_part,order_qty,end_date,mo_begin_date,mbp_lot_no')
       .order('project_id', { ascending: true })
     if (moStatusFilter) query = query.eq('hold_status', moStatusFilter)
+    if (moBeginDateFrom) query = query.gte('mo_begin_date', moBeginDateFrom)
+    if (moBeginDateTo) query = query.lte('mo_begin_date', moBeginDateTo)
     if (search.trim()) {
       const kw = search.trim()
       query = query.or(`project_id.ilike.%${kw}%,mbp_part.ilike.%${kw}%,mbp_lot_no.ilike.%${kw}%,source_order.ilike.%${kw}%`)
@@ -789,7 +799,9 @@ function SyncCard({ docKey }: SyncCardProps) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `製令單_${moStatusFilter ?? '全部'}_${new Date().toISOString().slice(0, 10)}.csv`
+    const fromTag = moBeginDateFrom || '不限起日'
+    const toTag = moBeginDateTo || '不限迄日'
+    a.download = `製令單_${moStatusFilter ?? '全部'}_${fromTag}_到_${toTag}_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -1553,6 +1565,41 @@ ${poPages}
                   {s ?? '全部'}
                 </button>
               ))}
+            </div>
+          )}
+          {isMoTab && (
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-slate-500">開立期間</span>
+              <input
+                type="date"
+                value={moBeginDateFrom}
+                onChange={(e) => {
+                  setMoPage(1)
+                  setMoBeginDateFrom(e.target.value)
+                }}
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 focus:border-cyan-500/50 focus:outline-none"
+              />
+              <span className="text-xs text-slate-500">~</span>
+              <input
+                type="date"
+                value={moBeginDateTo}
+                onChange={(e) => {
+                  setMoPage(1)
+                  setMoBeginDateTo(e.target.value)
+                }}
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 focus:border-cyan-500/50 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setMoPage(1)
+                  setMoBeginDateFrom('')
+                  setMoBeginDateTo('')
+                }}
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                清除期間
+              </button>
             </div>
           )}
           {isPoTab && (
