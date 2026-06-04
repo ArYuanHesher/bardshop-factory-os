@@ -709,10 +709,9 @@ export default function MaterialPrepPage() {
       if (allInventoryCodes.length > 0) {
         const [inventoryRes, unitRes] = await Promise.all([
           supabase
-            .from('erp_pj_sync')
-            .select('doc_no, qty')
-            .eq('doc_type', '倉庫庫存')
-            .in('doc_no', allInventoryCodes),
+            .from('material_inventory_list')
+            .select('item_code, book_count')
+            .in('item_code', allInventoryCodes),
           supabase
             .from('mm_bom_part_units')
             .select('part_code, unit_of_measure')
@@ -721,8 +720,8 @@ export default function MaterialPrepPage() {
 
         if (inventoryRes.error) throw inventoryRes.error
 
-        nextInventoryMap = ((inventoryRes.data as Array<{ doc_no: string; qty: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
-          acc[item.doc_no] = Number(item.qty) || 0
+        nextInventoryMap = ((inventoryRes.data as Array<{ item_code: string; book_count: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
+          acc[item.item_code] = Number(item.book_count) || 0
           return acc
         }, {})
 
@@ -992,13 +991,12 @@ export default function MaterialPrepPage() {
     if (!code) return
     try {
       const { data } = await supabase
-        .from('erp_pj_sync')
-        .select('doc_no, qty')
-        .eq('doc_type', '倉庫庫存')
-        .eq('doc_no', code)
+        .from('material_inventory_list')
+        .select('item_code, book_count')
+        .eq('item_code', code)
         .limit(1)
       if (data && data.length > 0) {
-        const qty = Number((data[0] as { doc_no: string; qty: number }).qty) || 0
+        const qty = Number((data[0] as { item_code: string; book_count: number }).book_count) || 0
         setInventoryMap(prev => ({ ...prev, [code]: qty }))
         setCustomCodeStocks(prev => ({ ...prev, [rowKey]: qty }))
         setMaterialOverrides(prev => ({ ...prev, [rowKey]: code }))

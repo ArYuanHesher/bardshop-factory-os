@@ -385,12 +385,12 @@ export default function NgMaterialPrepPage() {
       let nextUnitMap: Record<string, string> = {}
       if (allCodes.length > 0) {
         const [inventoryRes, unitRes] = await Promise.all([
-          supabase.from('erp_pj_sync').select('doc_no, qty').eq('doc_type', '倉庫庫存').in('doc_no', allCodes),
+          supabase.from('material_inventory_list').select('item_code, book_count').in('item_code', allCodes),
           supabase.from('mm_bom_part_units').select('part_code, unit_of_measure').in('part_code', allCodes),
         ])
         if (inventoryRes.error) throw inventoryRes.error
-        nextInventoryMap = ((inventoryRes.data as Array<{ doc_no: string; qty: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
-          acc[item.doc_no] = Number(item.qty) || 0; return acc
+        nextInventoryMap = ((inventoryRes.data as Array<{ item_code: string; book_count: number }> | null) || []).reduce<Record<string, number>>((acc, item) => {
+          acc[item.item_code] = Number(item.book_count) || 0; return acc
         }, {})
         nextUnitMap = ((unitRes.data as Array<{ part_code: string; unit_of_measure: string | null }> | null) || []).reduce<Record<string, string>>((acc, item) => {
           if (item.unit_of_measure) acc[item.part_code] = item.unit_of_measure; return acc

@@ -1,4 +1,4 @@
-const NEW_SITE_URL = 'https://factory-scheduler.vercel.app';
+const NEW_SITE_URL = 'https://bardshop.eip.vercel.app';
 
 export default function MigrationBanner() {
   return (
