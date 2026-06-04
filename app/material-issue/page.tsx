@@ -886,6 +886,9 @@ export default function MaterialIssuePage() {
 
       {/* Print styles */}
       <style jsx global>{`
+        @media screen {
+          html { -webkit-filter: grayscale(100%); filter: grayscale(100%); }
+        }
         @media print {
           html { -webkit-filter: grayscale(100%) !important; filter: grayscale(100%) !important; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }

@@ -381,6 +381,37 @@ export default function GroupOrderExportPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, selectedKeys, displayRows, manualMo])
 
+  // ---- 列印（套用製令工單格式）----
+  const handlePrint = useCallback(() => {
+    const targets = selectedKeys.size > 0
+      ? displayRows.filter(r => selectedKeys.has(r.row_key))
+      : displayRows
+    if (targets.length === 0) return
+
+    const moRecords = targets.map(r => {
+      const moNumber = (manualMo[r.row_key] ?? '').trim() || (r.mo_number ?? '').trim() || r.order_number
+      return {
+        mo_number: moNumber,
+        planned_start_date: '',
+        planned_end_date: r.delivery_date,
+        mo_status: r.mo_status || '',
+        department: '',
+        product_code: r.item_code,
+        lot_number: r.customer,
+        planned_qty: String(r.quantity ?? ''),
+        source_order: r.order_number,
+        mo_note: [r.item_name, r.note, r.plate_count ? `盤數：${r.plate_count}` : ''].filter(Boolean).join(' | '),
+        create_date: r.sheet_date,
+        factory: r.factory,
+        prep_status: '',
+        machine: '',
+      }
+    })
+
+    sessionStorage.setItem('mo_print_selection', JSON.stringify(moRecords))
+    window.open('/admin/argoerp/mo-summary/print', '_blank')
+  }, [displayRows, selectedKeys, manualMo])
+
   const importedCount = rows.filter(r => r.mo_status === '已匯入製令').length
   const pendingCount = rows.length - importedCount
 
@@ -417,6 +448,13 @@ export default function GroupOrderExportPage() {
               className="px-4 py-1.5 rounded bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-semibold disabled:opacity-50"
             >
               {importing ? '匯入中…' : '⬆ 匯入 ERP 製令工單'}
+            </button>
+            <button
+              onClick={handlePrint}
+              disabled={loading || displayRows.length === 0}
+              className="px-4 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-semibold disabled:opacity-50"
+            >
+              🖨 套用製令格式列印{selectedKeys.size > 0 ? ` (${selectedKeys.size})` : ''}
             </button>
           </div>
         </div>
@@ -561,6 +599,7 @@ export default function GroupOrderExportPage() {
         <div className="text-xs text-slate-600 space-y-1 pt-2">
           <p>・「儲存製令單號」：僅將手動輸入的製令單號存回出單表資料庫，不呼叫 ERP API（適合補登已在 ERP 建立的製令）。</p>
           <p>・「匯入 ERP 製令工單」：呼叫 IFAF028 介面將製令送入 ERP，成功後自動更新出單表狀態為「已匯入製令」。</p>
+          <p>・「套用製令格式列印」：沿用製令列印版型；有勾選時只列印勾選列，未勾選時列印目前篩選結果。</p>
           <p>・若僅勾選部分列，操作只影響勾選的列；未勾選時則操作全部顯示中的列。</p>
         </div>
       </div>

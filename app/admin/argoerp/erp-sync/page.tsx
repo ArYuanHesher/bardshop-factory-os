@@ -825,9 +825,10 @@ function SyncCard({ docKey }: SyncCardProps) {
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>製令單列印</title>
 <style>
-  body { font-family: sans-serif; font-size: 11px; margin: 16px; }
+  html { -webkit-filter: grayscale(100%); filter: grayscale(100%); }
+  body { font-family: sans-serif; font-size: 11px; margin: 16px; background: #fff; color: #000; }
   h2 { font-size: 14px; margin-bottom: 8px; }
-  p { font-size: 10px; color: #666; margin-bottom: 8px; }
+  p { font-size: 10px; color: #444; margin-bottom: 8px; }
   table { border-collapse: collapse; width: 100%; }
   th { background: #f0f0f0; font-weight: 600; text-align: left; padding: 4px 6px; border: 1px solid #ccc; }
   td { padding: 3px 6px; border: 1px solid #ddd; }
@@ -985,7 +986,8 @@ function SyncCard({ docKey }: SyncCardProps) {
 <title>採購訂單列印</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, "Microsoft JhengHei", "PingFang TC", sans-serif; font-size: 18px; margin: 0; background: #ccc; color: #000; }
+  html { -webkit-filter: grayscale(100%); filter: grayscale(100%); }
+  body { font-family: Arial, "Microsoft JhengHei", "PingFang TC", sans-serif; font-size: 18px; margin: 0; background: #fff; color: #000; }
   .po-card {
     width: 210mm; min-height: 297mm; background: white;
     margin: 0 auto 20px; padding: 14mm 15mm 12mm;
@@ -1033,7 +1035,7 @@ function SyncCard({ docKey }: SyncCardProps) {
   .part { font-weight: 600; font-family: monospace; color: #000; }
   .desc { font-size: 13px; color: #444; margin-top: 2px; }
   .remark { font-size: 13px; color: #000; background: #efefef; border: 1px solid #bbb; border-radius: 2px; padding: 2px 5px; margin-top: 4px; }
-  .packing { font-size: 13px; color: #1a5276; background: #d6eaf8; border: 1px solid #7fb3d3; border-radius: 2px; padding: 2px 5px; margin-top: 3px; }
+  .packing { font-size: 13px; color: #000; background: #efefef; border: 1px solid #bbb; border-radius: 2px; padding: 2px 5px; margin-top: 3px; }
   .soref-cell { border: 1px solid #ccc; padding: 4px 6px; text-align: center; }
   .soref-lot { font-size: 15px; font-weight: 600; color: #000; white-space: nowrap; }
   .soref-seq { font-size: 13px; color: #444; margin-top: 3px; white-space: nowrap; border-top: 1px dashed #bbb; padding-top: 3px; }
@@ -1083,9 +1085,10 @@ ${poPages}
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>銷售訂單列印</title>
 <style>
-  body { font-family: sans-serif; font-size: 11px; margin: 16px; }
+  html { -webkit-filter: grayscale(100%); filter: grayscale(100%); }
+  body { font-family: sans-serif; font-size: 11px; margin: 16px; background: #fff; color: #000; }
   h2 { font-size: 14px; margin-bottom: 8px; }
-  p { font-size: 10px; color: #666; margin-bottom: 8px; }
+  p { font-size: 10px; color: #444; margin-bottom: 8px; }
   table { border-collapse: collapse; width: 100%; }
   th { background: #f0f0f0; font-weight: 600; text-align: left; padding: 4px 6px; border: 1px solid #ccc; }
   td { padding: 3px 6px; border: 1px solid #ddd; }

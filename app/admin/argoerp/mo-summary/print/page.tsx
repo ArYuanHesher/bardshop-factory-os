@@ -594,6 +594,23 @@ function MoPrintContent() {
       {/* ── 全域列印 CSS ───────────────────────────────────── */}
       <style dangerouslySetInnerHTML={{ __html: `
         @page { size: A4 portrait; margin: 8mm 0; }
+        @media screen {
+          html { -webkit-filter: grayscale(100%) !important; filter: grayscale(100%) !important; }
+          html, body { background: #fff !important; color: #000 !important; }
+          .mo-pages-wrapper { background: #efefef !important; }
+          .mo-toolbar {
+            background: #f3f4f6 !important;
+            color: #000 !important;
+            border-bottom: 1px solid #bbb !important;
+            box-shadow: none !important;
+          }
+          .mo-toolbar * { color: #000 !important; }
+          .mo-toolbar button {
+            background: #fff !important;
+            color: #000 !important;
+            border: 1px solid #bbb !important;
+          }
+        }
         @media print {
           .mo-toolbar { display: none !important; }
           .no-print { display: none !important; }
