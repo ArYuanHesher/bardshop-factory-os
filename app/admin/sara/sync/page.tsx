@@ -11,6 +11,7 @@ interface ApiResult {
   error?: string
   rawResult?: unknown
   message?: string
+  hint?: string
 }
 
 // ── 結構化預覽元件 ──────────────────────────────────────────────────
@@ -198,10 +199,66 @@ function PreviewLotDetail({ data }: { data: unknown }) {
   )
 }
 
+function PreviewReport({ data }: { data: unknown }) {
+  type ReportRow = {
+    report_id?: string | number
+    mo_nbr?: string
+    lot_nbr?: string
+    item_no?: string
+    product_name?: string
+    job_name?: string
+    resource_name?: string
+    reported_qty?: number
+    good_qty?: number
+    ng_qty?: number
+    started_on?: string
+    ended_on?: string
+    reported_at?: string
+    operator_name?: string
+    status?: string
+  }
+  const arr = (data as { data?: ReportRow[] })?.data ?? []
+  if (!arr.length) return <div className="text-slate-500 text-xs">（無資料）</div>
+  return (
+    <div className="overflow-auto max-h-[500px] rounded border border-slate-700">
+      <table className="w-full text-white border-collapse">
+        <thead className="sticky top-0 bg-slate-900 z-10">
+          <tr>
+            <Th>#</Th><Th>報工單號</Th><Th>製令號</Th><Th>批號</Th><Th>品項</Th><Th>製程</Th><Th>資源</Th>
+            <Th>報工數</Th><Th>良品</Th><Th>不良</Th><Th>開始</Th><Th>結束</Th><Th>報工時間</Th><Th>人員</Th><Th>狀態</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {arr.map((r, i) => (
+            <tr key={`${r.report_id ?? 'na'}-${i}`} className="hover:bg-slate-800/50">
+              <Td>{i + 1}</Td>
+              <Td mono>{r.report_id ?? '—'}</Td>
+              <Td mono><span className="text-cyan-300">{r.mo_nbr ?? '—'}</span></Td>
+              <Td mono>{r.lot_nbr ?? '—'}</Td>
+              <Td mono>{r.item_no ?? '—'}</Td>
+              <Td><span className="text-teal-300">{r.job_name ?? '—'}</span></Td>
+              <Td>{r.resource_name ?? '—'}</Td>
+              <Td mono>{r.reported_qty ?? '—'}</Td>
+              <Td mono>{r.good_qty ?? '—'}</Td>
+              <Td mono>{r.ng_qty ?? '—'}</Td>
+              <Td>{r.started_on?.slice(0, 16) ?? '—'}</Td>
+              <Td>{r.ended_on?.slice(0, 16) ?? '—'}</Td>
+              <Td>{r.reported_at?.slice(0, 16) ?? '—'}</Td>
+              <Td>{r.operator_name ?? '—'}</Td>
+              <Td>{r.status ?? '—'}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function StructuredPreview({ action, data }: { action: string; data: unknown }) {
   switch (action) {
     case 'resource':    return <PreviewResource data={data} />
     case 'order':       return <PreviewOrder data={data} />
+    case 'report':      return <PreviewReport data={data} />
     case 'workcenter':  return <PreviewWorkcenter data={data} />
     case 'jlb':         return <PreviewJlb data={data} />
     case 'lot_detail':  return <PreviewLotDetail data={data} />
@@ -216,18 +273,63 @@ function StructuredPreview({ action, data }: { action: string; data: unknown }) 
 const ACTIONS: { key: string; label: string; desc: string; needsBody?: boolean; syncAction?: string }[] = [
   { key: 'ping',       label: '🔌 測試連線（取 api_key）', desc: 'POST /api/data_export/temp_token' },
   { key: 'order',      label: '📋 工單列表',             desc: '/data/order',     syncAction: 'sync_order' },
+  { key: 'report',     label: '📝 報工列表',             desc: '/data/report（支援多路徑 fallback）',    syncAction: 'sync_report' },
   { key: 'workcenter', label: '🏭 站點列表',             desc: '/data/workcenter', syncAction: 'sync_workcenter' },
   { key: 'jlb',        label: '⚙️ 製程列表',             desc: '/data/jlb',        syncAction: 'sync_jlb' },
   { key: 'resource',   label: '🔧 資源列表',             desc: '/data/resource (含 events / job_name)', syncAction: 'sync_resource' },
   { key: 'lot_detail', label: '🧭 途程列表',             desc: '/data/lot_detail（需 items）', needsBody: true, syncAction: 'sync_lot_detail' },
 ]
 
+function formatDateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10)
+}
+
 export default function SaraSyncPage() {
   const [results, setResults] = useState<Record<string, ApiResult>>({})
   const [loading, setLoading] = useState<string | null>(null)
+  const [reportPathsText, setReportPathsText] = useState<string>([
+    '/data/report',
+    '/data/work_report',
+    '/data/reports',
+    '/data/workreport',
+    '/data/report_list',
+    '/data/reporting',
+  ].join('\n'))
+  const [reportBodyText, setReportBodyText] = useState<string>('{}')
   const [lotItems, setLotItems] = useState<string>(JSON.stringify([
     { mo_nbr: 'A001', product_name: 'P1', lot_nbr: 'L1' },
   ], null, 2))
+
+  const reportBodyTemplates = (() => {
+    const today = new Date()
+    const from7 = new Date(today)
+    from7.setDate(today.getDate() - 7)
+    const from30 = new Date(today)
+    from30.setDate(today.getDate() - 30)
+
+    return [
+      { label: '空參數 {}', value: {} },
+      {
+        label: 'date_from / date_to（近 7 天）',
+        value: { date_from: formatDateOnly(from7), date_to: formatDateOnly(today) },
+      },
+      {
+        label: 'start_date / end_date（近 30 天）',
+        value: { start_date: formatDateOnly(from30), end_date: formatDateOnly(today) },
+      },
+      {
+        label: 'from / to（近 7 天）',
+        value: { from: formatDateOnly(from7), to: formatDateOnly(today) },
+      },
+      {
+        label: 'started_on / ended_on（完整時間）',
+        value: {
+          started_on: `${formatDateOnly(from7)}T00:00:00`,
+          ended_on: `${formatDateOnly(today)}T23:59:59`,
+        },
+      },
+    ]
+  })()
 
   const callApi = async (action: string, isSync = false) => {
     const stateKey = isSync ? `sync:${action}` : action
@@ -242,6 +344,20 @@ export default function SaraSyncPage() {
           setResults(prev => ({ ...prev, [stateKey]: { ok: false, action, error: 'items JSON 格式錯誤' } }))
           return
         }
+      }
+      if (action === 'report' || action === 'sync_report') {
+        const reportPaths = reportPathsText
+          .split(/[\r\n,]+/)
+          .map(s => s.trim())
+          .filter(Boolean)
+        let reportBody: unknown = {}
+        try {
+          reportBody = reportBodyText.trim() ? JSON.parse(reportBodyText) : {}
+        } catch {
+          setResults(prev => ({ ...prev, [stateKey]: { ok: false, action, error: '報工 request body JSON 格式錯誤' } }))
+          return
+        }
+        body = { reportPaths, reportBody }
       }
 
       const res = await fetch('/api/sara', {
@@ -259,6 +375,7 @@ export default function SaraSyncPage() {
           count: json.count,
           error: json.error,
           message: json.message,
+          hint: json.hint,
           rawResult: json.result ?? null,
         },
       }))
@@ -328,6 +445,43 @@ SARA_BASE_URL=https://sara-factory.com/api/data_export
           </p>
         </div>
 
+        <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-4 text-sm">
+          <div className="font-semibold text-sky-300 mb-2">🧪 報工端點測試參數（本頁即時生效）</div>
+          <p className="text-slate-300 text-xs mb-2">可直接輸入候選路徑與 request body，不需重啟服務。按「報工列表」的預覽/同步入庫會使用這裡的值。</p>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {reportBodyTemplates.map(t => (
+              <button
+                key={t.label}
+                type="button"
+                onClick={() => setReportBodyText(JSON.stringify(t.value, null, 2))}
+                className="px-2.5 py-1 rounded border border-sky-700/60 bg-sky-900/30 hover:bg-sky-800/40 text-[11px] text-sky-100"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-400">候選路徑（每行一個，或逗號分隔）</label>
+              <textarea
+                className="w-full mt-1 bg-slate-950 border border-slate-700 rounded p-2 text-xs font-mono"
+                rows={7}
+                value={reportPathsText}
+                onChange={e => setReportPathsText(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">報工 request body（JSON）</label>
+              <textarea
+                className="w-full mt-1 bg-slate-950 border border-slate-700 rounded p-2 text-xs font-mono"
+                rows={7}
+                value={reportBodyText}
+                onChange={e => setReportBodyText(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* 動作按鈕區 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {ACTIONS.map(a => {
@@ -391,7 +545,15 @@ SARA_BASE_URL=https://sara-factory.com/api/data_export
                         {sr.message ? ` · ${sr.message}` : ''}
                       </div>
                     ) : (
-                      <div className="text-rose-300 break-all">🗄️ 入庫失敗：{sr.error}</div>
+                      <div className="space-y-1">
+                        <div className="text-rose-300 break-all">🗄️ 入庫失敗：{sr.error}</div>
+                        {sr.hint && <div className="text-amber-300 break-all">💡 {sr.hint}</div>}
+                        {sr.error?.includes('找不到可用的報工端點') && (
+                          <div className="text-slate-400 break-all">
+                            可在 .env.local 設定：SARA_REPORT_PATHS=/實際路徑A,/實際路徑B（重啟服務後生效）
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

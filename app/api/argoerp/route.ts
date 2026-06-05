@@ -317,16 +317,29 @@ export async function POST(request: NextRequest) {
       })
 
       const { rawText, parsed } = await readApiResponse(res)
-      const error = extractApiError(parsed)
-      const success = res.ok && isArgoSuccess(parsed)
+      const resultRows = (parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).RESULT))
+        ? ((parsed as Record<string, unknown>).RESULT as Record<string, unknown>[])
+        : []
+      const hasCheckY = resultRows.some(row => String(row.CHECK_FLAG ?? '').toUpperCase() === 'Y')
+      const hasCheckN = resultRows.some(row => String(row.CHECK_FLAG ?? '').toUpperCase() === 'N')
+
+      // IMPORT 端點常見「已寫入但附帶警示字串」情況：
+      // 若 RESULT 存在且無 N，視為成功；若有 Y 也有 N，視為部分成功（success=false 但 HTTP 200）。
+      const success = res.ok && (
+        (resultRows.length > 0 ? !hasCheckN : isArgoSuccess(parsed))
+      )
+      const error = hasCheckN ? extractApiError(parsed) : (success ? null : extractApiError(parsed))
+      const partialSuccess = res.ok && hasCheckY && hasCheckN
 
       return NextResponse.json({
         status: success ? 'ok' : 'error',
         success,
+        partialSuccess,
+        anySuccess: hasCheckY,
         error,
         apiResult: parsed,
         rawText,
-      }, { status: success ? 200 : 502 })
+      }, { status: res.ok ? 200 : 502 })
     }
 
     if (action === 'query') {

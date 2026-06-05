@@ -106,7 +106,7 @@ export async function saraFetch<T = unknown>(
         ?? `HTTP ${res.status}`
     // 附帶 token 預覽協助診斷
     const tokenInfo = token ? `[token: ${token.slice(0, 8)}...len=${token.length}]` : '[token: <empty>]'
-    throw new Error(`SARA ${path} 失敗：${msg} ${tokenInfo}`)
+    throw new Error(`SARA ${path} 失敗 (HTTP ${res.status})：${msg} ${tokenInfo}`)
   }
 
   return parsed as T

@@ -17,6 +17,10 @@ function errMsg(e: unknown): string {
   return String(e)
 }
 
+function is404ErrorMessage(msg: string): boolean {
+  return /(HTTP\s*404|\b404\b|Not\s+Found)/i.test(msg)
+}
+
 // SARA 時間為 UTC+0；空字串轉 null
 function toIso(s?: string | null): string | null {
   if (!s) return null
@@ -156,6 +160,97 @@ export async function syncOrders(): Promise<SyncResult> {
   } catch (e) {
     const msg = errMsg(e)
     await logSync('order', false, null, Date.now() - started, msg)
+    throw new Error(msg)
+  }
+}
+
+// ── 3b. 報工 ───────────────────────────────────────────────────────────
+export async function syncReports(
+  reportPaths: string[] = [
+    '/data/report',
+    '/data/work_report',
+    '/data/reports',
+    '/data/workreport',
+    '/data/report_list',
+    '/data/reporting',
+  ],
+  reportBody: unknown = {},
+): Promise<SyncResult> {
+  const started = Date.now()
+  try {
+    let json: { data?: Array<Record<string, unknown>> } | null = null
+    let usedPath: string | null = null
+    const tried: string[] = []
+    const errors: string[] = []
+
+    for (const path of reportPaths) {
+      tried.push(path)
+      try {
+        json = await saraFetch<{ data?: Array<Record<string, unknown>> }>(path, reportBody)
+        usedPath = path
+        break
+      } catch (e) {
+        const msg = errMsg(e)
+        errors.push(`${path}: ${msg}`)
+        if (!is404ErrorMessage(msg)) {
+          throw new Error(msg)
+        }
+      }
+    }
+
+    if (!json || !usedPath) {
+      throw new Error(
+        `找不到可用的報工端點（皆回 404）：${tried.join(', ')}。` +
+        '請向 SARA 確認報工 API 路徑/權限，或在 .env.local 設定 SARA_REPORT_PATHS 覆蓋。',
+      )
+    }
+
+    const rows = (json.data ?? []).map((r, idx) => {
+      const reportId = String(r.report_id ?? r.id ?? '').trim()
+      const moNbr = String(r.mo_nbr ?? '').trim()
+      const lotNbr = String(r.lot_nbr ?? '').trim()
+      const jobSequence = Number(r.job_sequence ?? r.seq ?? 0) || null
+
+      return {
+        report_id: reportId || `${moNbr || 'NA'}-${lotNbr || 'NA'}-${jobSequence ?? 0}-${idx}`,
+        mo_nbr: moNbr || null,
+        lot_nbr: lotNbr || null,
+        item_no: r.item_no ?? null,
+        product_name: r.product_name ?? null,
+        job_name: r.job_name ?? null,
+        job_sequence: jobSequence,
+        resource_id: r.resource_id != null ? Number(r.resource_id) : null,
+        resource_name: r.resource_name ?? null,
+        reported_qty: r.reported_qty != null ? Number(r.reported_qty) : null,
+        good_qty: r.good_qty != null ? Number(r.good_qty) : null,
+        ng_qty: r.ng_qty != null ? Number(r.ng_qty) : null,
+        started_on: toIso(r.started_on as string | null),
+        ended_on: toIso(r.ended_on as string | null),
+        reported_at: toIso((r.reported_at ?? r.created_at) as string | null),
+        operator_id: r.operator_id ?? null,
+        operator_name: r.operator_name ?? null,
+        status: r.status ?? null,
+        raw: r,
+        synced_at: new Date().toISOString(),
+      }
+    })
+
+    if (rows.length > 0) {
+      const sb = getSupabaseAdminClient()
+      const CHUNK = 500
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const { error } = await sb
+          .from('sara_reports')
+          .upsert(rows.slice(i, i + CHUNK), { onConflict: 'report_id' })
+        if (error) throw new Error(errMsg(error))
+      }
+    }
+
+    await logSync('report', true, rows.length, Date.now() - started, `path=${usedPath}`)
+    return { count: rows.length, message: `來源端點：${usedPath}` }
+  } catch (e) {
+    const msg = errMsg(e)
+    await logSync('report', false, null, Date.now() - started, msg)
     throw new Error(msg)
   }
 }

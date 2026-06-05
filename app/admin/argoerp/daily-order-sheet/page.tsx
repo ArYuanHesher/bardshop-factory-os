@@ -212,6 +212,26 @@ function parseSourceRows(text: string): { rows: SourceRow[]; error: string } {
   return { rows: parsed, error: '' }
 }
 
+function toCsvCell(v: unknown): string {
+  return `"${String(v ?? '').replace(/"/g, '""')}"`
+}
+
+function downloadCsv(fileName: string, headers: string[], rows: unknown[][]): void {
+  const bom = '\uFEFF'
+  const csvContent = bom + [
+    headers.map(toCsvCell).join(','),
+    ...rows.map(r => r.map(toCsvCell).join(',')),
+  ].join('\n')
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   '已匯入製令': { label: '已匯入製令', cls: 'bg-emerald-900/50 text-emerald-300 border-emerald-700/50' },
   '已匯入採單': { label: '已匯入採單', cls: 'bg-orange-900/50 text-orange-300 border-orange-700/50' },
@@ -981,6 +1001,55 @@ export default function DailyOrderSheetPage() {
 
   // ---- 漏單檢測：跨所有日期，匯出未比對到製令且未比對到採購單的列 ----
   const [exportingMissing, setExportingMissing] = useState(false)
+  const [exportingSheetCsv, setExportingSheetCsv] = useState(false)
+
+  const handleExportSheetCsv = useCallback(() => {
+    if (sheetRows.length === 0) {
+      setSaveMsg('❌ 沒有可匯出的資料')
+      setTimeout(() => setSaveMsg(''), 3000)
+      return
+    }
+
+    setExportingSheetCsv(true)
+    try {
+      const headers = [
+        '出單日期', '工單編號', '單據種類', '生產廠別', '客戶', '品項編碼', '品名/規格', '備註',
+        '數量', '交付日期', '訂單狀態', '製令狀態', '製令單號', '採購狀態', '採購單號', '採購序號',
+        '備料狀態', '批備料單號', '機台',
+      ]
+      const rows = sheetRows.map(r => [
+        selectedDate,
+        r.order_number,
+        r.doc_type,
+        r.factory,
+        r.customer,
+        r.item_code,
+        r.item_name,
+        r.note,
+        r.quantity,
+        r.delivery_date,
+        r.order_status,
+        r.mo_status ?? '',
+        r.mo_number ?? '',
+        r.po_status ?? '',
+        r.po_number ?? '',
+        r.po_sub_no ?? '',
+        r.material_prep_status ?? '',
+        r.argo_slip_no ?? '',
+        r.machine ?? r.assigned_machine ?? '',
+      ])
+
+      const datePart = selectedDate || todayStr()
+      downloadCsv(`每日出單表_${datePart}.csv`, headers, rows)
+      setSaveMsg(`✅ 已匯出 CSV：${datePart}（${sheetRows.length} 筆）`)
+      setTimeout(() => setSaveMsg(''), 4000)
+    } catch (e) {
+      setSaveMsg(`❌ CSV 匯出失敗：${e instanceof Error ? e.message : String(e)}`)
+      setTimeout(() => setSaveMsg(''), 5000)
+    } finally {
+      setExportingSheetCsv(false)
+    }
+  }, [sheetRows, selectedDate])
 
   const handleMissingExport = useCallback(async () => {
     const ok = confirm(
@@ -1712,6 +1781,14 @@ export default function DailyOrderSheetPage() {
                   className="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium transition-colors"
                 >
                   {showPasteArea ? '收合貼上區' : '🔄 重新貼上取代'}
+                </button>
+                <button
+                  onClick={handleExportSheetCsv}
+                  disabled={exportingSheetCsv}
+                  className="px-4 py-2 rounded-lg bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 text-white text-sm font-medium transition-colors"
+                  title="匯出目前日期的出單資料為 CSV"
+                >
+                  {exportingSheetCsv ? '匯出中…' : `📤 匯出 CSV（${selectedDate || '當日'}）`}
                 </button>
                 <button
                   onClick={handleSave}

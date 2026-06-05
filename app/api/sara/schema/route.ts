@@ -8,6 +8,7 @@ const SARA_TABLES = [
   'sara_workcenters',
   'sara_jobs',
   'sara_orders',
+  'sara_reports',
   'sara_resources',
   'sara_resource_jobs',
   'sara_resource_events',
