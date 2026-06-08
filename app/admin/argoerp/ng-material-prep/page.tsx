@@ -123,6 +123,8 @@ export default function NgMaterialPrepPage() {
   // ---- 覆寫設定（此頁面使用 local state，不同步至 Supabase）----
   const [materialOverrides, setMaterialOverrides] = useState<Record<string, string>>({})
   const [qtyOverrides, setQtyOverrides] = useState<Record<string, string>>({})
+  const [customCodeInputs, setCustomCodeInputs] = useState<Record<string, string>>({})
+  const [customCodeStocks, setCustomCodeStocks] = useState<Record<string, number | null>>({})
   const [noBufferKeys, setNoBufferKeys] = useState<Set<string>>(new Set())
   const [noNeedRowKeys, setNoNeedRowKeys] = useState<Set<string>>(new Set())
   const [extraNoBomSlots, setExtraNoBomSlots] = useState<Record<string, string[]>>({})
@@ -287,6 +289,8 @@ export default function NgMaterialPrepPage() {
     setSelectedRowKeys(new Set())
     setMaterialOverrides({})
     setQtyOverrides({})
+    setCustomCodeInputs({})
+    setCustomCodeStocks({})
     setNoBufferKeys(new Set())
     setNoNeedRowKeys(new Set())
     setExtraNoBomSlots({})
@@ -712,6 +716,41 @@ export default function NgMaterialPrepPage() {
     })
   }, [])
 
+  const handleLookupCustomCode = useCallback(async (rowKey: string) => {
+    const raw = customCodeInputs[rowKey] ?? ''
+    const code = raw.trim().toUpperCase()
+    if (!code) return
+
+    setCustomCodeInputs(prev => ({ ...prev, [rowKey]: code }))
+    setMaterialOverrides(prev => ({ ...prev, [rowKey]: code }))
+
+    let stock: number | null = inventoryMap[code] ?? null
+    if (stock === null) {
+      const { data } = await supabase
+        .from('material_inventory_list')
+        .select('book_count')
+        .eq('item_code', code)
+        .maybeSingle()
+      if (data && typeof data.book_count === 'number') {
+        stock = Number(data.book_count)
+        setInventoryMap(prev => ({ ...prev, [code]: stock ?? 0 }))
+      }
+    }
+
+    if (!unitMap[code]) {
+      const { data: unitData } = await supabase
+        .from('mm_bom_part_units')
+        .select('unit_of_measure')
+        .eq('part_code', code)
+        .maybeSingle()
+      if (unitData?.unit_of_measure) {
+        setUnitMap(prev => ({ ...prev, [code]: unitData.unit_of_measure }))
+      }
+    }
+
+    setCustomCodeStocks(prev => ({ ...prev, [rowKey]: stock }))
+  }, [customCodeInputs, inventoryMap, unitMap])
+
   const statusBadge = (status: MaterialPrepRow['status']) => {
     const map: Record<MaterialPrepRow['status'], string> = {
       '可直接備料': 'bg-emerald-900/50 text-emerald-300 border border-emerald-700/50',
@@ -1013,12 +1052,10 @@ export default function NgMaterialPrepPage() {
                               </td>
                               <td className="px-3 py-2">
                                 <div className="flex items-center gap-1.5">
-                                  {row.substitute_options.length > 1 && (
-                                    <button
-                                      onClick={() => toggleSwapOpen(row.row_key)}
-                                      className="px-2 py-0.5 rounded text-xs bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 border border-amber-700/40 transition-colors"
-                                    >換料</button>
-                                  )}
+                                  <button
+                                    onClick={() => toggleSwapOpen(row.row_key)}
+                                    className="px-2 py-0.5 rounded text-xs bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 border border-amber-700/40 transition-colors"
+                                  >換料</button>
                                   {row.status === '無BOM' && (
                                     <input
                                       type="text"
@@ -1053,20 +1090,40 @@ export default function NgMaterialPrepPage() {
                             {isSwapOpen && (
                               <tr key={`${row.row_key}::swap`} className="bg-amber-900/10 border-t border-amber-700/20">
                                 <td colSpan={8} className="px-4 py-2">
-                                  <div className="flex flex-wrap gap-2 items-center">
-                                    <span className="text-xs text-amber-400 mr-1">選擇替代料：</span>
-                                    {row.substitute_options.map(opt => (
+                                  <div className="flex flex-col gap-2">
+                                    <div className="flex flex-wrap gap-2 items-center">
+                                      <span className="text-xs text-amber-400 mr-1">選擇替代料：</span>
+                                      {row.substitute_options.map(opt => (
+                                        <button
+                                          key={opt.code}
+                                          onClick={() => {
+                                            setMaterialOverrides(prev => ({ ...prev, [row.row_key]: opt.code }))
+                                          }}
+                                          className={`px-3 py-1 rounded-lg text-xs transition-colors ${row.selected_material_code === opt.code ? 'bg-amber-700 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'}`}
+                                        >
+                                          {opt.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 items-center">
+                                      <span className="text-xs text-amber-400">手動換料：</span>
+                                      <input
+                                        value={customCodeInputs[row.row_key] ?? ''}
+                                        onChange={e => setCustomCodeInputs(prev => ({ ...prev, [row.row_key]: e.target.value }))}
+                                        onKeyDown={e => { if (e.key === 'Enter') void handleLookupCustomCode(row.row_key) }}
+                                        placeholder="輸入料號"
+                                        className="w-44 px-2 py-1 rounded bg-slate-800 border border-slate-700 text-cyan-300 text-xs font-mono uppercase focus:outline-none focus:border-cyan-500"
+                                      />
                                       <button
-                                        key={opt.code}
-                                        onClick={() => {
-                                          setMaterialOverrides(prev => ({ ...prev, [row.row_key]: opt.code }))
-                                          toggleSwapOpen(row.row_key)
-                                        }}
-                                        className={`px-3 py-1 rounded-lg text-xs transition-colors ${row.selected_material_code === opt.code ? 'bg-amber-700 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'}`}
-                                      >
-                                        {opt.label}
-                                      </button>
-                                    ))}
+                                        onClick={() => void handleLookupCustomCode(row.row_key)}
+                                        className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs"
+                                      >查詢並套用</button>
+                                      {customCodeStocks[row.row_key] !== undefined && (
+                                        <span className={`text-xs ${customCodeStocks[row.row_key] === null ? 'text-red-400' : 'text-emerald-300'}`}>
+                                          {customCodeStocks[row.row_key] === null ? '查無庫存資料' : `庫存 ${formatQty(customCodeStocks[row.row_key] ?? 0)}`}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
                               </tr>

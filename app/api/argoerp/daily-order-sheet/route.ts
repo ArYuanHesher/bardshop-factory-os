@@ -120,6 +120,7 @@ export async function PATCH(request: NextRequest) {
         row_key: string
         mo_status?: string
         mo_number?: string
+        pr_number?: string | null
         match_status?: string | null
         match_line_no?: string | null
         match_pdl_seq?: number | null
@@ -157,6 +158,7 @@ export async function PATCH(request: NextRequest) {
       // 只覆寫 updates 裡明確帶入的欄位
       if (upd.mo_status !== undefined) merged.mo_status = upd.mo_status
       if (upd.mo_number !== undefined) merged.mo_number = upd.mo_number
+      if (upd.pr_number !== undefined) merged.pr_number = upd.pr_number
       if (upd.match_status !== undefined) merged.match_status = upd.match_status
       if (upd.match_line_no !== undefined) merged.match_line_no = upd.match_line_no
       if (upd.match_pdl_seq !== undefined) merged.match_pdl_seq = upd.match_pdl_seq

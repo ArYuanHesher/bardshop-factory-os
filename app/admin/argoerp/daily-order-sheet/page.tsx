@@ -247,6 +247,32 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   '暫緩區': { label: '暫緩區', cls: 'bg-amber-900/50 text-amber-300 border-amber-700/50' },
 }
 
+type OutsourcePrefix = 'MOT' | 'POC' | 'POO' | 'MPO'
+
+function getOutsourcePrefix(docNo?: string | null): OutsourcePrefix | null {
+  const v = String(docNo ?? '').trim().toUpperCase()
+  if (v.startsWith('MOT')) return 'MOT'
+  if (v.startsWith('POC')) return 'POC'
+  if (v.startsWith('POO')) return 'POO'
+  if (v.startsWith('MPO')) return 'MPO'
+  return null
+}
+
+function getOutsourcePrefixStyles(prefix: OutsourcePrefix | null): { rowBg: string; text: string; badge: string } {
+  switch (prefix) {
+    case 'MOT':
+      return { rowBg: 'bg-emerald-950/25', text: 'text-emerald-300 hover:text-emerald-100', badge: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50' }
+    case 'POC':
+      return { rowBg: 'bg-orange-950/25', text: 'text-orange-300 hover:text-orange-100', badge: 'bg-orange-900/40 text-orange-300 border-orange-700/50' }
+    case 'POO':
+      return { rowBg: 'bg-fuchsia-950/25', text: 'text-fuchsia-300 hover:text-fuchsia-100', badge: 'bg-fuchsia-900/40 text-fuchsia-300 border-fuchsia-700/50' }
+    case 'MPO':
+      return { rowBg: 'bg-sky-950/30', text: 'text-sky-300 hover:text-sky-100', badge: 'bg-sky-900/40 text-sky-300 border-sky-700/50' }
+    default:
+      return { rowBg: 'bg-purple-950/20', text: 'text-purple-300 hover:text-purple-100', badge: 'bg-purple-900/40 text-purple-300 border-purple-700/50' }
+  }
+}
+
 // ===== 頁面元件 =====
 export default function DailyOrderSheetPage() {
   const [selectedDate, setSelectedDate] = useState('')
@@ -1048,14 +1074,16 @@ export default function DailyOrderSheetPage() {
         r.quantity,
         r.delivery_date,
         r.order_status,
-        r.mo_status ?? '',
+        (r.mo_status ?? (((r.factory === 'C' || r.factory === 'O') && r.po_status === 'matched') ? '已匯入採單' : '')),
         r.mo_number ?? '',
         r.po_status ?? '',
         r.po_number ?? '',
         r.po_sub_no ?? '',
         r.material_prep_status ?? '',
         r.argo_slip_no ?? '',
-        r.machine ?? r.assigned_machine ?? '',
+        (r.mo_number
+          ? (moMachines[r.mo_number] ?? r.machine ?? r.assigned_machine ?? rowMachines[r.row_key] ?? '')
+          : (rowMachines[r.row_key] ?? r.machine ?? r.assigned_machine ?? '')),
       ])
 
       const datePart = selectedDate || todayStr()
@@ -1068,7 +1096,7 @@ export default function DailyOrderSheetPage() {
     } finally {
       setExportingSheetCsv(false)
     }
-  }, [sheetRows, selectedDate])
+  }, [sheetRows, selectedDate, moMachines, rowMachines])
 
   const handleMissingExport = useCallback(async () => {
     const ok = confirm(
@@ -2187,6 +2215,13 @@ export default function DailyOrderSheetPage() {
                         const effectiveStatus = row.mo_status ?? ((row.factory === 'C' || row.factory === 'O') && row.po_status === 'matched' ? '已匯入採單' : null)
                         const statusInfo = effectiveStatus ? STATUS_LABELS[effectiveStatus] : null
                         const sk = row.row_key || String(idx)
+                        const outsourcedDocNo = row.factory === 'O'
+                          ? (((row.po_status === 'matched' || row.po_status === 'qty_mismatch') && row.po_number)
+                            ? row.po_number
+                            : row.mo_number)
+                          : null
+                        const outsourcedPrefix = getOutsourcePrefix(outsourcedDocNo)
+                        const outsourcedStyles = getOutsourcePrefixStyles(outsourcedPrefix)
                         return (
                           <tr
                             key={`${row.row_key || 'row'}::${idx}`}
@@ -2197,8 +2232,8 @@ export default function DailyOrderSheetPage() {
                                 ? 'bg-amber-950/20'
                                 : row.factory === 'C' && row.po_status === 'matched'
                                 ? 'bg-orange-950/20'
-                                : row.factory === 'O' && row.po_status === 'matched'
-                                ? 'bg-purple-950/20'
+                                : row.factory === 'O' && (row.po_status === 'matched' || row.mo_number)
+                                ? outsourcedStyles.rowBg
                                 : row.factory === 'O' && row.po_status === 'no_po'
                                 ? 'bg-slate-900/60'
                                 : 'hover:bg-slate-900/50'
@@ -2268,17 +2303,23 @@ export default function DailyOrderSheetPage() {
                                   <div>
                                     <button
                                       onClick={() => setPoModalId(row.po_number!)}
-                                      className={`hover:underline underline-offset-2 text-left ${row.factory === 'C' ? 'text-orange-300 hover:text-orange-100' : 'text-purple-300 hover:text-purple-100'}`}
+                                      className={`hover:underline underline-offset-2 text-left ${row.factory === 'C' ? 'text-orange-300 hover:text-orange-100' : outsourcedStyles.text}`}
                                     >{row.po_number}</button>
                                     {row.po_sub_no && <span className="text-slate-500 ml-1">#{row.po_sub_no}</span>}
+                                    {row.factory === 'O' && outsourcedPrefix && (
+                                      <span className={`ml-1 px-1.5 py-0.5 rounded border text-[10px] ${outsourcedStyles.badge}`}>{outsourcedPrefix}</span>
+                                    )}
                                   </div>
                                 ) : row.po_status === 'qty_mismatch' && row.po_number ? (
                                   <div>
                                     <button
                                       onClick={() => setPoModalId(row.po_number!)}
-                                      className="text-amber-300 hover:text-amber-100 hover:underline underline-offset-2 text-left"
+                                      className={`${row.factory === 'O' ? outsourcedStyles.text : 'text-amber-300 hover:text-amber-100'} hover:underline underline-offset-2 text-left`}
                                     >{row.po_number}</button>
                                     {row.po_sub_no && <span className="text-slate-500 ml-1">#{row.po_sub_no}</span>}
+                                    {row.factory === 'O' && outsourcedPrefix && (
+                                      <span className={`ml-1 px-1.5 py-0.5 rounded border text-[10px] ${outsourcedStyles.badge}`}>{outsourcedPrefix}</span>
+                                    )}
                                     <div className="mt-1 px-1.5 py-0.5 rounded border text-[10px] bg-amber-950/40 text-amber-300 border-amber-700/50 inline-block">
                                       ⚠ 數量不符 ERP:{row.po_qty_erp ?? '?'} / 出單:{row.quantity}
                                     </div>
@@ -2318,7 +2359,10 @@ export default function DailyOrderSheetPage() {
                                   </div>
                                 ) : row.mo_number ? (
                                   <div>
-                                    <span className="text-violet-300">{row.mo_number}</span>
+                                    <span className={row.factory === 'O' ? outsourcedStyles.text : 'text-violet-300'}>{row.mo_number}</span>
+                                    {row.factory === 'O' && outsourcedPrefix && (
+                                      <span className={`ml-1 px-1.5 py-0.5 rounded border text-[10px] ${outsourcedStyles.badge}`}>{outsourcedPrefix}</span>
+                                    )}
                                     {row.factory === 'O' && (
                                       <div className="mt-1">
                                         <button

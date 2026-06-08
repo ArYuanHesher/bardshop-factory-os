@@ -53,16 +53,14 @@ export default function AdminDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
             {favoriteItems.map((item, idx) => {
               const colors = getColorClasses(item.theme)
+              const isLocked = Boolean((item as { locked?: boolean }).locked)
               return (
-                <Link 
-                  key={idx} 
-                  href={item.path} 
+                <div
+                  key={idx}
                   className={`
                     group relative bg-slate-900/40 border border-slate-700/60 rounded-2xl p-8 
-                    flex flex-col gap-6 transition-all duration-300 
-                    hover:shadow-[0_0_30px_rgba(0,0,0,0.3)] hover:-translate-y-1 
-                    ${colors.border} ${colors.bg}
-                    backdrop-blur-sm
+                    flex flex-col gap-6 transition-all duration-300 backdrop-blur-sm
+                    ${isLocked ? 'opacity-60 cursor-not-allowed' : `hover:shadow-[0_0_30px_rgba(0,0,0,0.3)] hover:-translate-y-1 ${colors.border} ${colors.bg}`}
                   `}
                 >
                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -70,6 +68,14 @@ export default function AdminDashboard() {
                       {item.groupTitle}
                     </span>
                   </div>
+
+                  {isLocked && (
+                    <div className="absolute top-4 left-4">
+                      <span className="text-[10px] font-mono tracking-widest text-amber-300 bg-amber-950/70 px-2 py-1 rounded border border-amber-700/60">
+                        LOCKED
+                      </span>
+                    </div>
+                  )}
 
                   <div className={`p-4 rounded-xl bg-slate-950 w-fit shadow-lg ${colors.icon}`}>
                     <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={item.icon} /></svg>
@@ -83,10 +89,13 @@ export default function AdminDashboard() {
                   <div className="mt-auto pt-6 flex items-center justify-between border-t border-white/5 group-hover:border-white/10 transition-colors">
                      <div className={`h-1 w-12 rounded-full opacity-20 group-hover:w-full transition-all duration-500 ${colors.bar}`}></div>
                      <span className="text-xs font-mono opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all text-white">
-                       ENTER &rarr;
+                       {isLocked ? 'LOCKED' : 'ENTER →'}
                      </span>
                   </div>
-                </Link>
+                  {!isLocked && (
+                    <Link href={item.path} className="absolute inset-0" aria-label={item.name} />
+                  )}
+                </div>
               )
             })}
           </div>
