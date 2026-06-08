@@ -1,9 +1,8 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
+import { useCallback, useEffect, useMemo, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
-import { exportPoToWord } from './exportWord'
 
 // ── 假資料（?demo=1 預覽用）──────────────────────────────────
 const DEMO_RECORDS: MoRecord[] = [
@@ -175,6 +174,8 @@ const FACTORY_COLOR: Record<string, string> = {
   O: '#7c3aed',
 }
 
+const RENDER_CHUNK_SIZE = 20
+
 function getLineNo(mo: MoRecord): string {
   if (mo.line_no_override !== undefined && mo.line_no_override !== null && mo.line_no_override !== '') {
     const n = parseInt(mo.line_no_override, 10)
@@ -185,6 +186,15 @@ function getLineNo(mo: MoRecord): string {
   const last2 = mo.mo_number.slice(-2)
   const n = parseInt(last2, 10)
   return isNaN(n) ? '0' : String(n)
+}
+
+function normalizeLineNo(lineNo: string | null | undefined): string {
+  const n = parseInt(String(lineNo ?? '0'), 10)
+  return isNaN(n) ? String(lineNo ?? '0') : String(n)
+}
+
+function createSoLookupKey(projectId: string | null | undefined, lineNo: string | null | undefined): string {
+  return `${String(projectId ?? '')}::${normalizeLineNo(lineNo)}`
 }
 
 // ── 子元件 ───────────────────────────────────────────────────
@@ -235,15 +245,16 @@ function InfoGrid({ rows }: {
 
 // ── 採購單卡片（常平 C / 委外 O）────────────────────────────
 function PoCard({
-  mo, soMap, customerCodeMap,
+  mo, soMap, soLineLookup, customerCodeMap,
 }: {
   mo: MoRecord
   soMap: Map<string, SoLine[]>
+  soLineLookup: Map<string, SoLine>
   customerCodeMap: Map<string, string>
 }) {
   const lineNo = getLineNo(mo)
   const soLines = soMap.get(mo.source_order ?? '') ?? []
-  const so = soLines.find(l => String(parseInt(String(l.line_no || '0'), 10)) === lineNo) ?? soLines[0] ?? null
+  const so = soLineLookup.get(createSoLookupKey(mo.source_order ?? '', lineNo)) ?? soLines[0] ?? null
   const poUnit = so?.unit_of_measure_oru || so?.unit_of_measure || ''
   const poQtyValue = (mo.planned_qty || '').trim()
   const poQtyDisplay = poQtyValue ? `${poQtyValue}${poUnit ? ` ${poUnit}` : ''}` : '—'
@@ -494,8 +505,62 @@ function MoPrintContent() {
   const [records, setRecords] = useState<MoRecord[]>([])
   const [soMap, setSoMap]     = useState<Map<string, SoLine[]>>(new Map())
   const [customerCodeMap, setCustomerCodeMap] = useState<Map<string, string>>(new Map()) // cname → partner_id
+  const [exportingWord, setExportingWord] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
+
+  const soLineLookup = useMemo(() => {
+    const map = new Map<string, SoLine>()
+    for (const [projectId, lines] of soMap.entries()) {
+      for (const line of lines) {
+        const key = createSoLookupKey(projectId, line.line_no)
+        if (!map.has(key)) map.set(key, line)
+      }
+    }
+    return map
+  }, [soMap])
+
+  const handleExportWord = useCallback(async () => {
+    if (exportingWord) return
+    setExportingWord(true)
+    try {
+      const mod = await import('./exportWord')
+      await mod.exportPoToWord(records, soMap, customerCodeMap)
+    } finally {
+      setExportingWord(false)
+    }
+  }, [exportingWord, records, soMap, customerCodeMap])
+
+  const visibleRecords = useMemo(() => {
+    if (visibleCount <= 0) return []
+    return records.slice(0, visibleCount)
+  }, [records, visibleCount])
+
+  useEffect(() => {
+    if (records.length === 0) {
+      setVisibleCount(0)
+      return
+    }
+    setVisibleCount(Math.min(RENDER_CHUNK_SIZE, records.length))
+  }, [records])
+
+  useEffect(() => {
+    if (visibleCount === 0) return
+    if (visibleCount >= records.length) return
+    const timer = window.setTimeout(() => {
+      setVisibleCount(prev => Math.min(prev + RENDER_CHUNK_SIZE, records.length))
+    }, 16)
+    return () => window.clearTimeout(timer)
+  }, [visibleCount, records.length])
+
+  const handlePrintClick = useCallback(async () => {
+    if (visibleCount < records.length) {
+      setVisibleCount(records.length)
+      await new Promise<void>(resolve => window.setTimeout(resolve, 80))
+    }
+    window.print()
+  }, [visibleCount, records.length])
 
   useEffect(() => {
     // ── Demo 模式：使用假資料，不讀 sessionStorage ──
@@ -520,9 +585,17 @@ function MoPrintContent() {
         ...new Set(mos.map(m => m.source_order).filter((x): x is string => !!x)),
       ]
       if (projectIds.length === 0) {
-        // 沒有來源訂單，仍然載入客戶代碼表供 lot_number 使用
+        // 沒有來源訂單時，僅查本次列印會用到的客戶，避免掃整張客戶表
+        const lotNames = [...new Set(mos.map(m => (m.lot_number ?? '').trim()).filter(Boolean))]
+        if (lotNames.length === 0) {
+          setLoading(false)
+          return
+        }
         void (async () => {
-          const { data: custData } = await supabase.from('erp_customers').select('partner_id, cname')
+          const { data: custData } = await supabase
+            .from('erp_customers')
+            .select('partner_id, cname')
+            .in('cname', lotNames)
           const codeMap = new Map<string, string>()
           for (const c of (custData ?? []) as { partner_id: string; cname: string }[]) codeMap.set(c.cname, c.partner_id)
           setCustomerCodeMap(codeMap)
@@ -546,13 +619,21 @@ function MoPrintContent() {
         }
         setSoMap(map)
 
-        // 同時載入客戶代碼表（供無 SO 的 lot_number fallback 使用）
-        const { data: custData } = await supabase
-          .from('erp_customers')
-          .select('partner_id, cname')
+        // 同時載入客戶代碼表（僅查本次列印實際需要的客戶名稱）
+        const customerNames = [...new Set([
+          ...mos.map(m => (m.lot_number ?? '').trim()),
+          ...(data ?? []).map(r => String((r as SoLine).partner_name ?? '').trim()),
+        ].filter(Boolean))]
+
         const codeMap = new Map<string, string>()
-        for (const c of (custData ?? []) as { partner_id: string; cname: string }[]) {
-          codeMap.set(c.cname, c.partner_id)
+        if (customerNames.length > 0) {
+          const { data: custData } = await supabase
+            .from('erp_customers')
+            .select('partner_id, cname')
+            .in('cname', customerNames)
+          for (const c of (custData ?? []) as { partner_id: string; cname: string }[]) {
+            codeMap.set(c.cname, c.partner_id)
+          }
         }
         setCustomerCodeMap(codeMap)
 
@@ -595,7 +676,6 @@ function MoPrintContent() {
       <style dangerouslySetInnerHTML={{ __html: `
         @page { size: A4 portrait; margin: 8mm 0; }
         @media screen {
-          html { -webkit-filter: grayscale(100%) !important; filter: grayscale(100%) !important; }
           html, body { background: #fff !important; color: #000 !important; }
           .mo-pages-wrapper { background: #efefef !important; }
           .mo-toolbar {
@@ -697,18 +777,22 @@ function MoPrintContent() {
           <span style={{ fontSize: '11px', color: '#475569' }}>
             SO 資料：{soMap.size} 筆訂單已載入
           </span>
+          <span style={{ fontSize: '11px', color: '#475569' }}>
+            預覽載入：{Math.min(visibleCount, records.length)} / {records.length}
+          </span>
           <button
-            onClick={() => void exportPoToWord(records, soMap, customerCodeMap)}
+            onClick={() => void handleExportWord()}
+            disabled={exportingWord}
             style={{
               padding: '8px 18px', background: '#16a34a', borderRadius: '6px',
               cursor: 'pointer', color: 'white', fontSize: '13px',
               fontWeight: 700, border: 'none',
             }}
           >
-            📄 下載 Word
+            {exportingWord ? '產生中...' : '📄 下載 Word'}
           </button>
           <button
-            onClick={() => window.print()}
+            onClick={() => void handlePrintClick()}
             style={{
               padding: '8px 22px', background: '#0891b2', borderRadius: '6px',
               cursor: 'pointer', color: 'white', fontSize: '13px',
@@ -722,15 +806,15 @@ function MoPrintContent() {
 
       {/* ── 頁面容器 ───────────────────────────────────────── */}
       <div className="mo-pages-wrapper" style={{ background: '#64748b', padding: '24px 16px', minHeight: '100vh' }}>
-        {records.map((mo) => {
+        {visibleRecords.map((mo) => {
           // 常平 C / 委外 O → 採購單格式
           if (mo.factory === 'C' || mo.factory === 'O') {
-            return <PoCard key={mo.mo_number} mo={mo} soMap={soMap} customerCodeMap={customerCodeMap} />
+            return <PoCard key={mo.mo_number} mo={mo} soMap={soMap} soLineLookup={soLineLookup} customerCodeMap={customerCodeMap} />
           }
 
           const lineNo = getLineNo(mo)
           const soLines = soMap.get(mo.source_order ?? '') ?? []
-          const so = soLines.find(l => String(parseInt(String(l.line_no || '0'), 10)) === lineNo) ?? soLines[0] ?? null
+          const so = soLineLookup.get(createSoLookupKey(mo.source_order ?? '', lineNo)) ?? soLines[0] ?? null
 
           const part   = so?.mbp_part || so?.part || null
           const qty    = so?.order_qty_oru ?? so?.order_qty ?? null
