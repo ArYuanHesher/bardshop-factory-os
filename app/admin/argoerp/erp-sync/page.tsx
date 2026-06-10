@@ -50,6 +50,7 @@ interface SoLine {
   unit_of_measure_oru: string | null
   unit_price_oru: number
   grade: string | null
+  customer_remark?: string | null
   remark: string | null
   tpn_part_no: string | null
   create_date: string | null
@@ -871,7 +872,7 @@ function SyncCard({ docKey }: SyncCardProps) {
     }
     const { data } = await query
     if (!data || data.length === 0) return
-    const headers = ['狀態', '訂單編號', '序號', '料號', '品名/規格說明', '數量', '交貨日(預)', '客戶名稱', '業務員', '備註']
+    const headers = ['狀態', '訂單編號', '序號', '料號', '品名/規格說明', '數量', '交貨日(預)', '客戶名稱', '業務員', '商品備註']
     const rows = data.map((r) => [
       r.hold_status ?? '',
       r.project_id ?? '',
@@ -1066,7 +1067,7 @@ ${poPages}
   }
 
   const handleSoPrint = () => {
-    const headers = ['狀態', '訂單編號', '序號', '料號', '品名/規格說明', '數量', '交貨日(預)', '客戶名稱', '業務員', '備註']
+    const headers = ['狀態', '訂單編號', '序號', '料號', '品名/規格說明', '數量', '交貨日(預)', '客戶名稱', '業務員', '商品備註']
     const rows = soRecords.map((r) => [
       r.hold_status ?? '—',
       r.project_id ?? '—',
@@ -1205,6 +1206,12 @@ ${poPages}
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'sync_po' }),
+        })
+      } else if (isPrTab) {
+        res = await fetch('/api/argoerp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'sync_pr' }),
         })
       } else {
         const filtersObj: Record<string, string> = {}
@@ -1774,7 +1781,7 @@ ${poPages}
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">交貨日(預)</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">客戶名稱 / 業務員</th>
                   <th className="px-3 py-2 text-left text-slate-400 font-medium">打樣/追加單號</th>
-                  <th className="px-3 py-2 text-left text-slate-400 font-medium">備註</th>
+                  <th className="px-3 py-2 text-left text-slate-400 font-medium">商品備註</th>
                   <th className="px-3 py-2 text-center text-slate-400 font-medium">操作</th>
                 </tr>
               </thead>

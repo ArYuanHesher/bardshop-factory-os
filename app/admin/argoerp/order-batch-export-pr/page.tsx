@@ -4,8 +4,8 @@
  * 出單表➜委外請購
  * ArgoERP IFAF105 — 請購單（PR）介面
  *
- * 一物一單：每個委外品項各自產生一張請購單
- * 請購單號格式：MPO + 銷售訂單數字部分 + 2位 SO 序號（match_line_no）
+ * 一張請購單（表頭）+ 多筆明細（表身）
+ * 請購單號格式：MPO + YYYYMMDD + 2位流水（例：MPO2026060801）
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -31,6 +31,7 @@ interface SourceRow {
 }
 
 interface PrHeader {
+  apply_id: string
   apply_date: string
   department: string
   hold_status: 'OPEN' | 'HOLD' | 'CLOSE' | 'UNSIGNED'
@@ -38,7 +39,6 @@ interface PrHeader {
 }
 
 interface LineEdit {
-  line_no: string
   mbp_ver: string
   uom: string
 }
@@ -63,26 +63,9 @@ function fmtDate(d: Date): string {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
 }
 
-function extractOrderNums(orderNo: string): string {
-  return orderNo.replace(/\D/g, '')
-}
-
-function genRowApplyNos(rows: SourceRow[]): string[] {
-  const counters = new Map<string, number>()
-  return rows.map(row => {
-    const nums = extractOrderNums(row.order_number)
-    const lineNo = row.match_line_no != null ? parseInt(row.match_line_no, 10) : Number.NaN
-    if (!Number.isNaN(lineNo) && lineNo > 0) {
-      return `MPO${nums}${String(lineNo).padStart(2, '0')}`
-    }
-    const c = (counters.get(nums) ?? 0) + 1
-    counters.set(nums, c)
-    return `MPO${nums}${String(c).padStart(2, '0')}`
-  })
-}
-
 function makeDefaultHeader(): PrHeader {
   return {
+    apply_id: '',
     apply_date: fmtDate(new Date()),
     department: 'M1100',
     hold_status: 'OPEN',
@@ -100,7 +83,6 @@ export default function PrBatchExportOPage() {
   const [sourceRows, setSourceRows] = useState<SourceRow[]>([])
   const [importedMpoRows, setImportedMpoRows] = useState<SourceRow[]>([])
   const [lineEdits, setLineEdits] = useState<LineEdit[]>([])
-  const [rowApplyNos, setRowApplyNos] = useState<string[]>([])
   const [header, setHeader] = useState<PrHeader>(makeDefaultHeader)
 
   const [availDates, setAvailDates] = useState<{ sheet_date: string; row_count: number }[]>([])
@@ -113,7 +95,7 @@ export default function PrBatchExportOPage() {
   const [importProgress, setImportProgress] = useState<{ done: number; total: number; errors: string[] } | null>(null)
   const [msg, setMsg] = useState('')
   const [unitMap, setUnitMap] = useState<Record<string, string>>({})
-  const [seqMismatchIdx, setSeqMismatchIdx] = useState<Set<number>>(new Set())
+  const [applyIdLoading, setApplyIdLoading] = useState(false)
 
   const [prSearchId, setPrSearchId] = useState('')
   const [prSearching, setPrSearching] = useState(false)
@@ -174,6 +156,42 @@ export default function PrBatchExportOPage() {
     return nextMap
   }, [])
 
+  const generateApplyId = useCallback(async (applyDate: string, existingRows: SourceRow[] = []) => {
+    const digits = applyDate.replace(/\D/g, '').slice(0, 8)
+    if (digits.length !== 8) throw new Error('開立日期格式錯誤，請使用 YYYY/MM/DD')
+    const prefix = `MPO${digits}`
+
+    const candidates: string[] = []
+    for (const row of existingRows) {
+      const pr = String(row.pr_number ?? '').trim().toUpperCase()
+      const mo = String(row.mo_number ?? '').trim().toUpperCase()
+      if (pr.startsWith(prefix)) candidates.push(pr)
+      if (mo.startsWith(prefix)) candidates.push(mo)
+    }
+
+    const { data, error } = await supabase
+      .from('erp_pj_sync')
+      .select('doc_no')
+      .eq('doc_type', '請購單號')
+      .ilike('doc_no', `${prefix}%`)
+
+    if (error) throw error
+
+    for (const rec of (data ?? []) as Array<{ doc_no?: string | null }>) {
+      const docNo = String(rec.doc_no ?? '').trim().toUpperCase()
+      if (docNo.startsWith(prefix)) candidates.push(docNo)
+    }
+
+    let maxSeq = 0
+    for (const no of candidates) {
+      const suffix = no.slice(prefix.length)
+      const seq = parseInt(suffix, 10)
+      if (!Number.isNaN(seq) && seq > maxSeq) maxSeq = seq
+    }
+
+    return `${prefix}${String(maxSeq + 1).padStart(2, '0')}`
+  }, [])
+
   const loadSheet = useCallback(async (date: string) => {
     if (!date) return
     try {
@@ -189,11 +207,9 @@ export default function PrBatchExportOPage() {
         .filter((x: SourceRow) => x.po_status !== 'no_po')
         .map((x: SourceRow) => ({ ...x, match_line_no: x.match_line_no ?? null }))
 
-      // 舊資料補償：早期已匯入請購但僅回寫 mo_number=po_number，沒有 pr_number。
-      // 這裡用 APPLY_ID 規則補出 pr_number，並回寫到 daily_order_sheets，避免後續頁面判斷遺漏。
-      const legacyApplyNos = genRowApplyNos(normalizedRows)
+      // 舊資料補償：早期已匯入請購但缺少 pr_number，若 mo_number 本身就是 MPO 則補寫。
       const legacyBackfillUpdates: Array<Record<string, unknown>> = []
-      const normalizedWithBackfill = normalizedRows.map((row, idx) => {
+      const normalizedWithBackfill = normalizedRows.map((row) => {
         const hasLegacyImportedMark =
           row.factory === 'O' &&
           row.po_status === 'matched' &&
@@ -203,7 +219,8 @@ export default function PrBatchExportOPage() {
 
         if (!hasLegacyImportedMark) return row
 
-        const backfilledPrNo = legacyApplyNos[idx] ?? ''
+        const moNo = String(row.mo_number ?? '').trim().toUpperCase()
+        const backfilledPrNo = moNo.startsWith('MPO') ? moNo : ''
         if (row.row_key && backfilledPrNo) {
           legacyBackfillUpdates.push({ row_key: row.row_key, pr_number: backfilledPrNo })
         }
@@ -242,14 +259,13 @@ export default function PrBatchExportOPage() {
       setSourceRows(rows)
       setImportedMpoRows(mpoImportedRows)
       setLineEdits(rows.map(row => ({
-        line_no: '1',
         mbp_ver: '1',
         uom: fetchedUnitMap[row.item_code] || 'PCS',
       })))
-      setRowApplyNos(genRowApplyNos(rows))
       setLoadedDate(date)
       setActiveTab('pending')
-      setSeqMismatchIdx(new Set())
+      const autoApplyId = await generateApplyId(header.apply_date, normalizedWithBackfill)
+      setHeader(prev => ({ ...prev, apply_id: autoApplyId }))
       if (rows.length === 0 && mpoImportedRows.length > 0) {
         setMsg(`ℹ️ 此日期委外列皆已匹配 MPO（${mpoImportedRows.length} 筆），已移至「已匯入(MPO)」分頁`)
       } else {
@@ -258,17 +274,17 @@ export default function PrBatchExportOPage() {
     } catch (e) {
       alert(`載入失敗：${e}`)
     }
-  }, [loadUnitMapForRows])
+  }, [loadUnitMapForRows, header.apply_date, generateApplyId])
 
   const payload = useMemo<Array<Record<string, string>>>(() => {
     return sourceRows.map((row, i) => {
-      const edit = lineEdits[i] ?? { line_no: '1', mbp_ver: '1', uom: 'PCS' }
+      const edit = lineEdits[i] ?? { mbp_ver: '1', uom: 'PCS' }
       return {
-        APPLY_ID: rowApplyNos[i] ?? '',
+        APPLY_ID: header.apply_id,
         APPLY_DATE: header.apply_date,
         SEG_SEGMENT_NO_DEPARTMENT: header.department,
         HOLD_STATUS: header.hold_status,
-        LINE_NO: edit.line_no || '1',
+        LINE_NO: String(i + 1),
         MBP_PART: row.item_code,
         MBP_VER: edit.mbp_ver || '1',
         MBP_LOT_NO: row.order_number,
@@ -278,14 +294,14 @@ export default function PrBatchExportOPage() {
         DUEDATE: row.delivery_date,
       }
     })
-  }, [sourceRows, lineEdits, rowApplyNos, header])
+  }, [sourceRows, lineEdits, header])
 
   const doExport = useCallback((fmt: 'csv' | 'xlsx' = 'csv') => {
     if (payload.length === 0) return
 
     const now = new Date()
     const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
-    const fileBase = `ArgoERP_委外請購單_BATCH_${loadedDate ?? ts}_${ts}`
+    const fileBase = `ArgoERP_委外請購單_${header.apply_id || 'MPO'}_${loadedDate ?? ts}_${ts}`
     const rows = payload.map(r => ERP_KEYS.map(k => r[k] ?? ''))
 
     if (fmt === 'xlsx') {
@@ -307,18 +323,22 @@ export default function PrBatchExportOPage() {
     a.download = `${fileBase}.csv`
     a.click()
     URL.revokeObjectURL(url)
-  }, [payload, loadedDate])
+  }, [payload, loadedDate, header.apply_id])
 
   const handleImport = useCallback(async () => {
     if (payload.length === 0) {
       alert('尚無可匯入資料')
       return
     }
+    if (!header.apply_id.trim()) {
+      alert('請先產生或填寫請購單號')
+      return
+    }
     if (!header.department.trim()) {
       alert('請填寫請購部門')
       return
     }
-    if (!confirm(`確認逐張匯入 ${payload.length} 張委外請購單至 ArgoERP？`)) return
+    if (!confirm(`確認匯入請購單 ${header.apply_id}（${payload.length} 筆明細）至 ArgoERP？`)) return
 
     const unitMismatch = sourceRows
       .map((row, i) => {
@@ -337,50 +357,49 @@ export default function PrBatchExportOPage() {
 
     setImporting(true)
     setMsg('')
-    setImportProgress({ done: 0, total: payload.length, errors: [] })
+    setImportProgress({ done: 0, total: 1, errors: [] })
     const errors: string[] = []
     const sheetUpdates: Array<Record<string, unknown>> = []
 
-    for (let i = 0; i < payload.length; i++) {
-      try {
-        const res = await fetch('/api/argoerp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'import', interfaceId: 'IFAF105', data: [payload[i]] }),
-        })
-        const result = await res.json()
-        if (!res.ok || !result?.success) {
-          const raw = typeof result?.rawText === 'string'
-            ? result.rawText.slice(0, 200)
-            : JSON.stringify(result?.apiResult ?? '').slice(0, 200)
-          errors.push(`${rowApplyNos[i]}: ${result?.error || `HTTP ${res.status}`} — ${raw}`)
-        } else {
+    try {
+      const res = await fetch('/api/argoerp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'import', interfaceId: 'IFAF105', data: payload }),
+      })
+      const result = await res.json()
+      if (!res.ok || !result?.success) {
+        const raw = typeof result?.rawText === 'string'
+          ? result.rawText.slice(0, 200)
+          : JSON.stringify(result?.apiResult ?? '').slice(0, 200)
+        errors.push(`${header.apply_id}: ${result?.error || `HTTP ${res.status}`} — ${raw}`)
+      } else {
+        for (let i = 0; i < sourceRows.length; i++) {
           const src = sourceRows[i]
-          if (loadedDate && src?.row_key) {
-            const hasMatchedPo = src.po_status === 'matched' && !!src.po_number
-            if (hasMatchedPo) {
-              sheetUpdates.push({
-                row_key: src.row_key,
-                mo_number: src.po_number,
-                pr_number: rowApplyNos[i] ?? '',
-                po_number: src.po_number,
-                po_status: 'matched',
-              })
-            } else {
-              sheetUpdates.push({
-                row_key: src.row_key,
-                mo_number: rowApplyNos[i] ?? '',
-                pr_number: rowApplyNos[i] ?? '',
-                po_status: null,
-              })
-            }
+          if (!loadedDate || !src?.row_key) continue
+          const hasMatchedPo = src.po_status === 'matched' && !!src.po_number
+          if (hasMatchedPo) {
+            sheetUpdates.push({
+              row_key: src.row_key,
+              mo_number: src.po_number,
+              pr_number: header.apply_id,
+              po_number: src.po_number,
+              po_status: 'matched',
+            })
+          } else {
+            sheetUpdates.push({
+              row_key: src.row_key,
+              mo_number: header.apply_id,
+              pr_number: header.apply_id,
+              po_status: null,
+            })
           }
         }
-      } catch (e) {
-        errors.push(`${rowApplyNos[i]}: ${e instanceof Error ? e.message : String(e)}`)
       }
-      setImportProgress({ done: i + 1, total: payload.length, errors: [...errors] })
+    } catch (e) {
+      errors.push(`${header.apply_id}: ${e instanceof Error ? e.message : String(e)}`)
     }
+    setImportProgress({ done: 1, total: 1, errors: [...errors] })
 
     let sheetSyncMsg = ''
     if (loadedDate && sheetUpdates.length > 0) {
@@ -403,24 +422,22 @@ export default function PrBatchExportOPage() {
       }
     }
 
-    const okCount = payload.length - errors.length
     if (errors.length === 0) {
-      const m = `✅ 全部 ${payload.length} 張委外請購單已匯入 ERP${sheetSyncMsg}`
+      const m = `✅ 請購單 ${header.apply_id} 已匯入 ERP（${payload.length} 筆明細）${sheetSyncMsg}`
       setMsg(m)
       alert(m)
       setSourceRows([])
       setLineEdits([])
-      setRowApplyNos([])
       setLoadedDate(null)
     } else {
-      const m = `⚠️ 匯入完成：${okCount} 成功，${errors.length} 失敗${sheetSyncMsg}`
+      const m = `⚠️ 匯入完成：請購單 ${header.apply_id} 失敗${sheetSyncMsg}`
       setMsg(m)
       alert(`${m}\n\n失敗明細：\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? `\n…（共 ${errors.length} 筆）` : ''}`)
     }
 
     setImporting(false)
     setTimeout(() => setImportProgress(null), 12000)
-  }, [payload, rowApplyNos, header.department, sourceRows, loadedDate, lineEdits, unitMap])
+  }, [payload, header.apply_id, header.department, sourceRows, loadedDate, lineEdits, unitMap])
 
   const setH = useCallback(<K extends keyof PrHeader>(k: K, v: PrHeader[K]) => {
     setHeader(prev => ({ ...prev, [k]: v }))
@@ -430,9 +447,18 @@ export default function PrBatchExportOPage() {
     setLineEdits(prev => prev.map((e, idx) => idx === i ? { ...e, [k]: v } : e))
   }, [])
 
-  const setApplyNo = useCallback((i: number, v: string) => {
-    setRowApplyNos(prev => prev.map((n, idx) => idx === i ? v : n))
-  }, [])
+  const handleRegenerateApplyId = useCallback(async () => {
+    setApplyIdLoading(true)
+    try {
+      const nextId = await generateApplyId(header.apply_date, [...sourceRows, ...importedMpoRows])
+      setHeader(prev => ({ ...prev, apply_id: nextId }))
+      setMsg(`✅ 已產生請購單號：${nextId}`)
+    } catch (e) {
+      setMsg(`❌ 產生請購單號失敗：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setApplyIdLoading(false)
+    }
+  }, [generateApplyId, header.apply_date, sourceRows, importedMpoRows])
 
   const searchSyncedPr = useCallback(async () => {
     const q = prSearchId.trim()
@@ -460,39 +486,13 @@ export default function PrBatchExportOPage() {
     }
   }, [prSearchId])
 
-  const compareSourceSequence = useCallback(() => {
-    if (sourceRows.length === 0) {
-      setMsg('⚠️ 尚未載入資料，無法比對來源序號')
-      return
-    }
-
-    const mismatch = new Set<number>()
-    for (let i = 0; i < sourceRows.length; i++) {
-      const row = sourceRows[i]
-      const nums = extractOrderNums(row.order_number)
-      const sourceSeq = (() => {
-        const n = row.match_line_no != null ? parseInt(row.match_line_no, 10) : Number.NaN
-        return !Number.isNaN(n) && n > 0 ? n : 1
-      })()
-      const expectedApply = `MPO${nums}${String(sourceSeq).padStart(2, '0')}`
-      if ((rowApplyNos[i] ?? '') !== expectedApply) mismatch.add(i)
-    }
-
-    setSeqMismatchIdx(mismatch)
-    if (mismatch.size === 0) {
-      setMsg('✅ 來源序號比對一致')
-    } else {
-      setMsg(`⚠️ 來源序號比對完成：${mismatch.size} 筆不一致（已標示）`)
-    }
-  }, [sourceRows, rowApplyNos])
-
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="max-w-[1500px] mx-auto space-y-4">
         <div className="flex items-end justify-between gap-3 flex-wrap border-b border-slate-800 pb-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">出單表➜委外請購</h1>
-            <p className="text-slate-400 text-sm mt-1">ArgoERP IFAF105（PJBF084）｜一物一單｜請購單號前綴 MPO</p>
+            <p className="text-slate-400 text-sm mt-1">ArgoERP IFAF105（PJBF084）｜一張請購單多筆明細｜請購單號規則 MPOYYYYMMDDNN</p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
@@ -518,7 +518,19 @@ export default function PrBatchExportOPage() {
 
         <section className="bg-slate-900 border border-slate-800 rounded p-4">
           <h2 className="font-semibold mb-3">請購表頭（必填）</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-sm">
+            <label className="flex flex-col gap-1">請購單號
+              <div className="flex gap-2">
+                <input value={header.apply_id} onChange={e => setH('apply_id', e.target.value.toUpperCase())} className="px-2 py-1.5 rounded bg-slate-950 border border-slate-700 flex-1 font-mono" />
+                <button
+                  onClick={() => void handleRegenerateApplyId()}
+                  disabled={applyIdLoading}
+                  className="px-3 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-800 disabled:text-slate-500 text-xs whitespace-nowrap"
+                >
+                  {applyIdLoading ? '取號中…' : '重產單號'}
+                </button>
+              </div>
+            </label>
             <label className="flex flex-col gap-1">開立日期
               <input value={header.apply_date} onChange={e => setH('apply_date', e.target.value)} className="px-2 py-1.5 rounded bg-slate-950 border border-slate-700" />
             </label>
@@ -560,11 +572,10 @@ export default function PrBatchExportOPage() {
           <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
             <h2 className="font-semibold">明細（{sourceRows.length} 筆）</h2>
             <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={() => compareSourceSequence()} disabled={sourceRows.length === 0} className="px-3 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-800 disabled:text-slate-500 text-sm">比對來源序號</button>
               <button onClick={() => doExport('csv')} disabled={payload.length === 0} className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-sm">匯出 CSV</button>
               <button onClick={() => doExport('xlsx')} disabled={payload.length === 0} className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-sm">匯出 XLSX</button>
               <button onClick={() => void handleImport()} disabled={importing || payload.length === 0} className="px-4 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-500 text-sm">
-                {importing ? '匯入中…' : `匯入 ERP（${payload.length}）`}
+                {importing ? '匯入中…' : `匯入 ERP（1 張/${payload.length} 筆）`}
               </button>
             </div>
           </div>
@@ -581,6 +592,7 @@ export default function PrBatchExportOPage() {
                 <tr>
                   <th className="px-2 py-2 text-left">#</th>
                   <th className="px-2 py-2 text-left">請購單號 (APPLY_ID)</th>
+                  <th className="px-2 py-2 text-left">LINE_NO</th>
                   <th className="px-2 py-2 text-left">來源單號</th>
                   <th className="px-2 py-2 text-left">單據種類</th>
                   <th className="px-2 py-2 text-left">料號</th>
@@ -588,7 +600,6 @@ export default function PrBatchExportOPage() {
                   <th className="px-2 py-2 text-left">數量</th>
                   <th className="px-2 py-2 text-left">交期</th>
                   <th className="px-2 py-2 text-left">來源序號</th>
-                  <th className="px-2 py-2 text-left">序號</th>
                   <th className="px-2 py-2 text-left">版本</th>
                   <th className="px-2 py-2 text-left">批號</th>
                   <th className="px-2 py-2 text-left">ERP 對應單位</th>
@@ -597,11 +608,10 @@ export default function PrBatchExportOPage() {
               </thead>
               <tbody>
                 {sourceRows.map((row, i) => (
-                  <tr key={`${row.row_key || row.order_number}-${i}`} className={`border-t border-slate-800/80 ${seqMismatchIdx.has(i) ? 'bg-amber-950/30' : ''}`}>
+                  <tr key={`${row.row_key || row.order_number}-${i}`} className="border-t border-slate-800/80">
                     <td className="px-2 py-1.5 text-slate-500">{i + 1}</td>
-                    <td className="px-2 py-1.5">
-                      <input value={rowApplyNos[i] ?? ''} onChange={e => setApplyNo(i, e.target.value)} className="w-44 px-2 py-1 rounded bg-slate-950 border border-slate-700" />
-                    </td>
+                    <td className="px-2 py-1.5 font-mono text-emerald-300">{header.apply_id || '—'}</td>
+                    <td className="px-2 py-1.5 font-mono">{i + 1}</td>
                     <td className="px-2 py-1.5 text-cyan-300">{row.order_number}</td>
                     <td className="px-2 py-1.5">{row.doc_type}</td>
                     <td className="px-2 py-1.5 font-mono">{row.item_code}</td>
@@ -609,9 +619,6 @@ export default function PrBatchExportOPage() {
                     <td className="px-2 py-1.5 font-mono">{row.quantity}</td>
                     <td className="px-2 py-1.5">{row.delivery_date}</td>
                     <td className="px-2 py-1.5 font-mono">{row.match_line_no || '1'}</td>
-                    <td className="px-2 py-1.5">
-                      <input value={lineEdits[i]?.line_no ?? '1'} onChange={e => setLE(i, 'line_no', e.target.value)} className="w-14 px-2 py-1 rounded bg-slate-950 border border-slate-700" />
-                    </td>
                     <td className="px-2 py-1.5">
                       <input value={lineEdits[i]?.mbp_ver ?? '1'} onChange={e => setLE(i, 'mbp_ver', e.target.value)} className="w-16 px-2 py-1 rounded bg-slate-950 border border-slate-700" />
                     </td>
@@ -655,7 +662,7 @@ export default function PrBatchExportOPage() {
                     {importedMpoRows.map((row, i) => (
                       <tr key={`${row.row_key || row.order_number}-imp-${i}`} className="border-t border-slate-800/80">
                         <td className="px-2 py-1.5 text-slate-500">{i + 1}</td>
-                        <td className="px-2 py-1.5 font-mono text-emerald-300">{row.mo_number || '—'}</td>
+                        <td className="px-2 py-1.5 font-mono text-emerald-300">{row.pr_number || row.mo_number || '—'}</td>
                         <td className="px-2 py-1.5 text-cyan-300">{row.order_number}</td>
                         <td className="px-2 py-1.5">{row.doc_type}</td>
                         <td className="px-2 py-1.5 font-mono">{row.item_code}</td>

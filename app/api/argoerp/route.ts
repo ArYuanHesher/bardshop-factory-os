@@ -60,6 +60,18 @@ function getRecordValue(record: Record<string, unknown> | undefined | null, fiel
   return suffixKey ? record[suffixKey] : undefined
 }
 
+function getFirstNonEmptyRecordValue(
+  record: Record<string, unknown> | undefined | null,
+  fieldNames: string[]
+): string | null {
+  for (const fieldName of fieldNames) {
+    const raw = getRecordValue(record, fieldName)
+    const value = String(raw ?? '').trim()
+    if (value) return value
+  }
+  return null
+}
+
 function toNumber(value: unknown): number {
   if (value === null || value === undefined || value === '') return 0
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0
@@ -622,8 +634,8 @@ export async function POST(request: NextRequest) {
         APIKEY3: keys.APIKEY3,
         SEGMENT,
         TABLE: 'PJ_PROJECT',
-        SHOWNULLCOLUMN: 'N',
-        CUSTOMCOLUMN: 'PROJECT_ID,BEGIN_DATE,HOLD_STATUS,TPN_PARTNER_ID,SALES_NAME,PARTNER_NAME',
+        // 取全欄位，避免不同 ERP 站台地址欄位命名差異導致抓不到值。
+        SHOWNULLCOLUMN: 'Y',
         PJT_TYPE: "= 'SO'",
         HOLD_STATUS: "IN ('OPEN','UNSIGNED')",
       })
@@ -701,6 +713,22 @@ export async function POST(request: NextRequest) {
       const soLines = Array.from(dedupeMap.values()).map((row) => {
         const pid = String(getRecordValue(row, 'PJT_PROJECT_ID') ?? '').trim()
         const header = soHeaderMap.get(pid)
+        const deliveryAddress = getFirstNonEmptyRecordValue(header, [
+          'DELIVERY_ADDRESS',
+          'SHIP_ADDRESS',
+          'RECEIVE_ADDRESS',
+          'ADDRESS',
+          'DELIVERY_ADDR',
+          'SHIP_ADDR',
+        ])
+        const customerRemark = getFirstNonEmptyRecordValue(header, [
+          'CUSTOMER_REMARK',
+          'REMARK',
+        ])
+        const invoiceFormat = getFirstNonEmptyRecordValue(header, [
+          'EXPORT_MODE',
+          'INVOICE_FORMAT',
+        ])
         return {
           project_id:         pid,
           begin_date:         String(getRecordValue(header, 'BEGIN_DATE') ?? '').trim() || null,
@@ -719,7 +747,10 @@ export async function POST(request: NextRequest) {
           duedate:            String(getRecordValue(row, 'DUEDATE') ?? '').trim() || null,
           description:        String(getRecordValue(row, 'REMARK') ?? '').trim() || null,
           partner_name:       String(getRecordValue(header, 'PARTNER_NAME') ?? '').trim() || null,
-          remark:             String(getRecordValue(row, 'REMARK') ?? '').trim() || null,
+          delivery_address:   deliveryAddress,
+          customer_remark:    customerRemark,
+          invoice_format:     invoiceFormat,
+          remark:             String(getRecordValue(row, 'REMARK2') ?? '').trim() || null,
           packing:            String(getRecordValue(row, 'PACKING') ?? '').trim() || null,
           remark2:            String(getRecordValue(row, 'REMARK2') ?? '').trim() || null,
           tpn_part_no:        String(getRecordValue(row, 'TPN_PART_NO') ?? '').trim() || null,
@@ -930,93 +961,9 @@ export async function POST(request: NextRequest) {
 
     if (action === 'sync_pr') {
       // ── 請購單同步（PJ_APPLYPROJECT + PJ_APPLYPROJECTDETAIL 兩段式，JS 端 JOIN）──────────────
-
-      // Step 1: 查 PJ_APPLYPROJECT（表頭）
-      const prHeaderSparam = JSON.stringify({
-        APIKEY1: keys.APIKEY1, APIKEY2: keys.APIKEY2, APIKEY3: keys.APIKEY3,
-        SEGMENT,
-        TABLE: 'PJ_APPLYPROJECT',
-        SHOWNULLCOLUMN: 'N',
-        CUSTOMCOLUMN: 'PROJECT_ID,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK',
-      })
-      const prHdrRes = await fetch(`${API_BASE}/S_QUERY`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sparam: prHeaderSparam }),
-      })
-      const { parsed: parsedPrHdr, rawText: rawPrHdr } = await readApiResponse(prHdrRes)
-      if (!prHdrRes.ok || !isArgoSuccess(parsedPrHdr)) {
-        return NextResponse.json({ status: 'error', error: extractApiError(parsedPrHdr) || 'PJ_APPLYPROJECT query failed', rawText: rawPrHdr }, { status: 502 })
-      }
-      const prHdrRows = findObjectRows(parsedPrHdr)
-      if (prHdrRows.length === 0) {
-        return NextResponse.json({ status: 'error', error: 'PJ_APPLYPROJECT 查無請購表頭' }, { status: 422 })
-      }
-
-      // 建 header map：PROJECT_ID → header row
-      const prHdrMap = new Map<string, Record<string, unknown>>()
-      for (const row of prHdrRows) {
-        const pid = String(getRecordValue(row, 'PROJECT_ID') ?? '').trim()
-        if (pid) prHdrMap.set(pid, row)
-      }
-
-      // Step 2: 查 PJ_APPLYPROJECTDETAIL（明細）
-      const prDtlSparam = JSON.stringify({
-        APIKEY1: keys.APIKEY1, APIKEY2: keys.APIKEY2, APIKEY3: keys.APIKEY3,
-        SEGMENT,
-        TABLE: 'PJ_APPLYPROJECTDETAIL',
-        SHOWNULLCOLUMN: 'Y',
-        CUSTOMCOLUMN: 'PJT_PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,CURRENCY',
-        LINE_NO: '>= 1',
-      })
-      const prDtlRes = await fetch(`${API_BASE}/S_QUERY`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sparam: prDtlSparam }),
-      })
-      const { parsed: parsedPrDtl, rawText: rawPrDtl } = await readApiResponse(prDtlRes)
-      if (!prDtlRes.ok || !isArgoSuccess(parsedPrDtl)) {
-        return NextResponse.json({ status: 'error', error: extractApiError(parsedPrDtl) || 'PJ_APPLYPROJECTDETAIL query failed', rawText: rawPrDtl }, { status: 502 })
-      }
-      const prDtlRows = findObjectRows(parsedPrDtl)
-
-      if (prDtlRows.length === 0) {
-        return NextResponse.json({ status: 'error', error: 'PJ_APPLYPROJECTDETAIL 查無明細' }, { status: 422 })
-      }
-
       const prSyncedAt = new Date().toISOString()
 
-      // 合併：去重 project_id + line_no，只保留有表頭的明細
-      const prDedupe = new Map<string, { dtl: Record<string, unknown>; hdr: Record<string, unknown> }>()
-      for (const dtl of prDtlRows) {
-        const pid  = String(getRecordValue(dtl, 'PJT_PROJECT_ID') ?? '').trim()
-        const line = String(getRecordValue(dtl, 'LINE_NO') ?? '').trim()
-        const hdr  = prHdrMap.get(pid)
-        if (!hdr) continue
-        const key = `${pid}|${line}`
-        if (!prDedupe.has(key)) prDedupe.set(key, { dtl, hdr })
-      }
-
-      const prSyncRows = Array.from(prDedupe.values()).map(({ dtl, hdr }) => ({
-        doc_type:        '請購單號',
-        doc_no:          String(getRecordValue(hdr, 'PROJECT_ID') ?? '').trim(),
-        sub_no:          String(getRecordValue(dtl, 'LINE_NO') ?? '').trim(),
-        item_code:       String(getRecordValue(dtl, 'MBP_PART') ?? '').trim() || null,
-        description:     String(getRecordValue(hdr, 'REMARK') ?? '').trim() || null,
-        qty:             toNumber(getRecordValue(dtl, 'ORDER_QTY_ORU')),
-        unit:            String(getRecordValue(dtl, 'UNIT_OF_MEASURE_ORU') ?? '').trim() || null,
-        status:          String(getRecordValue(hdr, 'HOLD_STATUS') ?? '').trim() || null,
-        start_date:      String(getRecordValue(hdr, 'APPLY_DATE') ?? '').trim() || null,
-        end_date:        String(getRecordValue(dtl, 'DUEDATE') ?? '').trim() || null,
-        customer_vendor: String(getRecordValue(hdr, 'SEG_SEGMENT_NO_DEPARTMENT') ?? '').trim() || null,
-        remark:          String(getRecordValue(dtl, 'CURRENCY') ?? '').trim() || null,
-        extra: {
-          MBP_VER:    String(getRecordValue(dtl, 'MBP_VER') ?? '').trim() || null,
-          MBP_LOT_NO: String(getRecordValue(dtl, 'MBP_LOT_NO') ?? '').trim() || null,
-          HDR_REMARK: String(getRecordValue(hdr, 'REMARK') ?? '').trim() || null,
-        },
-        synced_at: prSyncedAt,
-      }))
-
-      try {
+      async function persistPrSyncRows(prSyncRows: Array<Record<string, unknown>>) {
         const supabaseAdmin = getSupabaseAdminClient()
         const { error: clearError } = await supabaseAdmin.from('erp_pj_sync').delete().eq('doc_type', '請購單號')
         if (clearError) throw clearError
@@ -1026,6 +973,252 @@ export async function POST(request: NextRequest) {
           const { error: insertError } = await supabaseAdmin.from('erp_pj_sync').insert(chunk)
           if (insertError) throw insertError
         }
+      }
+
+      async function runPrQuery(
+        table: string,
+        customColumn: string | null,
+        extra: Record<string, string> = {},
+        showNullColumn: 'Y' | 'N' = 'Y'
+      ) {
+        const payload: Record<string, string> = {
+          APIKEY1: keys.APIKEY1,
+          APIKEY2: keys.APIKEY2,
+          APIKEY3: keys.APIKEY3,
+          SEGMENT,
+          TABLE: table,
+          SHOWNULLCOLUMN: showNullColumn,
+          ...extra,
+        }
+        if (customColumn) payload.CUSTOMCOLUMN = customColumn
+
+        const sparam = JSON.stringify(payload)
+        const res = await fetch(`${API_BASE}/S_QUERY`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sparam }),
+        })
+        const { parsed, rawText } = await readApiResponse(res)
+        return { res, parsed, rawText, rows: findObjectRows(parsed) }
+      }
+
+      // Step 0: 優先嘗試聯表（部分環境只授權 PJ_APPLYPROJECT,PJ_APPLYPROJECTDETAIL）
+      const prJoinedAttempts = [
+        {
+          customColumn: 'APPLY_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK,CURRENCY',
+          showNull: 'N' as const,
+        },
+        {
+          customColumn: 'PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK,CURRENCY',
+          showNull: 'N' as const,
+        },
+        { customColumn: null, showNull: 'N' as const },
+        {
+          customColumn: 'APPLY_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK,CURRENCY',
+          showNull: 'Y' as const,
+        },
+        {
+          customColumn: 'PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK,CURRENCY',
+          showNull: 'Y' as const,
+        },
+        { customColumn: null, showNull: 'Y' as const },
+      ]
+
+      for (const attemptConfig of prJoinedAttempts) {
+        const joined = await runPrQuery(
+          'PJ_APPLYPROJECT,PJ_APPLYPROJECTDETAIL',
+          attemptConfig.customColumn,
+          { LINE_NO: '>= 1' },
+          attemptConfig.showNull
+        )
+        if (!joined.res.ok || !isArgoSuccess(joined.parsed) || joined.rows.length === 0) continue
+
+        const joinedDedupe = new Map<string, Record<string, unknown>>()
+        for (const row of joined.rows) {
+          const docNo = getFirstNonEmptyRecordValue(row, ['APPLY_ID', 'PROJECT_ID', 'PJT_PROJECT_ID']) ?? ''
+          const subNo = String(getRecordValue(row, 'LINE_NO') ?? '').trim()
+          if (!docNo || !subNo) continue
+          const key = `${docNo}|${subNo}`
+          if (!joinedDedupe.has(key)) joinedDedupe.set(key, row)
+        }
+
+        const prSyncRows = Array.from(joinedDedupe.values()).map((row) => ({
+          doc_type:        '請購單號',
+          doc_no:          getFirstNonEmptyRecordValue(row, ['APPLY_ID', 'PROJECT_ID', 'PJT_PROJECT_ID']) ?? '',
+          sub_no:          String(getRecordValue(row, 'LINE_NO') ?? '').trim(),
+          item_code:       String(getRecordValue(row, 'MBP_PART') ?? '').trim() || null,
+          description:     String(getRecordValue(row, 'REMARK') ?? '').trim() || null,
+          qty:             toNumber(getRecordValue(row, 'ORDER_QTY_ORU')),
+          unit:            String(getRecordValue(row, 'UNIT_OF_MEASURE_ORU') ?? '').trim() || null,
+          status:          String(getRecordValue(row, 'HOLD_STATUS') ?? '').trim() || null,
+          start_date:      String(getRecordValue(row, 'APPLY_DATE') ?? '').trim() || null,
+          end_date:        String(getRecordValue(row, 'DUEDATE') ?? '').trim() || null,
+          customer_vendor: String(getRecordValue(row, 'SEG_SEGMENT_NO_DEPARTMENT') ?? '').trim() || null,
+          remark:          String(getRecordValue(row, 'CURRENCY') ?? '').trim() || null,
+          extra: {
+            MBP_VER:    String(getRecordValue(row, 'MBP_VER') ?? '').trim() || null,
+            MBP_LOT_NO: String(getRecordValue(row, 'MBP_LOT_NO') ?? '').trim() || null,
+            HDR_REMARK: String(getRecordValue(row, 'REMARK') ?? '').trim() || null,
+          },
+          synced_at: prSyncedAt,
+        }))
+
+        if (prSyncRows.length > 0) {
+          try {
+            await persistPrSyncRows(prSyncRows)
+          } catch (err) {
+            const message = err instanceof Error ? formatSupabaseAdminError(err.message) : '寫入 erp_pj_sync 失敗'
+            return NextResponse.json({ status: 'error', error: message }, { status: 500 })
+          }
+
+          return NextResponse.json({
+            status: 'ok',
+            syncedCount: prSyncRows.length,
+            totalHdrRows: prSyncRows.length,
+            totalDtlRows: prSyncRows.length,
+            syncMode: 'joined',
+          })
+        }
+      }
+
+      // Step 1: 查 PJ_APPLYPROJECT（表頭）
+      const prHeaderAttempts = [
+        { customColumn: 'APPLY_ID,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK,CURRENCY', showNull: 'N' as const },
+        { customColumn: 'PROJECT_ID,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK,CURRENCY', showNull: 'N' as const },
+        { customColumn: null, showNull: 'N' as const },
+        { customColumn: 'APPLY_ID,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK,CURRENCY', showNull: 'Y' as const },
+        { customColumn: 'PROJECT_ID,APPLY_DATE,HOLD_STATUS,SEG_SEGMENT_NO_DEPARTMENT,REMARK,CURRENCY', showNull: 'Y' as const },
+        { customColumn: null, showNull: 'Y' as const },
+      ]
+
+      let prHdrRows: Record<string, unknown>[] = []
+      let parsedPrHdr: unknown = null
+      let rawPrHdr = ''
+      let prHdrOk = false
+      for (const attemptConfig of prHeaderAttempts) {
+        const attempt = await runPrQuery('PJ_APPLYPROJECT', attemptConfig.customColumn, {}, attemptConfig.showNull)
+        parsedPrHdr = attempt.parsed
+        rawPrHdr = attempt.rawText
+        if (!attempt.res.ok || !isArgoSuccess(attempt.parsed)) continue
+        if (attempt.rows.length === 0) continue
+        prHdrRows = attempt.rows
+        prHdrOk = true
+        break
+      }
+      if (!prHdrOk) {
+        return NextResponse.json({
+          status: 'error',
+          error: extractApiError(parsedPrHdr) || 'PJ_APPLYPROJECT query failed',
+          rawText: rawPrHdr,
+          debugSparam: {
+            SEGMENT,
+            TABLE: 'PJ_APPLYPROJECT',
+            SHOWNULLCOLUMN: 'Y',
+          },
+        }, { status: 502 })
+      }
+      if (prHdrRows.length === 0) {
+        return NextResponse.json({ status: 'error', error: 'PJ_APPLYPROJECT 查無請購表頭' }, { status: 422 })
+      }
+
+      // 建 header map：兼容 APPLY_ID / PROJECT_ID 欄位差異
+      const prHdrMap = new Map<string, Record<string, unknown>>()
+      for (const row of prHdrRows) {
+        const pid = getFirstNonEmptyRecordValue(row, ['APPLY_ID', 'PROJECT_ID', 'PJT_PROJECT_ID'])
+        if (pid) prHdrMap.set(pid, row)
+      }
+
+      // Step 2: 查 PJ_APPLYPROJECTDETAIL（明細）
+      const prDetailAttempts = [
+        { customColumn: 'APPLY_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,CURRENCY', showNull: 'N' as const },
+        { customColumn: 'PJT_PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,CURRENCY', showNull: 'N' as const },
+        { customColumn: 'PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,CURRENCY', showNull: 'N' as const },
+        { customColumn: null, showNull: 'N' as const },
+        { customColumn: 'APPLY_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,CURRENCY', showNull: 'Y' as const },
+        { customColumn: 'PJT_PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,CURRENCY', showNull: 'Y' as const },
+        { customColumn: 'PROJECT_ID,LINE_NO,MBP_PART,MBP_VER,MBP_LOT_NO,ORDER_QTY_ORU,UNIT_OF_MEASURE_ORU,DUEDATE,CURRENCY', showNull: 'Y' as const },
+        { customColumn: null, showNull: 'Y' as const },
+      ]
+
+      let prDtlRows: Record<string, unknown>[] = []
+      let parsedPrDtl: unknown = null
+      let rawPrDtl = ''
+      let prDtlOk = false
+      for (const attemptConfig of prDetailAttempts) {
+        const attempt = await runPrQuery(
+          'PJ_APPLYPROJECTDETAIL',
+          attemptConfig.customColumn,
+          { LINE_NO: '>= 1' },
+          attemptConfig.showNull
+        )
+        parsedPrDtl = attempt.parsed
+        rawPrDtl = attempt.rawText
+        if (!attempt.res.ok || !isArgoSuccess(attempt.parsed)) continue
+        if (attempt.rows.length === 0) continue
+        prDtlRows = attempt.rows
+        prDtlOk = true
+        break
+      }
+      if (!prDtlOk) {
+        return NextResponse.json({
+          status: 'error',
+          error: extractApiError(parsedPrDtl) || 'PJ_APPLYPROJECTDETAIL query failed',
+          rawText: rawPrDtl,
+          debugSparam: {
+            SEGMENT,
+            TABLE: 'PJ_APPLYPROJECTDETAIL',
+            SHOWNULLCOLUMN: 'Y',
+            LINE_NO: '>= 1',
+          },
+        }, { status: 502 })
+      }
+
+      if (prDtlRows.length === 0) {
+        return NextResponse.json({ status: 'error', error: 'PJ_APPLYPROJECTDETAIL 查無明細' }, { status: 422 })
+      }
+
+      // 合併：去重 project_id + line_no，只保留有表頭的明細
+      const prDedupe = new Map<string, { dtl: Record<string, unknown>; hdr: Record<string, unknown> }>()
+      for (const dtl of prDtlRows) {
+        const pid = getFirstNonEmptyRecordValue(dtl, ['APPLY_ID', 'PJT_PROJECT_ID', 'PROJECT_ID']) ?? ''
+        const line = String(getRecordValue(dtl, 'LINE_NO') ?? '').trim()
+        const hdr  = prHdrMap.get(pid)
+        if (!hdr) continue
+        const key = `${pid}|${line}`
+        if (!prDedupe.has(key)) prDedupe.set(key, { dtl, hdr })
+      }
+
+      if (prDedupe.size === 0) {
+        return NextResponse.json({
+          status: 'error',
+          error: '請購表頭/明細 JOIN 後為 0 筆，可能是 APPLY_ID / PROJECT_ID 欄位命名不一致',
+          totalHdrRows: prHdrRows.length,
+          totalDtlRows: prDtlRows.length,
+        }, { status: 422 })
+      }
+
+      const prSyncRows = Array.from(prDedupe.values()).map(({ dtl, hdr }) => ({
+        doc_type:        '請購單號',
+        doc_no:          getFirstNonEmptyRecordValue(hdr, ['APPLY_ID', 'PROJECT_ID']) ?? '',
+        sub_no:          String(getRecordValue(dtl, 'LINE_NO') ?? '').trim(),
+        item_code:       String(getRecordValue(dtl, 'MBP_PART') ?? '').trim() || null,
+        description:     String(getRecordValue(hdr, 'REMARK') ?? '').trim() || null,
+        qty:             toNumber(getRecordValue(dtl, 'ORDER_QTY_ORU')),
+        unit:            String(getRecordValue(dtl, 'UNIT_OF_MEASURE_ORU') ?? '').trim() || null,
+        status:          String(getRecordValue(hdr, 'HOLD_STATUS') ?? '').trim() || null,
+        start_date:      String(getRecordValue(hdr, 'APPLY_DATE') ?? '').trim() || null,
+        end_date:        String(getRecordValue(dtl, 'DUEDATE') ?? '').trim() || null,
+        customer_vendor: String(getRecordValue(hdr, 'SEG_SEGMENT_NO_DEPARTMENT') ?? '').trim() || null,
+        remark:          (getFirstNonEmptyRecordValue(hdr, ['CURRENCY']) ?? String(getRecordValue(dtl, 'CURRENCY') ?? '').trim()) || null,
+        extra: {
+          MBP_VER:    String(getRecordValue(dtl, 'MBP_VER') ?? '').trim() || null,
+          MBP_LOT_NO: String(getRecordValue(dtl, 'MBP_LOT_NO') ?? '').trim() || null,
+          HDR_REMARK: String(getRecordValue(hdr, 'REMARK') ?? '').trim() || null,
+        },
+        synced_at: prSyncedAt,
+      }))
+
+      try {
+        await persistPrSyncRows(prSyncRows)
       } catch (err) {
         const message = err instanceof Error ? formatSupabaseAdminError(err.message) : '寫入 erp_pj_sync 失敗'
         return NextResponse.json({ status: 'error', error: message }, { status: 500 })
