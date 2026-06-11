@@ -2532,7 +2532,6 @@ export default function DailyOrderSheetPage() {
                                   onChange={e => {
                                     const machine = e.target.value
                                     setMoMachine(row.mo_number!, machine)
-                                    setSheetRows(prev => prev.map(r => r.mo_number === row.mo_number ? { ...r, machine } : r))
                                   }}
                                   className="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-cyan-500 min-w-[90px]"
                                 >
@@ -2545,7 +2544,6 @@ export default function DailyOrderSheetPage() {
                                   onChange={e => {
                                     const machine = e.target.value
                                     setRowMachines(prev => ({ ...prev, [row.row_key]: machine }))
-                                    setSheetRows(prev => prev.map(r => r.row_key === row.row_key ? { ...r, machine } : r))
                                     setMachineChanged(true)
                                   }}
                                   className="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-cyan-500 min-w-[90px]"
