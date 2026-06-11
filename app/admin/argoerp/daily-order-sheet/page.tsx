@@ -585,10 +585,15 @@ export default function DailyOrderSheetPage() {
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || `HTTP ${res.status}`)
 
-      // 3. 重新從 DB 讀回，確認儲存成功
-      await loadSheet(selectedDate)
+      // 3. 同步更新本地 sheetRows 的 machine 欄位（避免呼叫 loadSheet 引發 token 問題）
+      setSheetRows(prev => prev.map(r => ({
+        ...r,
+        machine: r.mo_number
+          ? (moMachines[r.mo_number] || r.machine || '')
+          : (rowMachines[r.row_key] || r.machine || ''),
+      })))
       setMachineChanged(false)
-      setSaveMsg('✅ 機台分配已儲存並確認')
+      setSaveMsg('✅ 機台分配已儲存')
       setTimeout(() => setSaveMsg(''), 4000)
     } catch (e) {
       setSaveMsg(`❌ 機台儲存失敗：${e instanceof Error ? e.message : String(e)}`)
@@ -596,7 +601,7 @@ export default function DailyOrderSheetPage() {
     } finally {
       setSavingMachine(false)
     }
-  }, [sheetRows, selectedDate, moMachines, rowMachines, loadSheet])
+  }, [sheetRows, selectedDate, moMachines, rowMachines])
 
   // ---- 解析貼上資料 ----
   const handleParse = useCallback(() => {
